@@ -1886,6 +1886,10 @@ namespace dc::native
         // the source rectangle in texels, the colours. Each is a sprite or a 4-vertex strip with PRIM ABE (the ALPHA
         // the game last set: setAlphaFlag / MGSetGsALPHA), Z test ALWAYS, no Z write. The CRect is (x, y, w, h).
         uint64_t g_alpha2D = 0x44; // (Cs - Cd) As + Cd
+        // The game's gp (SetEnv's, each frame). The sprite routines write TEX1 = linear << 5 | 0x41: MMAG from the
+        // game's linear (gp - 0x7908), 0 nearest; MMIN 1 (linear, but the 2D is drawn 1:1).
+        uint32_t g_gp = 0;
+        bool spritesNearest(const uint8_t *rdram) { return g_gp != 0u && rd32(rdram, g_gp - 0x7908u) == 0u; }
         struct Corner
         {
             float x, y; // GS pixels
@@ -2011,6 +2015,7 @@ namespace dc::native
             material.depthTest = false;
             material.depthWrite = false;
             material.clampU = material.clampV = true;
+            material.nearest = spritesNearest(rdram);
             const float tw = texture ? static_cast<float>(texture->width) : 1.0f, th = texture ? static_cast<float>(texture->height) : 1.0f;
             std::vector<ps2x::native::Vertex> vertices;
             auto vertex = [&](const Corner &k) {
@@ -2722,7 +2727,8 @@ namespace dc::native
         // SetEnv (0x140DA0): the frame's default state, ALPHA among it (mgAlpha, gp - 0x7408).
         void setEnvHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            g_alpha2D = rd64(rdram, getRegU32(ctx, 28) - 0x7408u);
+            g_gp = getRegU32(ctx, 28);
+            g_alpha2D = rd64(rdram, g_gp - 0x7408u);
             noteAlpha("SetEnv", ctx);
             g_setEnv(rdram, ctx, runtime);
         }

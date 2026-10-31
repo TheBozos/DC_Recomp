@@ -318,3 +318,6 @@ from the ELF's own symbols.
   overlap (an arm over the body) the frame darkened again, and the shadow showed the model's insides. As the game
   does, they now mark a work target cleared to black, and the pass's end lays that target over the frame once:
   Cd x (1 - As), As the strength where marked.
+- 2D filtering (2026-11-01): the sprite routines write TEX1 = linear << 5 | 0x41, MMAG from the game's `linear`
+  (gp - 0x7908). Drawn filtered regardless, the options menu's text and buttons had magenta outlines (the colour of
+  the transparent texels around them). The sprites now follow that variable (Material::nearest when it is 0).

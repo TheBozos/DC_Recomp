@@ -17,7 +17,7 @@
 // VU1 is told to skip every program (setVu1Gate): it runs no microcode. The native batches are numbered as the
 // programs VU1 skips (renderer groups), one per primitive, as CreateVUdataFromMDT starts one program per primitive.
 //
-// DC_NATIVE3D=1 turns it on.
+// Always on: Dark Cloud's picture has no other path (no GS).
 
 #include "ps2_runtime.h"
 #include "runtime/gs/gs_off.h"
@@ -1450,24 +1450,63 @@ namespace dc::native
             ctx->pc = getRegU32(ctx, 31);
         }
 
+        // As the game does: the shadow triangles mark a work target cleared to black (alpha 0), and the pass's end lays
+        // the target over the frame once, Cd x (1 - As) with As = the strength where marked. Overlapping triangles
+        // (an arm over the body) darken once, as on the PS2: drawn straight over the frame, each overlap darkened again
+        // and the shadow showed the model's insides.
+        uint8_t targetFor(uint32_t base);
+        constexpr uint32_t kShadowWork = 0x80000210u; // the work texture (fbp 0x210), apart from the game's TEX0 bases
         void endShadowHook(uint8_t *, R5900Context *ctx, PS2Runtime *)
         {
             const uint32_t strength = getRegU32(ctx, 4) & 0xFFu;
             ctx->pc = getRegU32(ctx, 31);
-            ps2x::native::Material material;
-            material.textured = false;
-            material.blend = ps2x::native::Material::Blend::Alpha;
-            material.depthTest = false;
-            material.depthWrite = false;
+            if (g_shadowDraws.empty())
+                return;
+            ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+            static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+            const uint8_t work = targetFor(kShadowWork);
+            auto screenQuad = [](uint32_t rgba) {
+                std::vector<ps2x::native::Vertex> vertices;
+                auto vertex = [&](float x, float y, float u, float v) {
+                    ps2x::native::Vertex out;
+                    out.x = 1728.0f + x;
+                    out.y = 1936.0f + y;
+                    out.u = u;
+                    out.v = v;
+                    out.rgba = rgba;
+                    return out;
+                };
+                const ps2x::native::Vertex a = vertex(0, 0, 0, 0), b = vertex(640, 0, 1, 0), c = vertex(0, 224, 0, 1), d = vertex(640, 224, 1, 1);
+                vertices.insert(vertices.end(), {a, b, c, b, d, c});
+                return vertices;
+            };
+            ps2x::native::Material mark;
+            mark.textured = false;
+            mark.blend = ps2x::native::Material::Blend::Opaque;
+            mark.depthTest = false;
+            mark.depthWrite = false;
+            mark.target = work;
+            const std::vector<ps2x::native::Vertex> clear = screenQuad(0u);
+            renderer.draw(mark, kIdentity, clear.data(), static_cast<uint32_t>(clear.size()));
             for (ShadowDraw &draw : g_shadowDraws)
             {
                 for (ps2x::native::Vertex &v : draw.vertices)
-                    v.rgba = strength << 24; // black, alpha = the strength (0x80 = 1.0)
+                    v.rgba = 0x80808080u; // marked: white, alpha 1
                 g_stats.shadowTriangles += draw.vertices.size() / 3u;
-                ps2x::native::Renderer::instance().draw(material, draw.toScreen.m, draw.vertices.data(),
-                                                        static_cast<uint32_t>(draw.vertices.size()));
+                renderer.draw(mark, draw.toScreen.m, draw.vertices.data(), static_cast<uint32_t>(draw.vertices.size()));
             }
             g_shadowDraws.clear();
+            ps2x::native::Material lay;
+            lay.textured = true;
+            lay.fromFrame = 1;
+            lay.source = work;
+            lay.frameWidth = 640;
+            lay.frameHeight = 224;
+            lay.blend = ps2x::native::Material::Blend::Alpha;
+            lay.depthTest = false;
+            lay.depthWrite = false;
+            const std::vector<ps2x::native::Vertex> over = screenQuad(strength << 24); // black, alpha = the strength
+            renderer.draw(lay, kIdentity, over.data(), static_cast<uint32_t>(over.size()));
         }
 
         // DepthOfField (0x1652C0: a0 the focus, two depths; a1 its passes; a2 the blur's alpha; a3 a haze's strength),
@@ -1752,10 +1791,9 @@ namespace dc::native
                 }
         }
 
-        // DC without the GS (PS2X_GS_RENDERER=none): the frame is the native renderer's alone, drawn by present() in
+        // DC without the GS (always; there is no GS path to compare with): the frame is the native renderer's alone, drawn by present() in
         // the order the game calls its routines. Its 2D comes from those routines' own arguments: screen-space draws, x
         // and y in GS primitive coordinates (pixels plus DC's XYOFFSET, 1728, 1936), z the GS Z they would write.
-        bool g_noGs = false;
         constexpr float kOriginX = 1728.0f, kOriginY = 1936.0f;
         // present() takes a vertex colour as the GS's modulate does (0x80 = 1.0); an untextured GS primitive is its RGB
         // as it is (0xFF = 1.0): flat colours are passed at half.
@@ -2789,9 +2827,6 @@ namespace dc::native
             for (CountHook &hook : g_countHooks)
                 if ((hook.original = runtime.lookupFunction(hook.address)))
                     runtime.registerFunction(hook.address, &countHook);
-        const char *on = std::getenv("DC_NATIVE3D");
-        if (!(on && on[0] == '1'))
-            return;
         g_drawVu1 = runtime.lookupFunction(kVisualDrawVu1);
         g_createFromMdt = runtime.lookupFunction(kCreateFromMdt);
         g_createFromMdtRemake = runtime.lookupFunction(kCreateFromMdtRemake);
@@ -2816,15 +2851,16 @@ namespace dc::native
         renderer.setEnabled(true);
         renderer.beginFrame(screen());
         ps2x::native::setVu1Gate(&gate);
-        // PS2X_GS_RENDERER=none: no GS, the frame is the native renderer's (present() draws it in the game's call order).
-        // Otherwise (comparison path), in the GS stream where VU1's output would have been, sorted with the GS draws.
-        const char *gsRenderer = std::getenv("PS2X_GS_RENDERER");
-        g_noGs = gsRenderer && std::strcmp(gsRenderer, "none") == 0;
-        renderer.setStreamDraws(!g_noGs);
+        // No GS, whatever PS2X_GS_RENDERER says: the frame is the native renderer's (present() draws it in the game's
+        // call order). The GS comparison path is gone for DC.
+        if (const char *gsRenderer = std::getenv("PS2X_GS_RENDERER"); gsRenderer && std::strcmp(gsRenderer, "none") != 0)
+            std::fprintf(stderr, "[dc] PS2X_GS_RENDERER=%s ignored: Dark Cloud has no GS path\n", gsRenderer);
+        ps2x::setGsOff(true);
+        ps2x::native::setUploadsWanted(false);
+        renderer.setStreamDraws(false);
         // No packet path either: the game's VIF1 and GIF transfers are not read (runtime/gs/gs_off.h); every VU1
         // program and every 2D draw is the adapter's, from the game's data.
-        ps2x::setPacketPathOff(g_noGs);
-        if (g_noGs)
+        ps2x::setPacketPathOff(true);
         {
             runtime.registerFunction(0x00130000u, &clearScreenHook);
             runtime.registerFunction(0x0012FD30u, &clearZHook);

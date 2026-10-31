@@ -303,3 +303,18 @@ from the ELF's own symbols.
   text colour (SetClut), sprite tables, the effects' 3D sprites, texture animation (MGMoveImage / MoveImageTest
   applied to the decoded textures), the balloons (drawn into an offscreen target), DoF (a copy of the frame).
   present() now honours Material::depthTest (the 2D was depth-tested against the 3D and hidden).
+- Loading pictures and frame pacing (2026-10-31). (1) LoadTexture (0x154950 / 0x154770, the loading screens only)
+  sends a picture's pixels and palette at once from the file's buffer, and the next file overwrites that buffer
+  while the record still points there: the Level-5 logo came out in wrong colours. It is decoded when sent and kept
+  while the record keeps those pixels and TEX0. (2) VSyncCallBack_Load stays installed after loading; publishing the
+  native frame from it cut the main loop's frames in two. It publishes only after 100 ms without a main-loop frame
+  now. (3) The window had a 60 Hz timer of its own (SetTargetFPS) and showed the latest frame: drifting against the
+  game's clock, it showed a frame twice and skipped the next every few seconds (the stutter). With no GS and native
+  frames, the window waits for each published frame and shows it once (Renderer::waitForFrame, 100 ms at most).
+- No GS path left (2026-10-31): DC turns the GS off itself whatever PS2X_GS_RENDERER says, the native drawing is
+  always on (no DC_NATIVE3D switch), and the test scripts capture the native frame (the GS frame capture, gs_*.png,
+  is skipped with the GS off).
+- Shadow pass, mark then lay (2026-10-31): the shadow triangles were drawn straight over the frame, so where they
+  overlap (an arm over the body) the frame darkened again, and the shadow showed the model's insides. As the game
+  does, they now mark a work target cleared to black, and the pass's end lays that target over the frame once:
+  Cd x (1 - As), As the strength where marked.

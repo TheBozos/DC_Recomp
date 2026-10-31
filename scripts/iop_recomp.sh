@@ -14,8 +14,8 @@ BIN="$GAME_BUILD/PS2Recomp/ps2xRuntime/ps2EntryRunner$EXE"
 DUMPS="$ROOT/build/iop_modules"
 rm -rf "$DUMPS" && mkdir -p "$DUMPS" "$GENERATED/iop"
 mkdir -p build/boots/iop_dump
-PS2X_IOP_NATIVE=0 PS2X_IOP_DUMP_MODULES="$(native "$DUMPS")" PS2X_GS_RENDERER=native \
-    PS2X_CAPTURE_DIR="$(native "$ROOT/build/boots/iop_dump")" PS2X_CAPTURE_INTERVAL=4 \
+PS2X_IOP_NATIVE=0 PS2X_IOP_DUMP_MODULES="$(native "$DUMPS")" PS2X_GS_RENDERER=none \
+    PS2X_NATIVE_CAPTURE_DIR="$(native "$ROOT/build/boots/iop_dump")" PS2X_NATIVE_CAPTURE_INTERVAL=4 \
     timeout "$SECONDS_TO_BOOT" "$BIN" "$ELF" > build/iop_dump.log 2>&1 || true
 ls "$DUMPS" | grep -qi '^SDRDRV.IRX.*\.json$' || { echo "no dump of SDRDRV (see build/iop_dump.log)"; exit 1; }
 for json in "$DUMPS"/*.json; do

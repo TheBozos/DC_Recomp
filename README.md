@@ -25,37 +25,38 @@ Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program on 
 
 ## Status
 
-**Bring-up, not playable yet.** On the full native path the game boots, finds its memory card, plays its 3D intro,
-shows the title screen and its attract demo, and New game plays the opening in the Dark Shrine (name entry,
-Colonel Flag, the Dark Genie) at 56-60 fps with music. The goal, as for the other ports of the fork, is no PS2
-emulation at all; paraLLEl-GS is never used. Native today: the game's code and overlays (recompiled), its IOP modules
-(recompiled), the frame loop and sound on the PC clock, and, with `DC_NATIVE3D=1`, its 3D models: the adapter
-(`runtime/dc_native.cpp`) draws each model piece from the game's own data (its MDT model, RenderInfo's camera and
-lights, the object's state, its texture decoded from the game's texture records in main memory), never from a packet
-built for the PS2 hardware, lit as the game's VU1 program lights it; VU1 runs no microcode.
+**Bring-up, not playable yet.** The game boots, shows the SCEA and Level-5 logos, plays its 3D intro, shows the
+title screen and its attract demo, and New game plays the opening in the Dark Shrine and Norune's first scenes at 60
+fps with music. The goal, as for the other ports of the fork, is no PS2 emulation at all; paraLLEl-GS is never used.
 
-**Still emulated, and being removed:**
+**No GS at all.** The picture is the native renderer's alone (`runtime/dc_native.cpp`, OpenGL): the 3D models from
+the game's own data (its MDT models, RenderInfo's camera and lights, the object's state, its textures from the game's
+texture records or the offline-converted disc pictures), the 2D (sprites, text, HUD, message balloons, fills, frame
+copies, depth of field) from the arguments of the game's own drawing routines. The game's VIF1 and GIF transfers are
+not read at all (each ends at once), VU1 runs no microcode, and there is no GS path left to switch back to.
 
-| Part | How it runs today |
+**Still missing or emulated:**
+
+| Part | Today |
 |---|---|
-| VU1 programs the adapter does not translate yet (shadows, screen-space sprites, particles, other effects) | VU1 microcode run by the generic VU1 AOT, which steps an interpreter: emulation |
-| Menus, HUD, text, 2D, the cutscenes' depth of field, everything sent to the GS as packets | the fork's GS front end interprets the GS packets (registers, GS memory layout) and draws them with OpenGL |
-| DMA, VIF / GIF packet handling, EE kernel HLE, IPU | the runtime's hardware layer |
+| VU1 programs not translated yet (screen-space sprites, particles, other effects) | not drawn (VU1 runs nothing) |
+| 2D routines not translated yet (some menus, the movies' frames, CDebugFont) | not drawn |
+| DMA channels other than VIF1 / GIF, EE kernel HLE, IPU (movies) | the runtime's hardware layer |
 
-Known defects: some character textures come out white or missing in the native 3D, black blocks in some Norune
-scenes.
+Known defects: cloth grids with runaway vertices (dropped by the guard band as the PS2 drops them, but the cloth
+simulation itself is not checked), the title's cloud trails sharper than on the PS2, some menus not checked yet.
 
 | Milestone | |
 |---|:---:|
 | Function map from the ELF's own symbol table (main program and both overlays, no Ghidra) | ✅ |
 | Recompile the main ELF and link it with the PS2Recomp runtime (Windows) | ✅ |
 | Code overlays `TITLE.BIN` and `DUN.BIN` (one load slot, picked by their header) | ✅ |
-| 3D models drawn natively from the game's data, lit like VU1 (`DC_NATIVE3D=1`) | 🔧 |
-| Every VU1 program translated (no VU1 microcode run) | ⏳ |
-| Menus, text and 2D drawn natively (no GS packets interpreted) | ⏳ |
+| 3D models drawn natively from the game's data, lit like VU1 | 🔧 |
+| Every VU1 program translated (no VU1 microcode run) | 🔧 |
+| Menus, text and 2D drawn natively (no GS packets interpreted) | 🔧 |
 | Boot: EE kernel, CD reads from the disc files, memory card detected | ✅ |
 | The game's IOP modules recompiled to native code (9 modules, nothing interpreted) | ✅ |
-| Intro, title screen, in-game 3D scenes after the title (native GS renderer) | ✅ |
+| Boot logos, intro, title screen, in-game 3D scenes after the title (no GS) | ✅ |
 | New game: name entry, the Dark Shrine opening (Colonel Flag summons the Genie) | ✅ |
 | Norune village: the opening scenes after the Dark Shrine | 🔧 |
 | First dungeon (Divine Beast Cave) | ⏳ |
@@ -75,10 +76,12 @@ state machine and no copy of GS memory in between.
 | Sound on the PC's clock | ✅ |
 | No paraLLEl-GS: OpenGL on the GPU | ✅ |
 | Frame loop on the PC's clock (60 fps, no vblank pacing) | ✅ |
-| 3D models drawn natively from the game's data, lit like VU1 (`DC_NATIVE3D=1`) | 🔧 |
-| Every VU1 program translated (screen-space sprites, particles and other effects still on the VU1 AOT interpreter) | ⏳ |
-| Menus, HUD, text and 2D drawn natively, no GS packets interpreted | ⏳ |
-| DMA, VIF / GIF packets and the IPU handled natively, not by the runtime's hardware layer | ⏳ |
+| No GS: the native renderer is the only picture, no GS path left | ✅ |
+| VIF1 / GIF packets never read (transfers end at once) | ✅ |
+| 3D models drawn natively from the game's data, lit like VU1 | 🔧 |
+| Every VU1 program translated (screen-space sprites, particles and other effects not drawn yet) | 🔧 |
+| Menus, HUD, text and 2D drawn natively from the game's routines | 🔧 |
+| Other DMA channels and the IPU handled natively, not by the runtime's hardware layer | ⏳ |
 
 ✅ works · 🔧 in progress · ⏳ not reached yet
 
@@ -87,7 +90,8 @@ what remains open.
 
 ## Screenshots
 
-The first boots on the full native path (native GS renderer, native IOP modules, recompiled overlays):
+The first boots on the full native path (taken with the old GS renderer, before the GS was removed; native IOP
+modules, recompiled overlays):
 
 | | | |
 |---|---|---|
@@ -110,8 +114,8 @@ disc files (game/) ──► tools/symtab_map.py (the ELF's symbol table) ──
                                            │
                  CMakeLists.txt ──► PS2Recomp runtime + generated code + runtime/dc_overrides.cpp, dc_native.cpp
                                            │
-   DC's native 3D (dc_native.cpp: the game's models, lit, drawn by the PC GPU; VU1 skips them) ─┐
-   still emulated: VU1 for the programs not translated · GS front end for 2D · DMAC / VIF / GIF · IPU ─┼─► ps2EntryRunner
+   DC's native picture (dc_native.cpp: the game's models and 2D, drawn by the PC GPU; no GS, VU1 runs nothing) ─┐
+   still the runtime's: VIF1 / GIF transfers ended unread · other DMAC channels · IPU ─────────────────────────┼─► ps2EntryRunner
    PS2Recomp IOP:     the game's own IRX as native code · SPU2 and IOP on the PC clock · SIO2
 ```
 

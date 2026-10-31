@@ -477,6 +477,15 @@ namespace dc::native
 
         std::unordered_map<uint32_t, std::pair<uint64_t, std::shared_ptr<const ps2x::native::TextureCache::Texture>>> g_decoded;
         uint64_t g_textureVersion = 0;
+        // DC_PROBE_SEQ=1 (diagnosis): each frame's draws in order, one letter each (C clear, Z clear Z, M model, s
+        // sprite, P / F / T sprite of the previous frame / the frame / a target, S stretch), for frames with a stretch.
+        std::string g_seq;
+        void seq(char c)
+        {
+            static const bool s_on = std::getenv("DC_PROBE_SEQ") != nullptr;
+            if (s_on && g_seq.size() < 4000u)
+                g_seq.push_back(c);
+        }
         // DC_PROBE_HITCH=1 (diagnosis): what each frame decoded, to find the frames that take long.
         struct FrameWork
         {
@@ -1074,6 +1083,19 @@ namespace dc::native
                     const uint32_t record = m.records && p < m.records->size() ? (*m.records)[p] : modelMaterialRecord(rdram, m, mat);
                     texture = record != 0u ? recordTexture(rdram, record) : nullptr;
                     material.tex0 = record != 0u ? rd64(rdram, record + 0x28u) : 0u;
+                    // DC_PROBE_LEVELS=1 (diagnosis): each model record's TEX0, + 0x30 and level pointers, once.
+                    static const bool s_probeLevels = std::getenv("DC_PROBE_LEVELS") != nullptr;
+                    static std::unordered_map<uint32_t, bool> s_levelsSeen;
+                    if (s_probeLevels && record != 0u && !s_levelsSeen[record] && s_levelsSeen.size() < 400u)
+                    {
+                        s_levelsSeen[record] = true;
+                        std::fprintf(stderr, "[dc:levels] %08x \"%.32s\" %ux%u kind %u tex0 %016llx +30 %016llx levels %08x %08x %08x %08x\n", record,
+                                     reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)), rd32(rdram, record) >> 16,
+                                     rd32(rdram, record + 4u) & 0xFFFFu, rd32(rdram, record + 4u) >> 16,
+                                     static_cast<unsigned long long>(rd64(rdram, record + 0x28u)),
+                                     static_cast<unsigned long long>(rd64(rdram, record + 0x30u)), rd32(rdram, record + 0x38u),
+                                     rd32(rdram, record + 0x3Cu), rd32(rdram, record + 0x40u), rd32(rdram, record + 0x44u));
+                    }
                     // DC_PROBE_UNTEX=1 (diagnosis): each record a model primitive cannot be textured with, once.
                     static const bool s_probeUntex = std::getenv("DC_PROBE_UNTEX") != nullptr;
                     static std::unordered_map<uint32_t, bool> s_untex;
@@ -1285,6 +1307,7 @@ namespace dc::native
             std::snprintf(g_drawWhat, sizeof(g_drawWhat), "model visual %08x vtable %08x data %08x mdt %08x %s program %u flags %x",
                           visual, rd32(rdram, visual + 8u), rd32(rdram, visual + 0x18u), mdt, model.copy ? "copy" : "live", program,
                           rd32(rdram, renderInfo + 0x310u));
+            seq('M');
             drawModel(rdram, model, load(rdram, localToWorld), renderInfo, !shadow && !screenSpace);
             if (shadow)
                 noteShadow(rdram, model, load(rdram, localToWorld), renderInfo, false); // a model drawn in the shadow pass
@@ -1843,12 +1866,14 @@ namespace dc::native
             quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, 0.0f,
                  flatColour(getRegU32(ctx, 4), getRegU32(ctx, 5), getRegU32(ctx, 6), getRegU32(ctx, 7)));
             ++g_stats.clears;
+            seq('C');
             g_stats.lastClear = (getRegU32(ctx, 4) & 0xFFu) << 16 | (getRegU32(ctx, 5) & 0xFFu) << 8 | (getRegU32(ctx, 6) & 0xFFu);
             drawScreen(material, vertices);
         }
         // MGClearZBuffer (0x12FD30, a0 the Z): the same sprite with ALPHA 0x6A (Cd: the colour kept), Z written.
         void clearZHook(uint8_t *, R5900Context *ctx, PS2Runtime *)
         {
+            seq('Z');
             ctx->pc = getRegU32(ctx, 31);
             ps2x::native::Material material;
             material.textured = false;
@@ -1915,6 +1940,7 @@ namespace dc::native
             const uint8_t n = static_cast<uint8_t>(1u + g_targetOfBase.size() % 7u); // 1..7
             for (auto it = g_targetOfBase.begin(); it != g_targetOfBase.end();)
                 it = it->second == n ? g_targetOfBase.erase(it) : std::next(it);
+            ps2x::native::Renderer::instance().setTargetSize(n, 0, 0); // a new place: the window's size until told otherwise
             return g_targetOfBase[base] = n;
         }
         // The renderer source for a place (0: not one of the game's own pictures); sets the material to sample it.
@@ -1942,13 +1968,17 @@ namespace dc::native
             {
                 ps2x::native::Material material = made;
                 ++g_stats.madeDraws[std::min<uint32_t>(made.source, 8u)];
+                seq(made.source == ps2x::native::Material::kPreviousFrame ? 'P' : made.source == 0u ? 'F' : 'T');
                 static const bool s_noMade = std::getenv("DC_NO_MADE") != nullptr; // diagnosis
                 if (s_noMade)
                     return;
-                static int s_logged = 0;
-                if (std::getenv("DC_PROBE_2D") && s_logged++ < 12)
-                    std::fprintf(stderr, "[dc:2d] sprite of record %08x samples source %u: (%.1f %.1f)-(%.1f %.1f) uv (%.0f %.0f)-(%.0f %.0f) rgba %08x\n",
-                                 record, made.source, c[0].x, c[0].y, c[3].x, c[3].y, c[0].u, c[0].v, c[3].u, c[3].v, c[0].rgba);
+                static int s_logged = 0, s_loggedTargets = 0;
+                if (std::getenv("DC_PROBE_2D") &&
+                    (made.source == ps2x::native::Material::kPreviousFrame ? s_logged++ < 12 : (++s_loggedTargets <= 12 || s_loggedTargets % 1200 == 0)))
+                    std::fprintf(stderr, "[dc:2d] sprite of record %08x \"%.32s\" tex0 %016llx samples source %u: (%.1f %.1f)-(%.1f %.1f) uv (%.0f %.0f)-(%.0f %.0f) rgba %08x alpha %llx\n",
+                                 record, reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)),
+                                 static_cast<unsigned long long>(rd64(rdram, record + 0x28u)), made.source, c[0].x, c[0].y, c[3].x, c[3].y,
+                                 c[0].u, c[0].v, c[3].u, c[3].v, c[0].rgba, static_cast<unsigned long long>(g_alpha2D));
                 material.frameWidth = 640;
                 material.frameHeight = 224;
                 material.blend = ps2x::native::blendOf(g_alpha2D);
@@ -2016,6 +2046,7 @@ namespace dc::native
             material.depthWrite = false;
             material.clampU = material.clampV = true;
             material.nearest = spritesNearest(rdram);
+            seq('s');
             const float tw = texture ? static_cast<float>(texture->width) : 1.0f, th = texture ? static_cast<float>(texture->height) : 1.0f;
             std::vector<ps2x::native::Vertex> vertices;
             auto vertex = [&](const Corner &k) {
@@ -2663,6 +2694,10 @@ namespace dc::native
                 return;
             }
             material.target = targetFor(dstBase);
+            // The work picture at the PS2's size (the game's 640 x 224 frame copy): the title draws it back into the
+            // frame each frame before copying the frame into it again, a feedback loop whose blur is that of a 640 x
+            // 224 picture filtered each frame (at the window's resolution it blurred several times less).
+            ps2x::native::Renderer::instance().setTargetSize(material.target, 640, 224);
             material.blend = ps2x::native::Material::Blend::Opaque;
             material.depthTest = false;
             material.depthWrite = false;
@@ -2674,6 +2709,7 @@ namespace dc::native
                  static_cast<float>(from.x + from.w) / 16.0f / 640.0f, static_cast<float>(from.y + from.h) / 16.0f / 224.0f);
             drawScreen(material, vertices);
             ++g_stats.stretches;
+            seq('S');
             static int s_logged = 0;
             if (std::getenv("DC_PROBE_2D") && s_logged++ < 6)
                 std::fprintf(stderr, "[dc:2d] stretch base %x (frame %x back %x) %d,%d %dx%d -> base %x target %u %d,%d %dx%d\n", srcBase, g_frameBase,
@@ -3001,6 +3037,25 @@ namespace dc::native
             s_average = s_average * 0.95 + std::min(ms, 50.0) * 0.05;
         }
         g_frameWork = FrameWork{};
+        static int s_seqLogged = 0;
+        if (!g_seq.empty() && g_seq.find('S') != std::string::npos && (s_seqLogged < 4 || s_frames % 300u == 0u))
+        {
+            ++s_seqLogged;
+            std::string runs;
+            for (size_t i = 0; i < g_seq.size();)
+            {
+                size_t j = i;
+                while (j < g_seq.size() && g_seq[j] == g_seq[i])
+                    ++j;
+                runs += g_seq[i];
+                if (j - i > 1)
+                    runs += std::to_string(j - i);
+                runs += ' ';
+                i = j;
+            }
+            std::fprintf(stderr, "[dc:seq] %s\n", runs.c_str());
+        }
+        g_seq.clear();
     }
 
     // DC_PROBE_TEX=1 (diagnosis): the texture manager's (0x1C75870) records, every 600 frames: count at + 0, records

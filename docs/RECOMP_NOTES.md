@@ -321,3 +321,10 @@ from the ELF's own symbols.
 - 2D filtering (2026-11-01): the sprite routines write TEX1 = linear << 5 | 0x41, MMAG from the game's `linear`
   (gp - 0x7908). Drawn filtered regardless, the options menu's text and buttons had magenta outlines (the colour of
   the transparent texels around them). The sprites now follow that variable (Material::nearest when it is 0).
+- The title's blur (2026-11-01): each title frame is C (clear), the clouds, six strips of the work texture
+  "frame_image" (0x1A40) drawn back over the frame (shifted a texel, squeezed by 45 / 42.5, alpha 0x70), then the
+  frame stretched into "frame_image" (MGStretchMoveImage), then a trail of the previous frame at 0x23: a feedback
+  loop, so the clouds smear as on the PS2. Natively it showed nothing: present() made its frame copy after binding
+  its shader, and flushing raylib's batch unbinds it, so the stretch drew nothing and the strips drew an empty
+  texture back. Fixed in the fork; the work texture is also kept at 640 x 224 (Renderer::setTargetSize), the size its
+  per-frame filtering blurs at. DC_PROBE_SEQ=1 logs a frame's draws in order.

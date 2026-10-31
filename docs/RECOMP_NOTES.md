@@ -328,3 +328,8 @@ from the ELF's own symbols.
   its shader, and flushing raylib's batch unbinds it, so the stretch drew nothing and the strips drew an empty
   texture back. Fixed in the fork; the work texture is also kept at 640 x 224 (Renderer::setTargetSize), the size its
   per-frame filtering blurs at. DC_PROBE_SEQ=1 logs a frame's draws in order.
+- The stutter, phase (2026-11-01): with the window following the game's frames, a small stutter stayed. The display
+  is at exactly 60.000 Hz (DWM: 16.6666 ms), as the game is; the publishes sat at an arbitrary point of the refresh, and
+  near the compositor's latch a few milliseconds of a frame's own work sent it to one refresh or the next. The frame
+  end's deadlines stay on the PC clock and their phase is steered (5 % of the error a frame) so publishes sit mid-
+  refresh: measured mean within 0.4 ms of it, worst 8 ms on heavy frames (DC_PROBE_PHASE=1).

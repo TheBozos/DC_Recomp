@@ -2,6 +2,7 @@
 
 #include "game_overrides.h"
 #include "ps2_runtime.h"
+#include "runtime/display_phase.h"
 #include "ps2_stubs.h"
 #include "runtime/ee_scheduler.h"
 
@@ -51,6 +52,29 @@ namespace
         const auto now = std::chrono::steady_clock::now();
         s_next = cap == 0u ? now : std::max(now, s_next + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                                                                std::chrono::duration<double>(1.0 / cap)));
+        // The deadlines stay on the PC clock; their phase is steered a little each frame so that this publish falls
+        // half a refresh away from the compositor taking the window's picture (runtime/display_phase.h): published
+        // near that moment, a frame went to one refresh or the next by a millisecond of work (the small stutter).
+        double phaseError = 0.0;
+        if (cap != 0u && ps2x::displayPhaseError(phaseError))
+        {
+            s_next -= std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(phaseError * 0.05));
+            // DC_PROBE_PHASE=1 (diagnosis): the publishes' distance from mid-refresh, every 300 frames (ms: mean, worst).
+            static const bool s_probe = std::getenv("DC_PROBE_PHASE") != nullptr;
+            static double s_sum = 0.0, s_worst = 0.0;
+            static uint32_t s_count = 0;
+            if (s_probe)
+            {
+                s_sum += phaseError;
+                s_worst = std::max(s_worst, std::abs(phaseError));
+                if (++s_count == 300u)
+                {
+                    std::fprintf(stderr, "[dc:phase] mean %+.2f ms, worst %.2f ms\n", s_sum / s_count * 1000.0, s_worst * 1000.0);
+                    s_sum = s_worst = 0.0;
+                    s_count = 0;
+                }
+            }
+        }
         runtime->eeScheduler().waitHostDeadline(
             s_next,
             [runtime]

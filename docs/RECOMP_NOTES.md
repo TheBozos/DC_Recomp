@@ -459,4 +459,10 @@ from the ELF's own symbols.
   PS2 blendTextuer reaches the GS at once and the sprites go out later with the frame's packet. Here the sprites read
   the place as the frame before left it, which on frames where the frame's stretched copy went there showed dark
   squares of the cave over the torches. blendTextuer now draws into a picture of its own (kBlendedPlace | place), and a
-  sprite reading inside its corner samples it (a frame late). Still open: the flame band shows a hard lower edge.
+  sprite reading inside its corner samples it (a frame late).
+  The torches are CFireOmni: DrawFire draws the flame as a fogged 3D sprite of that picture ("blender", no pixels of
+  its own): draw3D now samples pictures the game makes, and the flames sit on the torches. DrawRaster is a heat haze:
+  blendTextuerTest (0x162D80) copies the frame's rectangle around the flame into the place two lines at a time, each
+  band shifted by waveAnimeCnt (0x1D18980) times a random factor, then writes a mask texture's alpha there keeping
+  the colours (ALPHA (0 - 0) x FIX + Cd: Renderer Blend::AlphaOnly), and a "blender" 2D sprite lays the patch back.
+  Taken over natively; a 2D sprite reads blendTextuer's own picture only when blendTextuer wrote the place last.

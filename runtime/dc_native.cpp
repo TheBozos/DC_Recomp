@@ -2255,6 +2255,7 @@ namespace dc::native
             return g_targetOfBase[base] = n;
         }
         constexpr uint32_t kBlendedPlace = 0x40000000u;                  // blendTextuer's picture of a place: its own target
+        std::unordered_map<uint32_t, bool> g_blendedLast;                // place -> blendTextuer wrote it last (not blendTextuerTest)
         std::unordered_map<uint32_t, std::pair<int32_t, int32_t>> g_blendedExtent; // place -> the corner it blends
         // The renderer source for a place (0: not one of the game's own pictures); sets the material to sample it.
         bool sampleMade(uint32_t base, ps2x::native::Material &material)
@@ -2291,7 +2292,7 @@ namespace dc::native
             // ("frame_image") is a picture the game makes there; inside the corner blendTextuer blends ("blender"), the
             // picture it made.
             uint32_t madeBase = record != 0u ? static_cast<uint32_t>(rd64(rdram, record + 0x28u) & 0x3FFFu) : 0u;
-            if (const auto blended = g_blendedExtent.find(madeBase); blended != g_blendedExtent.end() &&
+            if (const auto blended = g_blendedExtent.find(madeBase); blended != g_blendedExtent.end() && g_blendedLast[madeBase] &&
                 std::max(c[0].u, c[3].u) <= static_cast<float>(blended->second.first) + 1.0f &&
                 std::max(c[0].v, c[3].v) <= static_cast<float>(blended->second.second) + 1.0f &&
                 g_targetOfBase.count(madeBase | kBlendedPlace) != 0u)
@@ -2653,10 +2654,24 @@ namespace dc::native
             if (g_toggles.noSprites3D)
                 return;
             std::shared_ptr<const ps2x::native::TextureCache::Texture> texture = record != 0u ? recordTexture(rdram, record) : nullptr;
-            if (record != 0u && !texture)
+            // A record without pixels of its own is a picture the game makes (the dungeon torches' flame, which
+            // blendTextuer blends in "work"): sampled from its target, in that picture's texels.
+            ps2x::native::Material made;
+            bool fromMade = false;
+            if (record != 0u && !texture && rd32(rdram, record + 0x38u) == 0u)
+            {
+                uint32_t base = static_cast<uint32_t>(rd64(rdram, record + 0x28u) & 0x3FFFu);
+                if (const auto blended = g_blendedExtent.find(base); blended != g_blendedExtent.end() &&
+                    std::max({u[0], u[1], u[2], u[3]}) <= static_cast<float>(blended->second.first) + 1.0f &&
+                    std::max({v[0], v[1], v[2], v[3]}) <= static_cast<float>(blended->second.second) + 1.0f &&
+                    g_targetOfBase.count(base | kBlendedPlace) != 0u)
+                    base |= kBlendedPlace;
+                fromMade = sampleMade(base, made);
+            }
+            if (record != 0u && !texture && !fromMade)
                 return;
-            ps2x::native::Material material;
-            material.textured = texture != nullptr;
+            ps2x::native::Material material = fromMade ? made : ps2x::native::Material{};
+            material.textured = texture != nullptr || fromMade;
             material.tex0 = record != 0u ? rd64(rdram, record + 0x28u) : 0u;
             material.blend = ps2x::native::blendOf(g_alpha2D);
             material.depthTest = true;
@@ -2664,7 +2679,8 @@ namespace dc::native
             material.clampU = material.clampV = true;
             material.fog = fog;
             material.fogColour = g_fogColour;
-            const float tw = texture ? static_cast<float>(texture->width) : 1.0f, th = texture ? static_cast<float>(texture->height) : 1.0f;
+            const float tw = texture ? static_cast<float>(texture->width) : fromMade ? 640.0f : 1.0f,
+                        th = texture ? static_cast<float>(texture->height) : fromMade ? static_cast<float>(made.frameHeight) : 1.0f;
             ps2x::native::Vertex k[4];
             for (int i = 0; i < 4; ++i)
             {
@@ -3144,6 +3160,77 @@ namespace dc::native
                              g_backBase, from.x, from.y, from.w, from.h, dstBase, material.target, to.x, to.y, to.w, to.h);
         }
 
+        // blendTextuerTest (0x162D80: a1 a work texture's place (TBP), a2 its width, a3 its format; t0 a rectangle of the
+        // frame (pixels, field lines); t1 a mask texture, t2 / t3 its destination and source; f12 the wave's amplitude
+        // (/ 10000), f13 its phase): the dungeon torches' heat haze (CFireOmni::DrawRaster). In the GS packet: the frame's
+        // rectangle copied into the place's top-left two lines at a time, each band shifted sideways by the wave
+        // (waveAnimeCnt 0x1D18980, eight entries from the phase, times a random factor up to 1.3 drawn anew every eight
+        // bands); then the mask texture drawn there with ALPHA (0 - 0) x FIX + Cd, which keeps the colours and writes the
+        // mask's alpha. The "blender" sprite after it lays the patch back over the torch through that alpha.
+        uint32_t g_hazeRandom = 0x12345678u;
+        void blendTextureTestHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            ctx->pc = getRegU32(ctx, 31);
+            const uint32_t place = getRegU32(ctx, 5) & 0x3FFFu;
+            const Rect frame = rectAt(rdram, getRegU32(ctx, 8));
+            const uint32_t mask = getRegU32(ctx, 9);
+            const Rect maskTo = rectAt(rdram, getRegU32(ctx, 10)), maskFrom = rectAt(rdram, getRegU32(ctx, 11));
+            const float amplitude = ctx->f[12] / 10000.0f, phase = ctx->f[13];
+            ps2x::native::Material copy;
+            if (!sampleMade(g_frameBase, copy))
+                return;
+            const uint8_t target = targetFor(place);
+            g_blendedLast[place] = false;
+            copy.target = target;
+            copy.blend = ps2x::native::Material::Blend::Opaque;
+            copy.depthTest = false;
+            copy.depthWrite = false;
+            copy.clampU = copy.clampV = true;
+            std::vector<ps2x::native::Vertex> vertices;
+            float factor = 0.0f;
+            int32_t k = 0;
+            for (int32_t row = 0; row < frame.h; row += 2)
+            {
+                int32_t index = static_cast<int32_t>(phase) + k;
+                if (index > 7)
+                    index -= 8;
+                const float wave = rdf(rdram, 0x01D18980u + static_cast<uint32_t>(std::clamp(index, 0, 31)) * 4u);
+                const int32_t offset = static_cast<int32_t>(amplitude * factor * wave * 16.0f);
+                const int32_t x0 = std::max(frame.x * 16 + offset, 0), x1 = std::min(offset + (frame.x + frame.w) * 16, 0x27F0);
+                quad(vertices, kOriginX, kOriginY + static_cast<float>(row), kOriginX + static_cast<float>(frame.w),
+                     kOriginY + static_cast<float>(row + 2), 0.0f, 0x80808080u, static_cast<float>(x0) / 16.0f / 640.0f,
+                     static_cast<float>(frame.y + row) / copy.frameHeight, static_cast<float>(x1) / 16.0f / 640.0f,
+                     static_cast<float>(frame.y + row + 2) / copy.frameHeight);
+                if (++k > 7)
+                {
+                    g_hazeRandom = g_hazeRandom * 1103515245u + 12345u;
+                    factor = rdf(rdram, 0x002A1DA8u) * static_cast<float>((g_hazeRandom >> 1) & 0x7FFFFFFFu) / 2147483648.0f;
+                    k = 0;
+                }
+            }
+            drawScreen(copy, vertices);
+            // The mask's alpha into the place, its colours kept.
+            if (mask != 0u)
+                if (const auto texture = recordTexture(rdram, mask))
+                {
+                    ps2x::native::Material alpha;
+                    alpha.target = target;
+                    alpha.textured = true;
+                    alpha.tex0 = rd64(rdram, mask + 0x28u);
+                    alpha.blend = ps2x::native::Material::Blend::AlphaOnly;
+                    alpha.depthTest = false;
+                    alpha.depthWrite = false;
+                    alpha.clampU = alpha.clampV = true;
+                    std::vector<ps2x::native::Vertex> masked;
+                    const float tw = static_cast<float>(texture->width), th = static_cast<float>(texture->height);
+                    quad(masked, kOriginX + static_cast<float>(maskTo.x), kOriginY + static_cast<float>(maskTo.y),
+                         kOriginX + static_cast<float>(maskTo.x + maskTo.w), kOriginY + static_cast<float>(maskTo.y + maskTo.h), 0.0f, 0x80808080u,
+                         static_cast<float>(maskFrom.x) / tw, static_cast<float>(maskFrom.y) / th,
+                         static_cast<float>(maskFrom.x + maskFrom.w) / tw, static_cast<float>(maskFrom.y + maskFrom.h) / th);
+                    drawScreen(alpha, masked, texture);
+                }
+        }
+
         // blendTextuer (0x162580: a1 a work texture's place (TBP), a2 its width, a3 its format; t0 texture A, t1 / t2 its
         // destination and source; t3 texture B, the stack's first two its destination and source): the game points its
         // frame at the work texture, fills A's destination grey (an untextured sprite, 0x80), draws A there with the
@@ -3163,6 +3250,7 @@ namespace dc::native
             // place as the frame before left it, the frame's copy on some frames (dark squares over the torches).
             const uint8_t target = targetFor(place | kBlendedPlace);
             g_blendedExtent[place] = {std::max(toA.x + toA.w, toB.x + toB.w), std::max(toA.y + toA.h, toB.y + toB.h)};
+            g_blendedLast[place] = true;
             // The work texture's rows are the GS's (y = 1936 + y, not halved as the frame's 448-line view).
             auto sprite = [&](const Rect &to, const Rect &from, uint32_t record, ps2x::native::Material::Blend blend, bool textured) {
                 ps2x::native::Material material;
@@ -3202,11 +3290,20 @@ namespace dc::native
                             alphaLo = std::min(alphaLo, texel >> 24), alphaHi = std::max(alphaHi, texel >> 24);
                             rgbHi = std::max({rgbHi, texel & 0xFFu, (texel >> 8) & 0xFFu, (texel >> 16) & 0xFFu});
                         }
-                    std::fprintf(stderr, "[dc:dump] blendTextuer place %x target %u: %s \"%.16s\" tex0 %016llx %ux%u alpha %u..%u rgb max %u, ALPHA %llx, to A (%d,%d %dx%d) B (%d,%d %dx%d)\n",
+                    const Rect &to = record == textureA ? toA : toB, &from = record == textureA ? fromA : fromB;
+                    std::fprintf(stderr, "[dc:dump] blendTextuer place %x target %u: %s \"%.16s\" tex0 %016llx %ux%u alpha %u..%u rgb max %u, ALPHA %llx, from (%d,%d %dx%d) to (%d,%d %dx%d)\n",
                                  place, target, record == textureA ? "A" : "B", record != 0u ? reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)) : "",
                                  record != 0u ? static_cast<unsigned long long>(rd64(rdram, record + 0x28u)) : 0ull, texture ? texture->width : 0u,
-                                 texture ? texture->height : 0u, alphaLo, alphaHi, rgbHi, static_cast<unsigned long long>(g_alpha2D), toA.x, toA.y, toA.w,
-                                 toA.h, toB.x, toB.y, toB.w, toB.h);
+                                 texture ? texture->height : 0u, alphaLo, alphaHi, rgbHi, static_cast<unsigned long long>(g_alpha2D), from.x, from.y,
+                                 from.w, from.h, to.x, to.y, to.w, to.h);
+                    // The decoded texture itself, as a PAM file (RGBA, alpha as the GS has it) beside the dump flag.
+                    if (texture)
+                        if (FILE *out = std::fopen(record == textureA ? "D:/DC_Recomp/build/blend_A.pam" : "D:/DC_Recomp/build/blend_B.pam", "wb"))
+                        {
+                            std::fprintf(out, "P7\nWIDTH %u\nHEIGHT %u\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n", texture->width, texture->height);
+                            std::fwrite(texture->rgba.data(), 4u, texture->rgba.size(), out);
+                            std::fclose(out);
+                        }
                 }
             static int s_logged = 0;
             if (std::getenv("DC_PROBE_2D") && s_logged++ < 6)
@@ -3558,6 +3655,7 @@ namespace dc::native
             }
             runtime.registerFunction(0x0012F430u, &stretchMoveHook);
             runtime.registerFunction(0x00162580u, &blendTextureHook);
+            runtime.registerFunction(0x00162D80u, &blendTextureTestHook);
             runtime.registerFunction(0x0012F970u, &moveFrameBuffHook);
             if ((g_enterFixZ = runtime.lookupFunction(0x00132930u)))
                 runtime.registerFunction(0x00132930u, &enterFixZHook);

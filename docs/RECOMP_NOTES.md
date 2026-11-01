@@ -425,3 +425,9 @@ from the ELF's own symbols.
   any shadow draw. With the plane 12.8 below, the mesh was pushed along the light (a dark rectangle in front of
   Norune's stairs) and below the ground (hidden once the marks were depth-tested). Mode 8 gets its plane through its
   origin as modes 1 / 2 do: the shade lies under the platform, as in PCSX2.
+- A face on the wall (2026-11-01): in Toan's house a piece of the archway showed Toan's eyes. TexAnime's MGMoveImage
+  copies a face expression into the face texture's place; the hook patched the first record found at that place,
+  and several share it (the face and a piece of the house), and the patch stayed. ReloadTexture (0x133070, a group's
+  records sent to GS memory when the group is not the current one) is now followed: each place's resident record is
+  the one sent there last, a copy patches it, and a patched record gets its own texels back when its group is sent
+  again. The frame dump also prints each draw's TEX0.

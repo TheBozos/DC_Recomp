@@ -37,6 +37,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace dc::native
@@ -992,6 +993,9 @@ namespace dc::native
                              vertices.size() / 3u, lo, hi, material.fog ? "on" : "off", fogLo, fogHi, static_cast<int>(material.blend),
                              material.alphaTest ? 1 : 0, material.alphaRef, material.depthTest ? 1 : 0, material.depthWrite ? 1 : 0,
                              material.textured ? (material.fromFrame != 0u ? "frame" : "textured") : "untextured");
+                if (material.tex0 != 0u)
+                    std::fprintf(stderr, "[dc:dump]     tex0 %016llx%s\n", static_cast<unsigned long long>(material.tex0),
+                                 texture ? "" : " (no texture)");
             }
             if (material.textured && material.fromFrame != 0u)
                 renderer.draw(material, setup.toScreen.m, vertices.data(), static_cast<uint32_t>(vertices.size()));
@@ -2617,6 +2621,37 @@ namespace dc::native
         // hash changes), as GS memory would keep the copy. Copies from or to a place no record holds (the frame: the
         // water's refraction copy) are not made.
         void patchTexture(const uint8_t *rdram, uint32_t src, const Rect &r, uint32_t dst, int32_t dx, int32_t dy);
+        // GS memory's residents: the record ReloadTexture last sent to each place (TBP0 and PSM), and the records holding
+        // a copy MGMoveImage made into them. Places are shared (Toan's face and a piece of his house), and the game sends
+        // a group's textures again before drawing them: a copy into the face's place must patch the face, and is undone
+        // for whatever record is sent there next.
+        constexpr uint64_t kTexturePlace = 0x3FFFull | 0x3Full << 20; // TBP0, PSM
+        std::unordered_map<uint64_t, uint32_t> g_resident;
+        std::unordered_set<uint32_t> g_patchedRecords;
+        // ReloadTexture (0x133070: a0 the texture manager, a2 the group): sends the group's records (their first half-word,
+        // the group) to GS memory when the group is not the current one or not loaded yet.
+        PS2Runtime::RecompiledFunction g_reloadTexture = nullptr;
+        void reloadTextureHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t manager = getRegU32(ctx, 4);
+            const int32_t group = static_cast<int32_t>(getRegU32(ctx, 6));
+            const bool sends = group >= 0 && group < 0x48 &&
+                               (static_cast<int32_t>(rd32(rdram, manager + 0xCu)) != group ||
+                                rd32(rdram, manager + static_cast<uint32_t>(group * 0xF + 0x10) * 4u) == 0u);
+            g_reloadTexture(rdram, ctx, runtime);
+            if (!sends)
+                return;
+            const int32_t count = static_cast<int32_t>(rd32(rdram, manager));
+            for (int32_t i = 1; i < std::min(count, 1024); ++i)
+            {
+                const uint32_t record = manager + 0x10F8u + static_cast<uint32_t>(i) * 0x50u;
+                if (static_cast<int16_t>(rd32(rdram, record) & 0xFFFFu) != group)
+                    continue;
+                g_resident[rd64(rdram, record + 0x28u) & kTexturePlace] = record;
+                if (g_patchedRecords.erase(record) != 0u)
+                    g_decoded.erase(record); // its own texels again
+            }
+        }
         void moveImageHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
@@ -2654,7 +2689,13 @@ namespace dc::native
                 drawScreen(made, vertices);
                 return;
             }
-            const uint32_t src = recordAt(srcTex0), dst = recordAt(dstTex0);
+            uint32_t dst = 0u;
+            if (const auto resident = g_resident.find(dstTex0 & kTexturePlace);
+                resident != g_resident.end() && (rd64(rdram, resident->second + 0x28u) & kTexturePlace) == (dstTex0 & kTexturePlace))
+                dst = resident->second;
+            else
+                dst = recordAt(dstTex0);
+            const uint32_t src = recordAt(srcTex0);
             if (src == 0u || dst == 0u)
             {
                 ++g_stats.textureCopiesMissed;
@@ -2687,7 +2728,10 @@ namespace dc::native
             patched->version = ++g_textureVersion;
             auto &slot = g_decoded[dst];
             if (slot.second == to)
+            {
                 slot.second = patched;
+                g_patchedRecords.insert(dst);
+            }
         }
 
         // The message balloons (ClsMes::MakeFukidashi 0x151AD0, a0 the ClsMes): the game points its frame at the balloon
@@ -3330,6 +3374,8 @@ namespace dc::native
                 runtime.registerFunction(address, &sprite3DHook);
             runtime.registerFunction(0x00171210u, &drawLineHook);
             runtime.registerFunction(0x0012F210u, &moveImageHook);
+            if ((g_reloadTexture = runtime.lookupFunction(0x00133070u)))
+                runtime.registerFunction(0x00133070u, &reloadTextureHook);
             runtime.registerFunction(0x00151AD0u, &balloonHook);
             runtime.registerFunction(0x00140660u, &moveImageTestHook);
             if ((g_getFrameTex = runtime.lookupFunction(0x0012F130u)) && (g_getBackTex = runtime.lookupFunction(0x0012F1A0u)))

@@ -468,7 +468,7 @@ from the ELF's own symbols.
   Taken over natively; a 2D sprite reads blendTextuer's own picture only when blendTextuer wrote the place last.
   The haze patch now has its own target too (kHazePlace | place, at the window's resolution): in the place's own
   640 x 224 target it came out blocky and left a hard-edged square behind Toan's head.
-- Toan's jaw (2026-11-01): in the first dungeon's cave dialogue his lower face was transparent black (live toggles
+- Toan's jaw (2026-11-01): in a scene in the first dungeon (Toan by a torch) his lower face was transparent black (live toggles
   nocopies / opaquemodels pointed at the face expression copy). The disc holds 20+ pictures named "c01d01an" (his
   expression sheets), all with the same palette and several of one size; the store matched a record by name, palette
   and texel count, so the 256 x 128 sheet the game loaded got the 128 x 256 one, whose right half decodes empty, and

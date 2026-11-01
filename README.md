@@ -42,6 +42,7 @@ not read at all (each ends at once), VU1 runs no microcode, and there is no GS p
 | VU1 programs not translated yet (screen-space sprites, particles, other effects) | not drawn (VU1 runs nothing) |
 | 2D routines not translated yet (some menus, the movies' frames, CDebugFont) | not drawn |
 | DMA channels other than VIF1 / GIF, EE kernel HLE, IPU (movies) | the runtime's hardware layer |
+| The SPU2 (sound): voices, ADPCM decoding, envelopes, reverb, mixing | emulated by the fork (ps2xIOP iop_spu2.cpp), driven by the game's native-recompiled sound drivers; silent at the moment (2026-11-01: the title's 44 s recorded all zero) |
 
 Known defects: cloth grids with runaway vertices (dropped by the guard band as the PS2 drops them, but the cloth
 simulation itself is not checked); the characters' shadow plane matched against PCSX2 rather than traced through the
@@ -62,7 +63,7 @@ menus not checked yet.
 | New game: name entry, the Dark Shrine opening (Colonel Flag summons the Genie) | ✅ |
 | Norune village: the opening scenes after the Dark Shrine | 🔧 |
 | First dungeon (Divine Beast Cave) | ⏳ |
-| Sound and music: SDRDRV, EzMIDI and LIBSD native, voice transfers complete | 🔧 |
+| Sound and music: SDRDRV, EzMIDI and LIBSD native, but on an emulated SPU2 (silent now): to replace with native audio at the drivers' level | 🔧 |
 | Native frame loop (no vblank pacing): 60 fps on the PC clock | ✅ |
 | Memory card saves (save and load) | ✅ |
 | Linux build | ⏳ |
@@ -75,7 +76,7 @@ state machine and no copy of GS memory in between.
 | Layer | |
 |---|:---:|
 | IOP modules (9) recompiled to C++, none interpreted | ✅ |
-| Sound on the PC's clock | ✅ |
+| Sound without the emulated SPU2 (native playback of the game's sequences and sound banks) | ⏳ |
 | No paraLLEl-GS: OpenGL on the GPU | ✅ |
 | Frame loop on the PC's clock (60 fps, no vblank pacing) | ✅ |
 | No GS: the native renderer is the only picture, no GS path left | ✅ |
@@ -118,7 +119,7 @@ disc files (game/) ──► tools/symtab_map.py (the ELF's symbol table) ──
                                            │
    DC's native picture (dc_native.cpp: the game's models and 2D, drawn by the PC GPU; no GS, VU1 runs nothing) ─┐
    still the runtime's: VIF1 / GIF transfers ended unread · other DMAC channels · IPU ─────────────────────────┼─► ps2EntryRunner
-   PS2Recomp IOP:     the game's own IRX as native code · SPU2 and IOP on the PC clock · SIO2
+   PS2Recomp IOP:     the game's own IRX as native code · SPU2 (emulated) and IOP on the PC clock · SIO2
 ```
 
 - The retail executable keeps its symbol table (CodeWarrior): every function has its name and size, for the main

@@ -386,4 +386,8 @@ from the ELF's own symbols.
   mRAPF1; feedback x 258 is vWALL), run by the mixer at 24 kHz on delay lines in its sound memory below the effect
   end. DC: mode 4 (large studio) on both groups, effect end 0x1FFFFF for group 0 and 0x1DFFFF for group 1, effect
   volumes 0x2800 (effects) and 0x300 (music). Group 0's output is not sent into group 1's reverb.
-  Not yet: noise, pitch modulation, the sound data input (streamed PCM: movies?).
+  Transfer callbacks: after sceSdVoiceTrans (and a one-shot sceSdBlockTrans) the channel's handler
+  (sceSdSetTransIntrHandler) or callback (sceSdSetTransCallback) runs shortly after, as an interrupt handler
+  (native::queueInterruptCall), for drivers that wait on it (VP2's). DC registers none.
+  Not yet: noise, pitch modulation, the sound data input (looping sceSdBlockTrans: DC never calls it; logged), the
+  SPU2 IRQ callback.

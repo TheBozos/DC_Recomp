@@ -333,3 +333,9 @@ from the ELF's own symbols.
   near the compositor's latch a few milliseconds of a frame's own work sent it to one refresh or the next. The frame
   end's deadlines stay on the PC clock and their phase is steered (5 % of the error a frame) so publishes sit mid-
   refresh: measured mean within 0.4 ms of it, worst 8 ms on heavy frames (DC_PROBE_PHASE=1).
+- Attract demo (2026-11-01): blendTextuer (0x162580) composes a work texture (FRAME pointed at a1's place): a grey
+  untextured sprite, texture A with the current ALPHA, texture B with ALPHA 0x09 (Cd x As + Cs), the frame pointed
+  back. Translated into the offscreen target of that place (Blend::DestinationBySource in the fork). The demo's
+  "PUSH START BUTTON" plate ("start2", 256 x 32) is a loaded texture sent to 0x1A40, the title's work place: sampled
+  as the work picture it showed a dark bar. A record with pixels of its own (+ 0x38) now always shows them; only a
+  record without ("frame_image") samples the picture the game makes there.

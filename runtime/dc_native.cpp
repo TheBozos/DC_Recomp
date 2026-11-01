@@ -1964,7 +1964,10 @@ namespace dc::native
         void drawStrip(const uint8_t *rdram, uint32_t record, const Corner (&c)[4], bool flat = false)
         {
             ps2x::native::Material made;
-            if (record != 0u && sampleMade(static_cast<uint32_t>(rd64(rdram, record + 0x28u) & 0x3FFFu), made))
+            // A record with pixels of its own shows them, wherever the game sends them in GS memory: the attract demo's
+            // "start2" plate goes to the title's work place 0x1A40 and showed the stale work picture. A record with none
+            // ("frame_image") is a picture the game makes there.
+            if (record != 0u && rd32(rdram, record + 0x38u) == 0u && sampleMade(static_cast<uint32_t>(rd64(rdram, record + 0x28u) & 0x3FFFu), made))
             {
                 ps2x::native::Material material = made;
                 ++g_stats.madeDraws[std::min<uint32_t>(made.source, 8u)];
@@ -1975,9 +1978,10 @@ namespace dc::native
                 static int s_logged = 0, s_loggedTargets = 0;
                 if (std::getenv("DC_PROBE_2D") &&
                     (made.source == ps2x::native::Material::kPreviousFrame ? s_logged++ < 12 : (++s_loggedTargets <= 12 || s_loggedTargets % 1200 == 0)))
-                    std::fprintf(stderr, "[dc:2d] sprite of record %08x \"%.32s\" tex0 %016llx samples source %u: (%.1f %.1f)-(%.1f %.1f) uv (%.0f %.0f)-(%.0f %.0f) rgba %08x alpha %llx\n",
+                    std::fprintf(stderr, "[dc:2d] sprite of record %08x \"%.32s\" tex0 %016llx pixels %08x kind %u samples source %u: (%.1f %.1f)-(%.1f %.1f) uv (%.0f %.0f)-(%.0f %.0f) rgba %08x alpha %llx\n",
                                  record, reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)),
-                                 static_cast<unsigned long long>(rd64(rdram, record + 0x28u)), made.source, c[0].x, c[0].y, c[3].x, c[3].y,
+                                 static_cast<unsigned long long>(rd64(rdram, record + 0x28u)), rd32(rdram, record + 0x38u),
+                                 rd32(rdram, record + 4u) >> 16, made.source, c[0].x, c[0].y, c[3].x, c[3].y,
                                  c[0].u, c[0].v, c[3].u, c[3].v, c[0].rgba, static_cast<unsigned long long>(g_alpha2D));
                 material.frameWidth = 640;
                 material.frameHeight = 224;
@@ -2716,6 +2720,52 @@ namespace dc::native
                              g_backBase, from.x, from.y, from.w, from.h, dstBase, material.target, to.x, to.y, to.w, to.h);
         }
 
+        // blendTextuer (0x162580: a1 a work texture's place (TBP), a2 its width, a3 its format; t0 texture A, t1 / t2 its
+        // destination and source; t3 texture B, the stack's first two its destination and source): the game points its
+        // frame at the work texture, fills A's destination grey (an untextured sprite, 0x80), draws A there with the
+        // current ALPHA, then B with ALPHA 0x09 (Cd x As + Cs), and points its frame back. The work texture is the
+        // offscreen target that stands for that place; a sprite of it shows it (the attract demo's PUSH START plate).
+        void blendTextureHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            ctx->pc = getRegU32(ctx, 31);
+            const uint32_t place = getRegU32(ctx, 5) & 0x3FFFu;
+            const uint32_t textureA = getRegU32(ctx, 8), textureB = getRegU32(ctx, 11);
+            const Rect toA = rectAt(rdram, getRegU32(ctx, 9)), fromA = rectAt(rdram, getRegU32(ctx, 10));
+            const Rect toB = rectAt(rdram, stackArg(rdram, ctx, 0)), fromB = rectAt(rdram, stackArg(rdram, ctx, 1));
+            const uint8_t target = targetFor(place);
+            // The work texture's rows are the GS's (y = 1936 + y, not halved as the frame's 448-line view).
+            auto sprite = [&](const Rect &to, const Rect &from, uint32_t record, ps2x::native::Material::Blend blend, bool textured) {
+                ps2x::native::Material material;
+                material.target = target;
+                material.blend = blend;
+                material.depthTest = false;
+                material.depthWrite = false;
+                material.clampU = material.clampV = true;
+                std::shared_ptr<const ps2x::native::TextureCache::Texture> texture;
+                if (textured)
+                {
+                    if (record == 0u || !(texture = recordTexture(rdram, record)))
+                        return;
+                    material.tex0 = rd64(rdram, record + 0x28u);
+                }
+                material.textured = textured;
+                const float tw = texture ? static_cast<float>(texture->width) : 1.0f, th = texture ? static_cast<float>(texture->height) : 1.0f;
+                std::vector<ps2x::native::Vertex> vertices;
+                quad(vertices, kOriginX + static_cast<float>(to.x), kOriginY + static_cast<float>(to.y), kOriginX + static_cast<float>(to.x + to.w),
+                     kOriginY + static_cast<float>(to.y + to.h), 0.0f, textured ? 0x80808080u : flatColour(0x80u, 0x80u, 0x80u, 0x80u),
+                     static_cast<float>(from.x) / tw, static_cast<float>(from.y) / th, static_cast<float>(from.x + from.w) / tw,
+                     static_cast<float>(from.y + from.h) / th);
+                drawScreen(material, vertices, texture);
+            };
+            sprite(toA, fromA, 0u, ps2x::native::Material::Blend::Opaque, false);
+            sprite(toA, fromA, textureA, ps2x::native::blendOf(g_alpha2D), true);
+            sprite(toB, fromB, textureB, ps2x::native::Material::Blend::DestinationBySource, true);
+            static int s_logged = 0;
+            if (std::getenv("DC_PROBE_2D") && s_logged++ < 6)
+                std::fprintf(stderr, "[dc:2d] blendTextuer place %x target %u: A %08x (%d,%d %dx%d) B %08x (%d,%d %dx%d)\n", place, target, textureA,
+                             toA.x, toA.y, toA.w, toA.h, textureB, toB.x, toB.y, toB.w, toB.h);
+        }
+
         // SetClut (0x14C5A0: a1 the texture whose CBP takes the palette, a2 the palette).
         void setClutHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
@@ -2934,6 +2984,7 @@ namespace dc::native
                 runtime.registerFunction(0x0012F1A0u, &getBackTexHook);
             }
             runtime.registerFunction(0x0012F430u, &stretchMoveHook);
+            runtime.registerFunction(0x00162580u, &blendTextureHook);
             if ((g_loadTm2 = runtime.lookupFunction(0x00154950u)))
                 runtime.registerFunction(0x00154950u, &loadTm2Hook);
             if ((g_loadTexture = runtime.lookupFunction(0x00154770u)))

@@ -1097,7 +1097,8 @@ namespace dc::native
                     material.fromFrame = 0;
                     material.source = 0;
                     madeU = madeV = 1.0f;
-                    if (!texture && record != 0u && rd32(rdram, record + 0x38u) == 0u)
+                    static const bool s_noMadeModels = std::getenv("DC_NO_MADE_MODELS") != nullptr; // diagnosis
+                    if (!s_noMadeModels && !texture && record != 0u && rd32(rdram, record + 0x38u) == 0u)
                     {
                         ps2x::native::Material made;
                         if (sampleMade(static_cast<uint32_t>(material.tex0 & 0x3FFFu), made) && made.source != 0u)

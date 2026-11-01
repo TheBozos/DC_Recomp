@@ -10,6 +10,9 @@ BIN="$GAME_BUILD/PS2Recomp/ps2xRuntime/ps2EntryRunner$EXE"
 export PS2X_GS_RENDERER=none
 export PS2X_IOP_NATIVE="${PS2X_IOP_NATIVE:-1}"
 export PS2X_SPU2_WALLCLOCK="${PS2X_SPU2_WALLCLOCK:-1}"
+# Sound without the SPU2: libsd taken over at its API, the game's sample banks played by the native mixer
+# (PS2Recomp ps2xIOP native_audio). PS2X_NATIVE_AUDIO=0 goes back to the emulated SPU2 (comparison only).
+export PS2X_NATIVE_AUDIO="${PS2X_NATIVE_AUDIO:-1}"
 export PS2X_IOP_WALLCLOCK="${PS2X_IOP_WALLCLOCK:-1}"
 # The native frame loop (runtime/dc_overrides.cpp nativeFrameEnd): no vblank paces the game; each frame ends by
 # blocking the main thread until its deadline on the PC clock (PS2X_FRAME_CAP, 60). DC_NATIVE=0 goes back to the

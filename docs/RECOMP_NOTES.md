@@ -372,3 +372,12 @@ from the ELF's own symbols.
   TBP 0x1A40 (1024 x 256) that MainDraw fills each frame with a copy of the frame (MGMoveImage). It drew untextured;
   it now samples that copy like the 2D does (Material::fromFrame + source), its texture coordinates scaled from the
   record's 2^TW x 2^TH to the copy's 640 x 224. Not seen from the save's spot: to check where it shows (water?).
+- Sound without the SPU2 (2026-11-01). DC's sound drivers (LIBSD, SDRDRV, MODMIDI, MODHSYN, EzMIDI) were native but
+  drove the fork's emulated SPU2, and the result was silence (the title's 44 s all zero). libsd is now taken over at
+  its API (PS2X_NATIVE_AUDIO=1, the default in scripts/run.sh; PS2Recomp ps2xIOP native_audio): every libsd call acts
+  on a native mixer (48 voices playing the game's ADPCM banks from a native sound memory: pitch, ADSR, volume, dry
+  mix) and uploads are copies done at once. The silence itself was upstream: EzMIDI ticks its sequencer from an IOP
+  timer interrupt it registers with intrman (GetHardTimerIntrCode + RegisterIntrHandler), which the IOP's timrman never
+  raised, and its handler wakes its thread only when GetTimerStatus shows the "compare reached" bit (11), which
+  timrman never returned. Both fixed in the fork. The title's music plays (peaks 6000-11000 from its 10th second).
+  Not yet: reverb, noise, pitch modulation, the sound data input (streamed PCM: movies?), and listening by ear.

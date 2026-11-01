@@ -431,3 +431,7 @@ from the ELF's own symbols.
   records sent to GS memory when the group is not the current one) is now followed: each place's resident record is
   the one sent there last, a copy patches it, and a patched record gets its own texels back when its group is sent
   again. The frame dump also prints each draw's TEX0.
+- IOP fully recompiled (2026-11-01): TMB's tools/iop_recomp.py fix (fork 344b6d4, from 6bc71c0) follows jump-table
+  switches and frameless leaves reached by pointer. Regenerated (scripts/iop_recomp.sh): MODHSYN 179, MODMIDI 53,
+  PADMAN 205, SDRDRV 13, SIO2MAN 49 functions, none left to the interpreter; [iop:hw] reports 0 interpreted
+  instructions after boot, 9 hardware register accesses in the whole run (boot), and EzMIDI's timer interrupt.

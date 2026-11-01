@@ -1371,7 +1371,15 @@ namespace dc::native
             if (g_dump2D)
             {
                 const Matrix world = load(rdram, localToWorld);
-                std::fprintf(stderr, "[dc:dump] %s shadow %u at (%g %g %g)\n", g_drawWhat, rd32(rdram, renderInfo + 0x320u), world.m[12], world.m[13], world.m[14]);
+                std::fprintf(stderr, "[dc:dump] %s shadow %u at (%g %g %g) alpha %016llx%s\n", g_drawWhat, rd32(rdram, renderInfo + 0x320u),
+                             world.m[12], world.m[13], world.m[14], static_cast<unsigned long long>(state.alpha), state.valid ? "" : " (no state)");
+            }
+            // DC_SKIP_MDT=<hex address> (diagnosis): models with that MDT are not drawn.
+            static const uint32_t s_skipMdt = [] { const char *v = std::getenv("DC_SKIP_MDT"); return v ? static_cast<uint32_t>(std::strtoul(v, nullptr, 16)) : 0u; }();
+            if (s_skipMdt != 0u && mdt == s_skipMdt)
+            {
+                g_objectState.valid = false;
+                return;
             }
             drawModel(rdram, model, load(rdram, localToWorld), renderInfo, !shadow && !screenSpace);
             if (shadow)

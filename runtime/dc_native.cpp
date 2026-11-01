@@ -693,7 +693,9 @@ namespace dc::native
             // 3: 24-bit, 4: 32-bit).
             const uint32_t bytes = (kind == 1u ? 1u : kind == 3u ? 3u : 4u) * w * h;
             const uint32_t tbw = std::max<uint32_t>((tex0 >> 14) & 0x3Fu, 1u);
-            const uint32_t psm = (tex0 >> 20) & 0x3Fu;
+            // PSMT8H (0x1B, the 8-bit texels kept in the top byte of 32-bit GS words: EnterFixTextureZ's menu sheet) is sent
+            // as plain 8-bit texels: decoded as PSMT8.
+            const uint32_t psm = ((tex0 >> 20) & 0x3Fu) == 0x1Bu ? 0x13u : (tex0 >> 20) & 0x3Fu;
             const uint32_t tw = (tex0 >> 26) & 0xFu, th = (tex0 >> 30) & 0xFu;
             const uint32_t cpsm = (tex0 >> 51) & 0xFu, csa = (tex0 >> 56) & 0x1Fu;
             if (pixels == 0u || bytes == 0u || (psm != 0x13u && psm != 0x14u && psm != 0x00u && psm != 0x01u) ||
@@ -1965,8 +1967,16 @@ namespace dc::native
             return true;
         }
         // A strip of four corners (v0 v1 v2, v1 v2 v3), textured with the record's texture when there is one.
+        // D:/DC_Recomp/build/dump2d.flag present (diagnosis, checked every 30 frames): the next frame's 2D draws logged one
+        // by one ([dc:dump]), then the flag removed.
+        bool g_dump2D = false;
         void drawStrip(const uint8_t *rdram, uint32_t record, const Corner (&c)[4], bool flat = false)
         {
+            if (g_dump2D)
+                std::fprintf(stderr, "[dc:dump] sprite %08x \"%.32s\" tex0 %016llx pixels %08x (%.1f %.1f)-(%.1f %.1f) uv (%.0f %.0f)-(%.0f %.0f) rgba %08x alpha %llx flat %d\n",
+                             record, record ? reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)) : "",
+                             record ? static_cast<unsigned long long>(rd64(rdram, record + 0x28u)) : 0ull, record ? rd32(rdram, record + 0x38u) : 0u,
+                             c[0].x, c[0].y, c[3].x, c[3].y, c[0].u, c[0].v, c[3].u, c[3].v, c[0].rgba, static_cast<unsigned long long>(g_alpha2D), flat ? 1 : 0);
             ps2x::native::Material made;
             // A record with pixels of its own shows them, wherever the game sends them in GS memory: the attract demo's
             // "start2" plate goes to the title's work place 0x1A40 and showed the stale work picture. A record with none
@@ -2914,6 +2924,74 @@ namespace dc::native
             if (auto texture = recordTexture(rdram, record))
                 g_pinned[record] = {rd32(rdram, record + 0x38u), rd64(rdram, record + 0x28u), texture};
         }
+        // EnterFixTexture (0x1320E0: a1 the name, a2 the pixels, a3 / t0 the size, t1 the kind, t2 the palette; the 14th
+        // argument set when 8-bit texels are in GS order): sends a fixed texture (the menus' "stayframe", "window"...) to
+        // GS memory once, from a buffer the record never points at (+ 0x38 and + 0x48 stay as they were). Decoded right
+        // after it, with those pointers put in the record for the decode and the record then restored as it was.
+        PS2Runtime::RecompiledFunction g_enterFix = nullptr;
+        void enterFixHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t name = getRegU32(ctx, 5), pixels = getRegU32(ctx, 6), palette = getRegU32(ctx, 10);
+            const uint32_t gsOrder = stackArg(rdram, ctx, 5);
+            g_enterFix(rdram, ctx, runtime);
+            const uint32_t record = pixels != 0u ? textureRecord(rdram, name) : 0u;
+            if (record == 0u)
+                return;
+            auto wr32 = [rdram](uint32_t address, uint32_t value) { std::memcpy(rdram + (address & 0x1FFFFFFu), &value, 4); };
+            const uint32_t keptPixels = rd32(rdram, record + 0x38u), keptPalette = rd32(rdram, record + 0x48u), keptOrder = rd32(rdram, record + 0x4Cu);
+            wr32(record + 0x38u, pixels);
+            wr32(record + 0x48u, palette);
+            wr32(record + 0x4Cu, gsOrder != 0u ? 1u : 0u);
+            g_pinned.erase(record);
+            g_decoded.erase(record);
+            auto texture = recordTexture(rdram, record);
+            g_decoded.erase(record);
+            wr32(record + 0x38u, keptPixels);
+            wr32(record + 0x48u, keptPalette);
+            wr32(record + 0x4Cu, keptOrder);
+            if (texture)
+                g_pinned[record] = {keptPixels, rd64(rdram, record + 0x28u), texture};
+            static int s_logged = 0;
+            if (std::getenv("DC_PROBE_2D") && s_logged++ < 40)
+                std::fprintf(stderr, "[dc:2d] fixed texture \"%.32s\" record %08x kind %u %ux%u gs order %u: %s\n",
+                             reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)), record, rd32(rdram, record + 4u) >> 16,
+                             rd32(rdram, record) >> 16, rd32(rdram, record + 4u) & 0xFFFFu, gsOrder != 0u ? 1u : 0u,
+                             texture ? "decoded" : "NOT decoded");
+        }
+        // EnterFixTextureZ (0x132930: a1 a picture file): a 640 x 224 8-bit picture (the menus' "stayframe" sheet) sent once
+        // as PSMT8H to 0x1180, its palette to 0x3FE0, from the file's buffer; the record holds neither pointer. Decoded
+        // right after it, as EnterFixTexture's are.
+        PS2Runtime::RecompiledFunction g_enterFixZ = nullptr;
+        void enterFixZHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t file = getRegU32(ctx, 5);
+            g_enterFixZ(rdram, ctx, runtime);
+            const uint32_t picture = file + rd32(rdram, file + 0x30u);
+            if ((rd32(rdram, picture + 0x24u) & 0xFFFFu) != 0x280u || (rd32(rdram, picture + 0x24u) >> 16) != 0xE0u)
+                return;
+            const uint32_t pixels = picture + 0x10u + (rd32(rdram, picture + 0x1Cu) & 0xFFFFu);
+            const uint32_t palette = pixels + rd32(rdram, picture + 0x18u);
+            const uint32_t record = textureRecord(rdram, file + 0x10u);
+            if (record == 0u)
+                return;
+            auto wr32 = [rdram](uint32_t address, uint32_t value) { std::memcpy(rdram + (address & 0x1FFFFFFu), &value, 4); };
+            const uint32_t keptPixels = rd32(rdram, record + 0x38u), keptPalette = rd32(rdram, record + 0x48u), keptOrder = rd32(rdram, record + 0x4Cu);
+            wr32(record + 0x38u, pixels);
+            wr32(record + 0x48u, palette);
+            wr32(record + 0x4Cu, 0u);
+            g_pinned.erase(record);
+            g_decoded.erase(record);
+            auto texture = recordTexture(rdram, record);
+            g_decoded.erase(record);
+            wr32(record + 0x38u, keptPixels);
+            wr32(record + 0x48u, keptPalette);
+            wr32(record + 0x4Cu, keptOrder);
+            if (texture)
+                g_pinned[record] = {keptPixels, rd64(rdram, record + 0x28u), texture};
+            if (std::getenv("DC_PROBE_2D"))
+                std::fprintf(stderr, "[dc:2d] fixed Z texture \"%.32s\" record %08x: %s\n",
+                             reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)), record, texture ? "decoded" : "NOT decoded");
+        }
         // LoadTexture(TM2_head *, CTexture *, tbp, cbp) and LoadTexture(char *, u8 *, CTexture *, tbp, cbp).
         void loadTm2Hook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
@@ -3036,6 +3114,10 @@ namespace dc::native
             runtime.registerFunction(0x0012F430u, &stretchMoveHook);
             runtime.registerFunction(0x00162580u, &blendTextureHook);
             runtime.registerFunction(0x0012F970u, &moveFrameBuffHook);
+            if ((g_enterFixZ = runtime.lookupFunction(0x00132930u)))
+                runtime.registerFunction(0x00132930u, &enterFixZHook);
+            if ((g_enterFix = runtime.lookupFunction(0x001320E0u)))
+                runtime.registerFunction(0x001320E0u, &enterFixHook);
             if ((g_loadTm2 = runtime.lookupFunction(0x00154950u)))
                 runtime.registerFunction(0x00154950u, &loadTm2Hook);
             if ((g_loadTexture = runtime.lookupFunction(0x00154770u)))
@@ -3158,6 +3240,20 @@ namespace dc::native
             std::fprintf(stderr, "[dc:seq] %s\n", runs.c_str());
         }
         g_seq.clear();
+        if (g_dump2D)
+        {
+            g_dump2D = false;
+            std::fprintf(stderr, "[dc:dump] frame end\n");
+        }
+        static uint32_t s_dumpCheck = 0;
+        if (++s_dumpCheck % 30u == 0u)
+            if (FILE *flag = std::fopen("D:/DC_Recomp/build/dump2d.flag", "rb"))
+            {
+                std::fclose(flag);
+                std::remove("D:/DC_Recomp/build/dump2d.flag");
+                g_dump2D = true;
+                std::fprintf(stderr, "[dc:dump] frame start\n");
+            }
     }
 
     // DC_PROBE_TEX=1 (diagnosis): the texture manager's (0x1C75870) records, every 600 frames: count at + 0, records

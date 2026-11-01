@@ -346,3 +346,10 @@ from the ELF's own symbols.
   ("frame_image"), the menus' darkened backdrop: it was black. The frame presented last is copied into that place's
   target, sampled as 448 rows. (3) MGMoveImage out of the frame (the towns' MainDraw copies it each frame into a named
   texture) is drawn into the destination's target 1:1 instead of being dropped.
+- Fixed textures (2026-11-01, Georama menu). The menu's panels, icons and frames come from "stayframe", a 640 x 224
+  8-bit sheet EnterFixTextureZ (0x132930) sends once to the spare top byte of a 32-bit buffer (PSMT8H at 0x1180, its
+  palette at 0x3FE0) from a file buffer later freed; EnterFixTexture (0x1320E0) does the same for single fixed
+  textures ("cursor", "e01t22"...). Neither record keeps its pixel or palette pointer, so every sprite of them was
+  skipped (only the text, "gaiji", showed). Both are decoded right after the call (the pointers put in the record for
+  the decode, the record restored) and kept; PSMT8H is decoded as PSMT8 (the texels are sent as plain 8-bit).
+  An on-demand probe found it: D:/DC_Recomp/build/dump2d.flag makes the next frame log every 2D draw ([dc:dump]).

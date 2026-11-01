@@ -454,3 +454,9 @@ from the ELF's own symbols.
 - Test runs open their window without the focus (PS2X_WINDOW_NO_FOCUS=1, scripts/boot_test.sh), and the host input
   follows the system's foreground window on Windows (VP2S's fork 7318752 / 0d79208): a run in the background no
   longer reads the player's pad.
+- Dungeon torches (2026-11-01): their fire is blendTextuer (0x162580) blending "d01e03" with "d01e02" into the top-left
+  128 x 128 of "work" (0x1A40), shown by "blender" sprites over each torch. The game calls the sprites first; on the
+  PS2 blendTextuer reaches the GS at once and the sprites go out later with the frame's packet. Here the sprites read
+  the place as the frame before left it, which on frames where the frame's stretched copy went there showed dark
+  squares of the cave over the torches. blendTextuer now draws into a picture of its own (kBlendedPlace | place), and a
+  sprite reading inside its corner samples it (a frame late). Still open: the flame band shows a hard lower edge.

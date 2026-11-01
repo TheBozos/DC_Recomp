@@ -2254,6 +2254,8 @@ namespace dc::native
             g_targetRows[n] = 224.0f;
             return g_targetOfBase[base] = n;
         }
+        constexpr uint32_t kBlendedPlace = 0x40000000u;                  // blendTextuer's picture of a place: its own target
+        std::unordered_map<uint32_t, std::pair<int32_t, int32_t>> g_blendedExtent; // place -> the corner it blends
         // The renderer source for a place (0: not one of the game's own pictures); sets the material to sample it.
         bool sampleMade(uint32_t base, ps2x::native::Material &material)
         {
@@ -2286,8 +2288,15 @@ namespace dc::native
             ps2x::native::Material made;
             // A record with pixels of its own shows them, wherever the game sends them in GS memory: the attract demo's
             // "start2" plate goes to the title's work place 0x1A40 and showed the stale work picture. A record with none
-            // ("frame_image") is a picture the game makes there.
-            if (record != 0u && rd32(rdram, record + 0x38u) == 0u && sampleMade(static_cast<uint32_t>(rd64(rdram, record + 0x28u) & 0x3FFFu), made))
+            // ("frame_image") is a picture the game makes there; inside the corner blendTextuer blends ("blender"), the
+            // picture it made.
+            uint32_t madeBase = record != 0u ? static_cast<uint32_t>(rd64(rdram, record + 0x28u) & 0x3FFFu) : 0u;
+            if (const auto blended = g_blendedExtent.find(madeBase); blended != g_blendedExtent.end() &&
+                std::max(c[0].u, c[3].u) <= static_cast<float>(blended->second.first) + 1.0f &&
+                std::max(c[0].v, c[3].v) <= static_cast<float>(blended->second.second) + 1.0f &&
+                g_targetOfBase.count(madeBase | kBlendedPlace) != 0u)
+                madeBase |= kBlendedPlace;
+            if (record != 0u && rd32(rdram, record + 0x38u) == 0u && sampleMade(madeBase, made))
             {
                 ps2x::native::Material material = made;
                 ++g_stats.madeDraws[std::min<uint32_t>(made.source, 8u)];
@@ -3126,6 +3135,9 @@ namespace dc::native
             drawScreen(material, vertices);
             ++g_stats.stretches;
             seq('S');
+            if (g_dump2D)
+                std::fprintf(stderr, "[dc:dump] stretch base %x (%d,%d %dx%d) -> base %x target %u (%d,%d %dx%d), 1/16 pixels\n", srcBase, from.x, from.y,
+                             from.w, from.h, dstBase, material.target, to.x, to.y, to.w, to.h);
             static int s_logged = 0;
             if (std::getenv("DC_PROBE_2D") && s_logged++ < 6)
                 std::fprintf(stderr, "[dc:2d] stretch base %x (frame %x back %x) %d,%d %dx%d -> base %x target %u %d,%d %dx%d\n", srcBase, g_frameBase,
@@ -3144,7 +3156,13 @@ namespace dc::native
             const uint32_t textureA = getRegU32(ctx, 8), textureB = getRegU32(ctx, 11);
             const Rect toA = rectAt(rdram, getRegU32(ctx, 9)), fromA = rectAt(rdram, getRegU32(ctx, 10));
             const Rect toB = rectAt(rdram, stackArg(rdram, ctx, 0)), fromB = rectAt(rdram, stackArg(rdram, ctx, 1));
-            const uint8_t target = targetFor(place);
+            // A picture of its own (kBlendedPlace | place), apart from what else the game puts in that place: the
+            // dungeons' torch halos are blended into the top-left 128 x 128 of "work" (0x1A40), which also takes the
+            // frame's stretched copy. On the PS2 blendTextuer reaches the GS at once while the "blender" sprites that show
+            // it go out with the frame's packet, after it; here they come first (the game calls them first) and read the
+            // place as the frame before left it, the frame's copy on some frames (dark squares over the torches).
+            const uint8_t target = targetFor(place | kBlendedPlace);
+            g_blendedExtent[place] = {std::max(toA.x + toA.w, toB.x + toB.w), std::max(toA.y + toA.h, toB.y + toB.h)};
             // The work texture's rows are the GS's (y = 1936 + y, not halved as the frame's 448-line view).
             auto sprite = [&](const Rect &to, const Rect &from, uint32_t record, ps2x::native::Material::Blend blend, bool textured) {
                 ps2x::native::Material material;
@@ -3172,6 +3190,24 @@ namespace dc::native
             sprite(toA, fromA, 0u, ps2x::native::Material::Blend::Opaque, false);
             sprite(toA, fromA, textureA, ps2x::native::blendOf(g_alpha2D), true);
             sprite(toB, fromB, textureB, ps2x::native::Material::Blend::DestinationBySource, true);
+            // The frame dump: both textures (name, TEX0, alpha range) and where they go.
+            if (g_dump2D)
+                for (const uint32_t record : {textureA, textureB})
+                {
+                    const auto texture = record != 0u ? recordTexture(rdram, record) : nullptr;
+                    uint32_t alphaLo = 255u, alphaHi = 0u, rgbHi = 0u;
+                    if (texture)
+                        for (uint32_t texel : texture->rgba)
+                        {
+                            alphaLo = std::min(alphaLo, texel >> 24), alphaHi = std::max(alphaHi, texel >> 24);
+                            rgbHi = std::max({rgbHi, texel & 0xFFu, (texel >> 8) & 0xFFu, (texel >> 16) & 0xFFu});
+                        }
+                    std::fprintf(stderr, "[dc:dump] blendTextuer place %x target %u: %s \"%.16s\" tex0 %016llx %ux%u alpha %u..%u rgb max %u, ALPHA %llx, to A (%d,%d %dx%d) B (%d,%d %dx%d)\n",
+                                 place, target, record == textureA ? "A" : "B", record != 0u ? reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)) : "",
+                                 record != 0u ? static_cast<unsigned long long>(rd64(rdram, record + 0x28u)) : 0ull, texture ? texture->width : 0u,
+                                 texture ? texture->height : 0u, alphaLo, alphaHi, rgbHi, static_cast<unsigned long long>(g_alpha2D), toA.x, toA.y, toA.w,
+                                 toA.h, toB.x, toB.y, toB.w, toB.h);
+                }
             static int s_logged = 0;
             if (std::getenv("DC_PROBE_2D") && s_logged++ < 6)
                 std::fprintf(stderr, "[dc:2d] blendTextuer place %x target %u: A %08x (%d,%d %dx%d) B %08x (%d,%d %dx%d)\n", place, target, textureA,

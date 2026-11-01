@@ -339,3 +339,10 @@ from the ELF's own symbols.
   "PUSH START BUTTON" plate ("start2", 256 x 32) is a loaded texture sent to 0x1A40, the title's work place: sampled
   as the work picture it showed a dark bar. A record with pixels of its own (+ 0x38) now always shows them; only a
   record without ("frame_image") samples the picture the game makes there.
+- Georama and the menus (2026-11-01, the first play session). (1) MGDrawShade (0x130760) sets ALPHA 0x2A for the
+  shade it draws and leaves it; CMapObject::DrawShade calls it directly, and the day clock and the hand cursor drawn
+  after it were opaque (magenta and black boxes). It is wrapped as the blob shadows are: the 2D blend kept around it.
+  (2) MGMoveFrameBuffImage (0x12F970) interleaves the two fields of the frame shown last into a 640 x 448 picture
+  ("frame_image"), the menus' darkened backdrop: it was black. The frame presented last is copied into that place's
+  target, sampled as 448 rows. (3) MGMoveImage out of the frame (the towns' MainDraw copies it each frame into a named
+  texture) is drawn into the destination's target 1:1 instead of being dropped.

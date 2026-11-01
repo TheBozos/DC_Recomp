@@ -1932,6 +1932,9 @@ namespace dc::native
         uint32_t g_frameBase = ~0u, g_backBase = ~0u;
         bool g_backAsked = false; // the getter the game called last (DC reports one base for both: the last one decides)
         std::unordered_map<uint32_t, uint8_t> g_targetOfBase;
+        // The rows a target's picture spans (its texels' v): the frame's 224, or 448 for a picture made from both fields
+        // (MGMoveFrameBuffImage).
+        float g_targetRows[8] = {224.0f, 224.0f, 224.0f, 224.0f, 224.0f, 224.0f, 224.0f, 224.0f};
         uint8_t targetFor(uint32_t base)
         {
             auto found = g_targetOfBase.find(base);
@@ -1941,6 +1944,7 @@ namespace dc::native
             for (auto it = g_targetOfBase.begin(); it != g_targetOfBase.end();)
                 it = it->second == n ? g_targetOfBase.erase(it) : std::next(it);
             ps2x::native::Renderer::instance().setTargetSize(n, 0, 0); // a new place: the window's size until told otherwise
+            g_targetRows[n] = 224.0f;
             return g_targetOfBase[base] = n;
         }
         // The renderer source for a place (0: not one of the game's own pictures); sets the material to sample it.
@@ -1957,7 +1961,7 @@ namespace dc::native
             material.textured = true;
             material.fromFrame = 1;
             material.frameWidth = 640;
-            material.frameHeight = 224;
+            material.frameHeight = static_cast<uint16_t>(material.source != 0u && material.source < 8u ? g_targetRows[material.source] : 224.0f);
             return true;
         }
         // A strip of four corners (v0 v1 v2, v1 v2 v3), textured with the record's texture when there is one.
@@ -1984,7 +1988,6 @@ namespace dc::native
                                  rd32(rdram, record + 4u) >> 16, made.source, c[0].x, c[0].y, c[3].x, c[3].y,
                                  c[0].u, c[0].v, c[3].u, c[3].v, c[0].rgba, static_cast<unsigned long long>(g_alpha2D));
                 material.frameWidth = 640;
-                material.frameHeight = 224;
                 material.blend = ps2x::native::blendOf(g_alpha2D);
                 material.depthTest = false;
                 material.depthWrite = false;
@@ -1994,7 +1997,7 @@ namespace dc::native
                     v.x = k.x;
                     v.y = k.y;
                     v.u = k.u / 640.0f; // the target's pixels are the texture's texels
-                    v.v = k.v / 224.0f;
+                    v.v = k.v / static_cast<float>(made.frameHeight);
                     v.rgba = k.rgba;
                     return v;
                 };
@@ -2437,8 +2440,27 @@ namespace dc::native
                 }
                 return 0u;
             };
-            const uint32_t src = recordAt(srcTex0), dst = recordAt(dstTex0);
             ++g_stats.textureCopies;
+            // Out of one of the game's own pictures (its frame: the towns copy it each frame) into a place: drawn into
+            // that place's target, 1:1.
+            ps2x::native::Material made;
+            const uint32_t dstBase = static_cast<uint32_t>(dstTex0 & 0x3FFFu);
+            if (sampleMade(static_cast<uint32_t>(srcTex0 & 0x3FFFu), made) && dstBase != g_frameBase && dstBase != g_backBase)
+            {
+                made.target = targetFor(dstBase);
+                made.blend = ps2x::native::Material::Blend::Opaque;
+                made.depthTest = false;
+                made.depthWrite = false;
+                made.clampU = made.clampV = true;
+                std::vector<ps2x::native::Vertex> vertices;
+                quad(vertices, kOriginX + static_cast<float>(dx), kOriginY + static_cast<float>(dy), kOriginX + static_cast<float>(dx + r.w),
+                     kOriginY + static_cast<float>(dy + r.h), 0.0f, 0x80808080u, static_cast<float>(r.x) / 640.0f,
+                     static_cast<float>(r.y) / made.frameHeight, static_cast<float>(r.x + r.w) / 640.0f,
+                     static_cast<float>(r.y + r.h) / made.frameHeight);
+                drawScreen(made, vertices);
+                return;
+            }
+            const uint32_t src = recordAt(srcTex0), dst = recordAt(dstTex0);
             if (src == 0u || dst == 0u)
             {
                 ++g_stats.textureCopiesMissed;
@@ -2766,6 +2788,32 @@ namespace dc::native
                              toA.x, toA.y, toA.w, toA.h, textureB, toB.x, toB.y, toB.w, toB.h);
         }
 
+        // MGMoveFrameBuffImage (0x12F970: a0 the destination's TEX0): the two fields of the frame shown last, interleaved
+        // line by line into a 640 x 448 picture (the menus' backdrop: "frame_image", drawn darkened behind them). The
+        // native frame is whole already: the frame presented last, copied into that place's target, as 448 rows.
+        void moveFrameBuffHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            ctx->pc = getRegU32(ctx, 31);
+            const uint32_t dstBase = static_cast<uint32_t>(rd64(rdram, getRegU32(ctx, 4)) & 0x3FFFu);
+            if (dstBase == g_frameBase || dstBase == g_backBase)
+                return;
+            ps2x::native::Material material;
+            material.target = targetFor(dstBase);
+            g_targetRows[material.target] = 448.0f;
+            material.textured = true;
+            material.fromFrame = 1;
+            material.source = ps2x::native::Material::kPreviousFrame;
+            material.frameWidth = 640;
+            material.frameHeight = 224;
+            material.blend = ps2x::native::Material::Blend::Opaque;
+            material.depthTest = false;
+            material.depthWrite = false;
+            material.clampU = material.clampV = true;
+            std::vector<ps2x::native::Vertex> vertices;
+            quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, 0.0f, 0x80808080u);
+            drawScreen(material, vertices);
+        }
+
         // SetClut (0x14C5A0: a1 the texture whose CBP takes the palette, a2 the palette).
         void setClutHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
@@ -2792,13 +2840,15 @@ namespace dc::native
         }
         // MGDrawShadow / MGDrawShadowFast / MGDrawShadowFast2 (0x1305F0 / 0x1303B0 / 0x1304D0): the characters' blob
         // shadows set their own ALPHA (0x2A) and restore the state with a prebuilt packet (sceVif1PkCall), which is not
-        // read: the 2D blend is kept as it was around them.
+        // read: the 2D blend is kept as it was around them. MGDrawShade (0x130760) sets ALPHA 0x2A for the shade it draws
+        // (DAT 0x1C75840 = 8) and leaves it: called by CMapObject::DrawShade directly (Georama, the towns' objects), the 2D
+        // drawn after it (the day clock, the hand cursor) came out opaque, their transparent texels magenta and black.
         struct ShadowCall
         {
             uint32_t address;
             PS2Runtime::RecompiledFunction original;
         };
-        ShadowCall g_shadowCalls[] = {{0x001305F0u, nullptr}, {0x001303B0u, nullptr}, {0x001304D0u, nullptr}};
+        ShadowCall g_shadowCalls[] = {{0x001305F0u, nullptr}, {0x001303B0u, nullptr}, {0x001304D0u, nullptr}, {0x00130760u, nullptr}};
         void blobShadowHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint64_t saved = g_alpha2D;
@@ -2985,6 +3035,7 @@ namespace dc::native
             }
             runtime.registerFunction(0x0012F430u, &stretchMoveHook);
             runtime.registerFunction(0x00162580u, &blendTextureHook);
+            runtime.registerFunction(0x0012F970u, &moveFrameBuffHook);
             if ((g_loadTm2 = runtime.lookupFunction(0x00154950u)))
                 runtime.registerFunction(0x00154950u, &loadTm2Hook);
             if ((g_loadTexture = runtime.lookupFunction(0x00154770u)))

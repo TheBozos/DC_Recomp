@@ -435,3 +435,11 @@ from the ELF's own symbols.
   switches and frameless leaves reached by pointer. Regenerated (scripts/iop_recomp.sh): MODHSYN 179, MODMIDI 53,
   PADMAN 205, SDRDRV 13, SIO2MAN 49 functions, none left to the interpreter; [iop:hw] reports 0 interpreted
   instructions after boot, 9 hardware register accesses in the whole run (boot), and EzMIDI's timer interrupt.
+- Norune's sky (2026-11-01): deep blue where PCSX2's is pale. The sky is three camera-following meshes: a gradient
+  (MDT 009d9e00, vertex colours deep blue to white, textured with "work" at 0x1A40: CT32, 640 wide, 1024 x 256, TCC 0,
+  modulate), a dome (its own 128 x 128 picture, mostly transparent) and cloud layers (0x1A40 as a 128 x 128 picture,
+  alpha-tested). PRMODE always enables blending (DrawVu1), the ALPHA is 0x44, and the lit colours match: the
+  difference is the gradient's texture. With no picture made at 0x1A40 that frame, it now reads the previous frame,
+  as GS memory holds it there: the upper sky is pale as in PCSX2 (the user compared live); the band above the hills
+  is still bluer than PCSX2's. DC_WORK_NOT_PREVIOUS=1 restores the untextured gradient; DC_SKIP_MDT=<hex> skips a
+  model; the frame dump prints each draw's ALPHA, TEX0, first vertex colour and lighting.

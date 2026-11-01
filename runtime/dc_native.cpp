@@ -1056,6 +1056,7 @@ namespace dc::native
         // coordinates (the positions when <= 0), + 0x38 the materials.
         uint32_t g_fogColour = 0; // FOGCOL as the models' DrawVu1 last set it (RenderInfo + 0x338): the 3D sprites' fog
         bool sampleMade(uint32_t base, ps2x::native::Material &material);
+        extern std::unordered_map<uint32_t, uint8_t> g_targetOfBase;
         void drawModel(const uint8_t *rdram, const Model &m, const Matrix &localToWorld, uint32_t renderInfo, bool drawn)
         {
             const uint32_t mdt = m.mdt;
@@ -1128,7 +1129,23 @@ namespace dc::native
                     material.source = 0;
                     madeU = madeV = 1.0f;
                     static const bool s_noMadeModels = std::getenv("DC_NO_MADE_MODELS") != nullptr; // diagnosis
-                    if (!s_noMadeModels && !texture && record != 0u && rd32(rdram, record + 0x38u) == 0u)
+                    // The towns' "work" (0x1A40: CT32, 640 wide, 1024 x 256), with no picture made there this frame, holds the
+                    // previous frame's pixels on the PS2 (matched against PCSX2; what the game last wrote there is not traced).
+                    // Norune's sky gradient (MDT 009d9e00, blue to white) is modulated by it: read as the previous frame, the
+                    // sky is pale as in PCSX2 (deep blue untextured), the band above the hills still bluer than PCSX2's.
+                    // DC_WORK_NOT_PREVIOUS=1 (diagnosis) leaves it untextured.
+                    static const bool s_workPrevious = std::getenv("DC_WORK_NOT_PREVIOUS") == nullptr;
+                    if (s_workPrevious && !texture && record != 0u && rd32(rdram, record + 0x38u) == 0u &&
+                        (material.tex0 & 0x3FFFu) == 0x1A40u && g_targetOfBase.find(0x1A40u) == g_targetOfBase.end())
+                    {
+                        material.fromFrame = 1;
+                        material.source = ps2x::native::Material::kPreviousFrame;
+                        material.frameWidth = 640;
+                        material.frameHeight = 224;
+                        madeU = static_cast<float>(1u << ((material.tex0 >> 26) & 0xFu)) / 640.0f;
+                        madeV = static_cast<float>(1u << ((material.tex0 >> 30) & 0xFu)) / 224.0f;
+                    }
+                    else if (!s_noMadeModels && !texture && record != 0u && rd32(rdram, record + 0x38u) == 0u)
                     {
                         ps2x::native::Material made;
                         if (sampleMade(static_cast<uint32_t>(material.tex0 & 0x3FFFu), made) && made.source != 0u)
@@ -1206,6 +1223,14 @@ namespace dc::native
                     }
                     v.rgba = shade(lighting, m.f(normals + ni * 16u), m.f(normals + ni * 16u + 4u),
                                    m.f(normals + ni * 16u + 8u), stride == 4u ? colour : nullptr);
+                    // The frame dump: a primitive's first vertex, its raw colour and the lighting it gets.
+                    if (g_dump2D && i == 0u)
+                        std::fprintf(stderr, "[dc:dump]     vertex colour %s (%g %g %g %g) material (%g %g %g %g) ambient (%g %g %g %g) light0 (%g %g %g %g) -> %08x\n",
+                                     stride == 4u ? "" : "none", stride == 4u ? colour[0] : 0.0f, stride == 4u ? colour[1] : 0.0f,
+                                     stride == 4u ? colour[2] : 0.0f, stride == 4u ? colour[3] : 0.0f, lighting.material[0],
+                                     lighting.material[1], lighting.material[2], lighting.material[3], lighting.ambient[0],
+                                     lighting.ambient[1], lighting.ambient[2], lighting.ambient[3], lighting.colour[0][0],
+                                     lighting.colour[0][1], lighting.colour[0][2], lighting.colour[0][3], v.rgba);
                     if (setup.fog)
                     {
                         const float *t = setup.toScreen.m;

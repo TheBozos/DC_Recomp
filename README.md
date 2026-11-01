@@ -42,7 +42,7 @@ not read at all (each ends at once), VU1 runs no microcode, and there is no GS p
 | VU1 programs not translated yet (screen-space sprites, particles, other effects) | not drawn (VU1 runs nothing) |
 | 2D routines not translated yet (some menus, the movies' frames, CDebugFont) | not drawn |
 | DMA channels other than VIF1 / GIF, EE kernel HLE, IPU (movies) | the runtime's hardware layer |
-| Reverb, the sound data input (streamed PCM) | not rendered yet by the native mixer (libsd's effect calls are accepted and kept) |
+| Noise, pitch modulation, the sound data input (streamed PCM) | not rendered yet by the native mixer |
 
 Known defects: cloth grids with runaway vertices (dropped by the guard band as the PS2 drops them, but the cloth
 simulation itself is not checked); the characters' shadow plane matched against PCSX2 rather than traced through the
@@ -63,7 +63,7 @@ menus not checked yet.
 | New game: name entry, the Dark Shrine opening (Colonel Flag summons the Genie) | ✅ |
 | Norune village: the opening scenes after the Dark Shrine | 🔧 |
 | First dungeon (Divine Beast Cave) | ⏳ |
-| Sound and music: the drivers native, libsd taken over by a native mixer (no SPU2); title music plays, reverb not yet | 🔧 |
+| Sound and music: the drivers native, libsd taken over by a native mixer (no SPU2); title music and effects play, with libsd's reverb | 🔧 |
 | Native frame loop (no vblank pacing): 60 fps on the PC clock | ✅ |
 | Memory card saves (save and load) | ✅ |
 | Linux build | ⏳ |

@@ -380,4 +380,10 @@ from the ELF's own symbols.
   timer interrupt it registers with intrman (GetHardTimerIntrCode + RegisterIntrHandler), which the IOP's timrman never
   raised, and its handler wakes its thread only when GetTimerStatus shows the "compare reached" bit (11), which
   timrman never returned. Both fixed in the fork. The title's music plays (peaks 6000-11000 from its 10th second).
-  Not yet: reverb, noise, pitch modulation, the sound data input (streamed PCM: movies?), and listening by ear.
+  Reverb (sceSdSetEffectAttr / GetEffectAttr / ClearEffectWorkArea, the effect-enable core attribute, the effect end
+  address): libsd's own preset table (LIBSD.IRX, 0x44-byte entries: a word, then the 32 reverb settings in 8-byte
+  units; the area sizes before it) and its echo/delay adjustments (delay moves mLSAME, mRSAME, dLSAME, mLCOMB1, mLAPF1,
+  mRAPF1; feedback x 258 is vWALL), run by the mixer at 24 kHz on delay lines in its sound memory below the effect
+  end. DC: mode 4 (large studio) on both groups, effect end 0x1FFFFF for group 0 and 0x1DFFFF for group 1, effect
+  volumes 0x2800 (effects) and 0x300 (music). Group 0's output is not sent into group 1's reverb.
+  Not yet: noise, pitch modulation, the sound data input (streamed PCM: movies?).

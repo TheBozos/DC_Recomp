@@ -20,6 +20,12 @@ set(PS2X_ENABLE_PARALLEL_GS OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(PS2Recomp)
 
+# The runner's icon and version information (runtime/app: The Bozos' clown dressed as Toan, no game art).
+if(WIN32)
+    enable_language(RC)
+    target_sources(ps2EntryRunner PRIVATE "${CMAKE_SOURCE_DIR}/runtime/app/dc.rc")
+endif()
+
 file(GLOB DC_GENERATED_SOURCES CONFIGURE_DEPENDS "${DC_GENERATED_DIR}/*.cpp")
 if(NOT DC_GENERATED_SOURCES)
     message(FATAL_ERROR

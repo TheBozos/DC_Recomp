@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/branding/dc_banner.png" alt="Dark Cloud, native PC port by The Bozos" width="100%">
+
 # DC_Recomp
 
 **A native Windows and Linux port of *Dark Cloud* (NTSC-U, `SCUS-97111`), made by statically recompiling the game's PlayStation 2 code to C++.**<br>

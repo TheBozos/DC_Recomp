@@ -965,9 +965,11 @@ namespace dc::native
                         ++g_stats.zNegative;
                 }
             ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
-            material.textured = setup.textureMapped && texture != nullptr;
+            material.textured = setup.textureMapped && (texture != nullptr || material.fromFrame != 0u);
             g_stats.triangles += vertices.size() / 3u;
-            if (material.textured)
+            if (material.textured && material.fromFrame != 0u)
+                renderer.draw(material, setup.toScreen.m, vertices.data(), static_cast<uint32_t>(vertices.size()));
+            else if (material.textured)
             {
                 ++g_stats.ownTextures;
                 renderer.draw(material, setup.toScreen.m, vertices.data(), static_cast<uint32_t>(vertices.size()), texture);
@@ -1023,6 +1025,7 @@ namespace dc::native
         // before), then per vertex the indices of its position, normal, texture coordinates and colour), + 0x30 texture
         // coordinates (the positions when <= 0), + 0x38 the materials.
         uint32_t g_fogColour = 0; // FOGCOL as the models' DrawVu1 last set it (RenderInfo + 0x338): the 3D sprites' fog
+        bool sampleMade(uint32_t base, ps2x::native::Material &material);
         void drawModel(const uint8_t *rdram, const Model &m, const Matrix &localToWorld, uint32_t renderInfo, bool drawn)
         {
             const uint32_t mdt = m.mdt;
@@ -1064,6 +1067,7 @@ namespace dc::native
             material.textured = false;
             material.depthTest = true;
             applyObjectState(g_objectState, material);
+            float madeU = 1.0f, madeV = 1.0f; // a made picture's texture coordinates (see the record lookup below)
             material.fog = setup.fog;
             material.fogColour = setup.fogColour;
             g_fogColour = setup.fogColour;
@@ -1086,6 +1090,26 @@ namespace dc::native
                     const uint32_t record = m.records && p < m.records->size() ? (*m.records)[p] : modelMaterialRecord(rdram, m, mat);
                     texture = record != 0u ? recordTexture(rdram, record) : nullptr;
                     material.tex0 = record != 0u ? rd64(rdram, record + 0x28u) : 0u;
+                    // A record without pixels of its own whose place holds a picture the game makes there (the towns'
+                    // "work": MainDraw copies the frame into it each frame, and a model piece under the ground samples it
+                    // through its own texture coordinates): that picture, its texels the frame's (640 x rows of the
+                    // record's 2^TW x 2^TH).
+                    material.fromFrame = 0;
+                    material.source = 0;
+                    madeU = madeV = 1.0f;
+                    if (!texture && record != 0u && rd32(rdram, record + 0x38u) == 0u)
+                    {
+                        ps2x::native::Material made;
+                        if (sampleMade(static_cast<uint32_t>(material.tex0 & 0x3FFFu), made) && made.source != 0u)
+                        {
+                            material.fromFrame = made.fromFrame;
+                            material.source = made.source;
+                            material.frameWidth = made.frameWidth;
+                            material.frameHeight = made.frameHeight;
+                            madeU = static_cast<float>(1u << ((material.tex0 >> 26) & 0xFu)) / static_cast<float>(made.frameWidth);
+                            madeV = static_cast<float>(1u << ((material.tex0 >> 30) & 0xFu)) / static_cast<float>(made.frameHeight);
+                        }
+                    }
                     // DC_PROBE_LEVELS=1 (diagnosis): each model record's TEX0, + 0x30 and level pointers, once.
                     static const bool s_probeLevels = std::getenv("DC_PROBE_LEVELS") != nullptr;
                     static std::unordered_map<uint32_t, bool> s_levelsSeen;
@@ -1114,6 +1138,8 @@ namespace dc::native
                                      record != 0u ? rd32(rdram, record) >> 16 : 0u, record != 0u ? rd32(rdram, record + 4u) & 0xFFFFu : 0u,
                                      record != 0u ? rd32(rdram, record + 0x4Cu) : 0u, record != 0u ? rd32(rdram, record + 0x38u) : 0u,
                                      record != 0u ? rd32(rdram, record + 0x48u) : 0u);
+                        std::fprintf(stderr, "[dc:untex]   used by %s at (%g %g %g), tex0 %016llx, uv scale %g\n", g_drawWhat, localToWorld.m[12],
+                                     localToWorld.m[13], localToWorld.m[14], static_cast<unsigned long long>(tex0), uvScale);
                     }
                 }
                 if (count == 0u || count > 65536u)
@@ -1130,8 +1156,8 @@ namespace dc::native
                     v.x = m.f(positions + pi * 16u);
                     v.y = m.f(positions + pi * 16u + 4u);
                     v.z = m.f(positions + pi * 16u + 8u);
-                    v.u = m.f(uvs + ti * 16u) * uvScale;
-                    v.v = m.f(uvs + ti * 16u + 4u) * uvScale;
+                    v.u = m.f(uvs + ti * 16u) * uvScale * madeU;
+                    v.v = m.f(uvs + ti * 16u + 4u) * uvScale * madeV;
                     float colour[4];
                     if (stride == 4u)
                     {

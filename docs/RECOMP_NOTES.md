@@ -367,3 +367,8 @@ from the ELF's own symbols.
 - Test runs from the user's save (2026-11-01): build/load.pad (Start at 20, 23, 24 s, then Cross every 3 s: the menu
   opens on CONTINUE when a save exists) loads straight into Norune. The card is game/mc0 (gitignored); a copy of the
   save is kept in build/saves.
+- Models sampling the game's own pictures (2026-11-01, unverified on screen): Norune has a model piece (MDT 009d9e00,
+  drawn three times a frame, 50 under the ground near the save's spot) textured with "work", a record without pixels at
+  TBP 0x1A40 (1024 x 256) that MainDraw fills each frame with a copy of the frame (MGMoveImage). It drew untextured;
+  it now samples that copy like the 2D does (Material::fromFrame + source), its texture coordinates scaled from the
+  record's 2^TW x 2^TH to the copy's 640 x 224. Not seen from the save's spot: to check where it shows (water?).

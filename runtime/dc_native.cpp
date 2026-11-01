@@ -477,6 +477,7 @@ namespace dc::native
 
         std::unordered_map<uint32_t, std::pair<uint64_t, std::shared_ptr<const ps2x::native::TextureCache::Texture>>> g_decoded;
         uint64_t g_textureVersion = 0;
+        bool g_dump2D = false; // the on-demand frame dump (drawStrip's [dc:dump])
         // DC_PROBE_SEQ=1 (diagnosis): each frame's draws in order, one letter each (C clear, Z clear Z, M model, s
         // sprite, P / F / T sprite of the previous frame / the frame / a target, S stretch), for frames with a stretch.
         std::string g_seq;
@@ -1310,6 +1311,11 @@ namespace dc::native
                           visual, rd32(rdram, visual + 8u), rd32(rdram, visual + 0x18u), mdt, model.copy ? "copy" : "live", program,
                           rd32(rdram, renderInfo + 0x310u));
             seq('M');
+            if (g_dump2D)
+            {
+                const Matrix world = load(rdram, localToWorld);
+                std::fprintf(stderr, "[dc:dump] %s shadow %u at (%g %g %g)\n", g_drawWhat, rd32(rdram, renderInfo + 0x320u), world.m[12], world.m[13], world.m[14]);
+            }
             drawModel(rdram, model, load(rdram, localToWorld), renderInfo, !shadow && !screenSpace);
             if (shadow)
                 noteShadow(rdram, model, load(rdram, localToWorld), renderInfo, false); // a model drawn in the shadow pass
@@ -1409,10 +1415,37 @@ namespace dc::native
         {
             const uint32_t mdt = m.mdt;
             ShadowDraw draw;
-            const Matrix clip = mul(mul(mul(load(rdram, renderInfo + 0x230u), load(rdram, renderInfo + 0x10u)),
-                                        load(rdram, renderInfo + 0x2D0u)),
-                                    localToWorld);
+            // DrawVu1's own projection for every shadow draw (its SetShadowData): clip x view x RenderInfo + 0x2D0 x the
+            // object. + 0x2D0 is the scene light's shadow matrix (EdSetLightParam in the towns): shadows are cast along the
+            // light, turning with the time of day. Its plane lies 12.8 below the shadow model's origin (its translation
+            // column, (-12.8 kx, -12.8, -12.8 kz)), and the characters' shadows landed a body's height below their feet, off
+            // the screen; PCSX2 shows them at the feet (short at noon, long and to one side at dusk). For MGDrawShadowFast /
+            // MGDrawShadow (+ 0x320 = 1 / 2) the plane is put through the model's origin, the feet. (Matched against PCSX2;
+            // the microprogram's own handling of the 12.8 is not traced. DrawVu1 copies + 0x2B0 / + 0x2C0, the point
+            // 12.8 lower and the normal DrawShadow gives, and does not use them.)
+            Matrix shadowMatrix = load(rdram, renderInfo + 0x2D0u);
+            if (const uint32_t mode = rd32(rdram, renderInfo + 0x320u); mode == 1u || mode == 2u)
+            {
+                shadowMatrix.m[12] = 0.0f;
+                shadowMatrix.m[13] = 0.0f;
+                shadowMatrix.m[14] = 0.0f;
+            }
+            static int s_logged = 0;
+            if (std::getenv("DC_PROBE_SHADOW") && s_logged++ < 6)
+                std::fprintf(stderr, "[dc:shadow] mode %u point (%g %g %g) normal (%g %g %g) local t (%g %g %g) 0x2D0 columns (%g %g %g %g | %g %g %g %g | %g %g %g %g | %g %g %g %g)\n",
+                             rd32(rdram, renderInfo + 0x320u), rdf(rdram, renderInfo + 0x2B0u), rdf(rdram, renderInfo + 0x2B4u), rdf(rdram, renderInfo + 0x2B8u),
+                             rdf(rdram, renderInfo + 0x2C0u), rdf(rdram, renderInfo + 0x2C4u), rdf(rdram, renderInfo + 0x2C8u), localToWorld.m[12], localToWorld.m[13],
+                             localToWorld.m[14], rdf(rdram, renderInfo + 0x2D0u), rdf(rdram, renderInfo + 0x2D4u), rdf(rdram, renderInfo + 0x2D8u),
+                             rdf(rdram, renderInfo + 0x2DCu), rdf(rdram, renderInfo + 0x2E0u), rdf(rdram, renderInfo + 0x2E4u), rdf(rdram, renderInfo + 0x2E8u),
+                             rdf(rdram, renderInfo + 0x2ECu), rdf(rdram, renderInfo + 0x2F0u), rdf(rdram, renderInfo + 0x2F4u), rdf(rdram, renderInfo + 0x2F8u),
+                             rdf(rdram, renderInfo + 0x2FCu), rdf(rdram, renderInfo + 0x300u), rdf(rdram, renderInfo + 0x304u), rdf(rdram, renderInfo + 0x308u),
+                             rdf(rdram, renderInfo + 0x30Cu));
+            const Matrix clip = mul(mul(mul(load(rdram, renderInfo + 0x230u), load(rdram, renderInfo + 0x10u)), shadowMatrix), localToWorld);
             draw.toScreen = mul(load(rdram, renderInfo + 0x270u), clip);
+            // The marks are depth-tested against the scene (endShadowHook); lying on the ground, they are pulled 0.05 %
+            // nearer (GS Z, larger nearer) so the ground's own depth does not hide them where the two are equal.
+            for (int c = 0; c < 4; ++c)
+                draw.toScreen.m[c * 4 + 2] *= 1.0005f;
             const uint32_t positions = mdt + m.u32(mdt + 0x10u);
             const uint32_t stride = static_cast<int32_t>(m.u32(mdt + 0x20u)) > 0 ? 4u : 3u;
             const uint32_t list = mdt + m.u32(mdt + 0x28u);
@@ -1449,8 +1482,21 @@ namespace dc::native
                             draw.vertices.push_back(vertex(indices, i + k));
             }
             clipDepth(clip, draw.vertices);
+            static int s_screenLogged = 0;
+            if (std::getenv("DC_PROBE_SHADOW") && !draw.vertices.empty() && (s_screenLogged++ % 2700) < 3)
+            {
+                const ps2x::native::Vertex &v = draw.vertices[0];
+                const float *t = draw.toScreen.m;
+                const float x = t[0] * v.x + t[4] * v.y + t[8] * v.z + t[12], y = t[1] * v.x + t[5] * v.y + t[9] * v.z + t[13];
+                const float w = t[3] * v.x + t[7] * v.y + t[11] * v.z + t[15];
+                std::fprintf(stderr, "[dc:shadow] mode %u vertex (%g %g %g) -> screen (%g %g) w %g, %zu vertices\n", rd32(rdram, renderInfo + 0x320u), v.x, v.y,
+                             v.z, w != 0.0f ? x / w : 0.0f, w != 0.0f ? y / w : 0.0f, w, draw.vertices.size());
+            }
             if (!draw.vertices.empty())
+            {
+                seq('D');
                 g_shadowDraws.push_back(std::move(draw));
+            }
         }
 
         // CVisualShadow::DrawVu1, taken over: no VU data, packet or VU1 program; its shadow model (the MDT at + 0x20)
@@ -1469,8 +1515,10 @@ namespace dc::native
                 noteShadow(rdram, shadowModel, load(rdram, localToWorld), renderInfo, true);
         }
 
+        void seq(char c);
         void beginShadowHook(uint8_t *, R5900Context *ctx, PS2Runtime *)
         {
+            seq('B');
             g_shadowDraws.clear();
             ctx->pc = getRegU32(ctx, 31);
         }
@@ -1480,16 +1528,44 @@ namespace dc::native
         // (an arm over the body) darken once, as on the PS2: drawn straight over the frame, each overlap darkened again
         // and the shadow showed the model's insides.
         uint8_t targetFor(uint32_t base);
+        extern std::unordered_map<uint32_t, uint8_t> g_targetOfBase;
         constexpr uint32_t kShadowWork = 0x80000210u; // the work texture (fbp 0x210), apart from the game's TEX0 bases
+        // A shadow pass ended: its marks and darkening wait for the end of the frame's 3D (layShadows from flushShadows,
+        // before the first 2D draw or at the frame's end). The game calls MGEndDrawShadow between its model draws (Norune:
+        // 11 models, the pass, 14 more, the ground among them), and laid there the shadow was drawn over by the ground;
+        // on the PS2 those models reach the GS before it. Depth-tested against the finished scene, the marks still leave
+        // out a character standing in front.
+        struct PendingShadows
+        {
+            uint32_t strength;
+            std::vector<ShadowDraw> draws;
+        };
+        std::vector<PendingShadows> g_pendingShadows;
         void endShadowHook(uint8_t *, R5900Context *ctx, PS2Runtime *)
         {
             const uint32_t strength = getRegU32(ctx, 4) & 0xFFu;
             ctx->pc = getRegU32(ctx, 31);
+            seq('E');
+            if (g_dump2D)
+                std::fprintf(stderr, "[dc:dump] shadow pass end, %zu shadow draws\n", g_shadowDraws.size());
             if (g_shadowDraws.empty())
                 return;
+            g_pendingShadows.push_back({strength, std::move(g_shadowDraws)});
+            g_shadowDraws.clear();
+        }
+        void layShadows(uint32_t strength, std::vector<ShadowDraw> &draws)
+        {
             ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
             static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
             const uint8_t work = targetFor(kShadowWork);
+            static int s_passLogged = 0;
+            if (std::getenv("DC_PROBE_SHADOW") && (s_passLogged++ % 300) == 0)
+            {
+                std::fprintf(stderr, "[dc:shadow] pass end: strength %u, %zu draws, work target %u; places:", strength, draws.size(), work);
+                for (const auto &[base, slot] : g_targetOfBase)
+                    std::fprintf(stderr, " %x->%u", base, slot);
+                std::fputc('\n', stderr);
+            }
             auto screenQuad = [](uint32_t rgba) {
                 std::vector<ps2x::native::Vertex> vertices;
                 auto vertex = [&](float x, float y, float u, float v) {
@@ -1513,14 +1589,17 @@ namespace dc::native
             mark.target = work;
             const std::vector<ps2x::native::Vertex> clear = screenQuad(0u);
             renderer.draw(mark, kIdentity, clear.data(), static_cast<uint32_t>(clear.size()));
-            for (ShadowDraw &draw : g_shadowDraws)
+            // The marks are depth-tested against the scene (the work target shares the frame's depth, as the GS's work
+            // texture shares its Z buffer): where a character stands in front of the ground, its depth hides the flattened
+            // shadow, the work texture stays unmarked and the character is not darkened.
+            mark.depthTest = true;
+            for (ShadowDraw &draw : draws)
             {
                 for (ps2x::native::Vertex &v : draw.vertices)
                     v.rgba = 0x80808080u; // marked: white, alpha 1
                 g_stats.shadowTriangles += draw.vertices.size() / 3u;
                 renderer.draw(mark, draw.toScreen.m, draw.vertices.data(), static_cast<uint32_t>(draw.vertices.size()));
             }
-            g_shadowDraws.clear();
             ps2x::native::Material lay;
             lay.textured = true;
             lay.fromFrame = 1;
@@ -1532,6 +1611,15 @@ namespace dc::native
             lay.depthWrite = false;
             const std::vector<ps2x::native::Vertex> over = screenQuad(strength << 24); // black, alpha = the strength
             renderer.draw(lay, kIdentity, over.data(), static_cast<uint32_t>(over.size()));
+        }
+        void flushShadows()
+        {
+            if (g_pendingShadows.empty())
+                return;
+            std::vector<PendingShadows> pending;
+            pending.swap(g_pendingShadows);
+            for (PendingShadows &pass : pending)
+                layShadows(pass.strength, pass.draws);
         }
 
         // DepthOfField (0x1652C0: a0 the focus, two depths; a1 its passes; a2 the blur's alpha; a3 a haze's strength),
@@ -1848,6 +1936,7 @@ namespace dc::native
                         std::shared_ptr<const ps2x::native::TextureCache::Texture> texture = nullptr)
         {
             static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+            flushShadows();
             ++g_frameWork.draws;
             if (!vertices.empty())
                 ps2x::native::Renderer::instance().draw(material, kIdentity, vertices.data(), static_cast<uint32_t>(vertices.size()),
@@ -1969,7 +2058,6 @@ namespace dc::native
         // A strip of four corners (v0 v1 v2, v1 v2 v3), textured with the record's texture when there is one.
         // D:/DC_Recomp/build/dump2d.flag present (diagnosis, checked every 30 frames): the next frame's 2D draws logged one
         // by one ([dc:dump]), then the flag removed.
-        bool g_dump2D = false;
         void drawStrip(const uint8_t *rdram, uint32_t record, const Corner (&c)[4], bool flat = false)
         {
             if (g_dump2D)
@@ -2065,13 +2153,18 @@ namespace dc::native
             material.nearest = spritesNearest(rdram);
             seq('s');
             const float tw = texture ? static_cast<float>(texture->width) : 1.0f, th = texture ? static_cast<float>(texture->height) : 1.0f;
+            // Sampled as they are, a piece's edge falls exactly on the boundary between two texels of its sheet (the GS
+            // samples at pixel corners, the GPU at pixel centres): a rounding then took the next piece's column (thin dark
+            // lines beside the menus' labels and tabs). The texture coordinates are pulled 1/32 texel inside the piece.
+            const float uMid = (c[0].u + c[3].u) * 0.5f, vMid = (c[0].v + c[3].v) * 0.5f;
+            const float inset = material.nearest ? 1.0f / 32.0f : 0.0f;
             std::vector<ps2x::native::Vertex> vertices;
             auto vertex = [&](const Corner &k) {
                 ps2x::native::Vertex v;
                 v.x = k.x;
                 v.y = k.y;
-                v.u = k.u / tw;
-                v.v = k.v / th;
+                v.u = (k.u + (k.u < uMid ? inset : k.u > uMid ? -inset : 0.0f)) / tw;
+                v.v = (k.v + (k.v < vMid ? inset : k.v > vMid ? -inset : 0.0f)) / th;
                 v.rgba = flat ? flatColour(k.rgba, k.rgba >> 8, k.rgba >> 16, k.rgba >> 24) : k.rgba;
                 return v;
             };
@@ -3197,6 +3290,7 @@ namespace dc::native
                 if (const uint64_t calls = hook.calls.exchange(0))
                     std::fprintf(stderr, "[dc:probe] %s: %llu calls\n", hook.name, static_cast<unsigned long long>(calls));
         }
+        flushShadows();
         renderer.endFrame();
         renderer.beginFrame(screen());
         g_clutOverride.clear();
@@ -3222,7 +3316,7 @@ namespace dc::native
         }
         g_frameWork = FrameWork{};
         static int s_seqLogged = 0;
-        if (!g_seq.empty() && g_seq.find('S') != std::string::npos && (s_seqLogged < 4 || s_frames % 300u == 0u))
+        if (!g_seq.empty() && (g_seq.find('S') != std::string::npos || g_seq.find('E') != std::string::npos) && (s_seqLogged < 4 || s_frames % 300u == 0u))
         {
             ++s_seqLogged;
             std::string runs;

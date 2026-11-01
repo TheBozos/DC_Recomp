@@ -353,3 +353,17 @@ from the ELF's own symbols.
   skipped (only the text, "gaiji", showed). Both are decoded right after the call (the pointers put in the record for
   the decode, the record restored) and kept; PSMT8H is decoded as PSMT8 (the texels are sent as plain 8-bit).
   An on-demand probe found it: D:/DC_Recomp/build/dump2d.flag makes the next frame log every 2D draw ([dc:dump]).
+- Shadows (2026-11-01). (1) The shadow pass ends between the game's model draws (Norune: the 11 map pieces, the pass,
+  then Toan's 14 pieces): its marks and darkening now wait for the end of the frame's 3D (flushShadows, before the
+  first 2D draw or at the frame's end) and the marks are depth-tested against the finished scene (the work target
+  shares the frame's depth), so a character in front of a shadow is not darkened (the house's shadow over Toan).
+  (2) Position: DrawVu1 projects every shadow with clip x view x RenderInfo + 0x2D0 x the object; + 0x2D0 is the scene
+  light's projection (EdSetLightParam), which turns with the time of day. Its plane lies 12.8 below the shadow model's
+  origin, so the characters' shadows landed a body's height below their feet (off the screen in the save's Norune
+  spot: GS y 2183-2191, the frame ending at 2160). PCSX2 shows them at the feet (short at noon, long to one side at
+  dusk): for MGDrawShadowFast / MGDrawShadow the plane is put through the model's origin. Matched against PCSX2; how
+  the microprogram handles the 12.8 is not traced (DrawVu1 copies + 0x2B0 / + 0x2C0 and does not use them).
+  (3) Diagnosis: DC_PROBE_SHADOW=1 (the pass, the vectors, where the shadow lands), DC_PROBE_SEQ=1 now with B / D / E.
+- Test runs from the user's save (2026-11-01): build/load.pad (Start at 20, 23, 24 s, then Cross every 3 s: the menu
+  opens on CONTINUE when a save exists) loads straight into Norune. The card is game/mc0 (gitignored); a copy of the
+  save is kept in build/saves.

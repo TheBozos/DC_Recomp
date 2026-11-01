@@ -400,3 +400,12 @@ from the ELF's own symbols.
   it: sceVu0ScaleVector took its scale from a2 whenever $f12 was 0 (the cloth's wind scaled by 0 became a huge
   push), and sceVu0Normalize / sceVu0InnerProduct counted w. They now do what libvu0 does (scale in $f12; xyz only,
   normalize's w = 0). DC_PROBE_CLOTH=1 prints a cloth's grid bounds, its far vertices and the guard's drops.
+- libvu0 stubs checked against the game's own libvu0 (2026-11-01): each stub compared with DC's code for it (SCUS
+  0x121588..0x122268). Fixed to match: RotMatrixX / Y / Z (29 calls in DC) use libvu0's own sine and cosine (the angle
+  folded to pi/2 - |angle|, a degree-9 polynomial, sin = +-sqrt(1 - cos^2)), not std::sin / cos: within 5e-4 inside
+  +-pi, no rotation below about 2e-4, mirrored or wild past +-pi, as on the console. Not called by DC but fixed for
+  other games: RotTransPers(N)'s mode was inverted (mode 0 converts all four x16); ClipScreen(3) and ClipAll tested a
+  guard band instead of libvu0's strict 0..4096 / min..max (w included) with its 0x40 / 0x80 flags; CameraMatrix and
+  NormalLightMatrix normalized with w; division by zero (DivVector, RotTransPers' w) gave 0 instead of the VU's largest
+  float; FTOI did not saturate. Left: DropShadowMatrix / ViewScreenMatrix dividing by an exact zero, and code that
+  reads VU0 registers a libvu0 call left behind (the stubs set none).

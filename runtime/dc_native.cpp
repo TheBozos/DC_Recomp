@@ -24,6 +24,7 @@
 #include "runtime/native/native_renderer.h"
 #include "runtime/native/native_vif1.h"
 
+#include <array>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -538,7 +539,7 @@ namespace dc::native
         struct StoredTexture
         {
             uint32_t width = 0, height = 0, offset = 0;
-            uint32_t texelHash = 0; // FNV-1a 32 of the first 4096 bytes of its texels in GS order (version 2; 0 unknown)
+            uint32_t texelHash = 0; // CRC-32 of all its texels in GS order (version 3; 0 unknown)
         };
         std::vector<uint8_t> g_store;
         std::unordered_map<std::string, std::vector<StoredTexture>> g_storeIndex;
@@ -551,6 +552,26 @@ namespace dc::native
             for (uint32_t i = 0; i < bytes; ++i)
                 hash = (hash ^ rdram[(address + i) & 0x1FFFFFFu]) * 0x01000193u;
             return hash;
+        }
+
+        // CRC-32 (the zlib one) of main memory: the store's texel CRC.
+        uint32_t crc32(const uint8_t *rdram, uint32_t address, uint32_t bytes)
+        {
+            static const auto table = [] {
+                std::array<uint32_t, 256> t{};
+                for (uint32_t i = 0; i < 256u; ++i)
+                {
+                    uint32_t c = i;
+                    for (int k = 0; k < 8; ++k)
+                        c = (c & 1u) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+                    t[i] = c;
+                }
+                return t;
+            }();
+            uint32_t crc = 0xFFFFFFFFu;
+            for (uint32_t i = 0; i < bytes; ++i)
+                crc = table[(crc ^ rdram[(address + i) & 0x1FFFFFFu]) & 0xFFu] ^ (crc >> 8);
+            return crc ^ 0xFFFFFFFFu;
         }
 
         void loadStore()
@@ -585,7 +606,7 @@ namespace dc::native
                 std::memcpy(&height, entry + 34, 2);
                 std::memcpy(&paletteHash, entry + 36, 4);
                 std::memcpy(&texture.offset, entry + 40, 4);
-                if (version >= 2u)
+                if (version >= 3u) // version 2's hash covered the first 4096 bytes only, alike in many pictures
                     std::memcpy(&texture.texelHash, entry + 44, 4);
                 texture.width = width;
                 texture.height = height;
@@ -667,7 +688,7 @@ namespace dc::native
             // them): the one whose texels are the record's (as EnterTexture left them, in GS order), else the one of the
             // record's width and height, else of its texel count.
             const uint32_t pixels = rd32(rdram, record + 0x38u);
-            const uint32_t texelHash = pixels != 0u ? fnv1a32(rdram, pixels, std::min(4096u, w * h)) : 0u;
+            const uint32_t texelHash = pixels != 0u ? crc32(rdram, pixels, w * h) : 0u;
             uint32_t best = 0;
             auto consider = [&](const StoredTexture &candidate) {
                 if (candidate.width * candidate.height != w * h)
@@ -702,6 +723,14 @@ namespace dc::native
                 std::fprintf(stderr, "[dc:native] texture \"%s\" %ux%u palette %08x not in the store%s\n", name, w, h, paletteHash,
                              stored ? ": its indices with the record's palette" : "");
             }
+            // A version 2 store and no picture of the name with the record's texels: the one taken is a guess.
+            if (stored && best < 4u && texelHash != 0u && stored->texelHash != 0u)
+                if (static std::unordered_map<std::string, bool> s_guessed; !s_guessed[std::string(name) + '|' + std::to_string(texelHash)])
+                {
+                    s_guessed[std::string(name) + '|' + std::to_string(texelHash)] = true;
+                    std::fprintf(stderr, "[dc:native] texture \"%s\" %ux%u: no stored picture has its texels (%08x), %ux%u taken\n", name, w,
+                                 h, texelHash, stored->width, stored->height);
+                }
             return stored;
         }
 
@@ -2829,6 +2858,7 @@ namespace dc::native
         // a copy MGMoveImage made into them. Places are shared (Toan's face and a piece of his house), and the game sends
         // a group's textures again before drawing them: a copy into the face's place must patch the face, and is undone
         // for whatever record is sent there next.
+        uint64_t g_publishedFrames = 0; // frames published (publish)
         constexpr uint64_t kTexturePlace = 0x3FFFull | 0x3Full << 20; // TBP0, PSM
         std::unordered_map<uint64_t, uint32_t> g_resident;
         std::unordered_set<uint32_t> g_patchedRecords;
@@ -2855,6 +2885,107 @@ namespace dc::native
                 if (g_patchedRecords.erase(record) != 0u)
                     g_decoded.erase(record); // its own texels again
             }
+        }
+        // TexAnime (0x167170: a0 the CTextureAnime, a1 the group): DC_PROBE_COPIES=1 also logs each slot's keyframe (this +
+        // 0x120 + slot x 4: kind, frames to hold (< 0 for ever), source rectangle, next) and its frame count (+ 0x180)
+        // whenever the keyframe changes, and every 600 calls.
+        PS2Runtime::RecompiledFunction g_texAnime = nullptr;
+        void texAnimeHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            static const bool s_probe = std::getenv("DC_PROBE_COPIES") != nullptr;
+            if (s_probe)
+            {
+                const uint32_t anime = getRegU32(ctx, 4);
+                static std::unordered_map<uint64_t, uint32_t> s_last;
+                static uint32_t s_calls = 0;
+                const bool every = ++s_calls % 600u == 0u;
+                for (uint32_t slot = 0; slot < 0x18u; ++slot)
+                {
+                    const uint32_t entry = rd32(rdram, anime + 0x120u + slot * 4u);
+                    if (rd32(rdram, anime + slot * 4u) == 0u || entry == 0u)
+                        continue;
+                    uint32_t &last = s_last[static_cast<uint64_t>(anime) << 8 | slot];
+                    if (last == entry && !every)
+                        continue;
+                    last = entry;
+                    auto h = [&](uint32_t offset) { return static_cast<int>(static_cast<int16_t>(rd32(rdram, entry + offset) & 0xFFFFu)); };
+                    std::fprintf(stderr, "[dc:texanime] frame %llu anime %08x group %d slot %u: entry %08x kind %d hold %d chain %d group %d/%d rect (%d,%d %dx%d) to %d,%d next %08x first %08x count %d\n",
+                                 static_cast<unsigned long long>(g_publishedFrames), anime, static_cast<int>(getRegU32(ctx, 5)), slot, entry, h(0), h(4),
+                                 h(6), h(8), h(0x20), h(0x38), h(0x3A), h(0x3C), h(0x3E), h(0x40), h(0x42), rd32(rdram, entry + 0x54u),
+                                 rd32(rdram, anime + 0x60u + slot * 4u), static_cast<int>(rd32(rdram, anime + 0x180u + slot * 4u)));
+                }
+            }
+            g_texAnime(rdram, ctx, runtime);
+        }
+        // CTextureAnime's Enable (0x167B40) / Disable (0x167B80) (a0 the anime, a1 the slot), DisableAll (0x167AE0) and
+        // CCharacter's TexAnimeOn (0x138080) / TexAnimeOff (0x1380B0) (a0 the character, a1 the slot) / ClearTexAnime
+        // (0x138020): DC_PROBE_COPIES=1
+        // logs each call with its caller, and the first time an anime is enabled, every slot's first keyframe.
+        PS2Runtime::RecompiledFunction g_animeCalls[6] = {};
+        constexpr uint32_t kAnimeCallAddress[6] = {0x00167B40u, 0x00167B80u, 0x00167AE0u, 0x00138080u, 0x001380B0u, 0x00138020u};
+        constexpr const char *kAnimeCallName[6] = {"Enable", "Disable", "DisableAll", "CCharacter::TexAnimeOn", "CCharacter::TexAnimeOff",
+                                                   "CCharacter::ClearTexAnime"};
+        template <int N>
+        void animeCallHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            static const bool s_probe = std::getenv("DC_PROBE_COPIES") != nullptr;
+            if (s_probe)
+            {
+                const uint32_t self = getRegU32(ctx, 4);
+                std::fprintf(stderr, "[dc:texanime] frame %llu %s(%08x, %d) from %08x\n", static_cast<unsigned long long>(g_publishedFrames),
+                             kAnimeCallName[N], self, static_cast<int>(getRegU32(ctx, 5)), getRegU32(ctx, 31));
+                static std::unordered_set<uint32_t> s_listed;
+                if (N == 0 && s_listed.insert(self).second)
+                    for (uint32_t slot = 0; slot < 0x18u; ++slot)
+                    {
+                        uint32_t entry = rd32(rdram, self + 0x60u + slot * 4u);
+                        if (entry == 0u)
+                            continue;
+                        std::fprintf(stderr, "[dc:texanime]   slot %u:", slot);
+                        for (int k = 0; k < 12 && entry != 0u; ++k, entry = rd32(rdram, entry + 0x54u))
+                        {
+                            auto h = [&](uint32_t offset) { return static_cast<int>(static_cast<int16_t>(rd32(rdram, entry + offset) & 0xFFFFu)); };
+                            std::fprintf(stderr, " [kind %d hold %d chain %d (%d,%d %dx%d) to %d,%d]", h(0), h(4), h(6), h(0x38), h(0x3A), h(0x3C),
+                                         h(0x3E), h(0x40), h(0x42));
+                        }
+                        std::fprintf(stderr, "\n");
+                    }
+            }
+            g_animeCalls[N](rdram, ctx, runtime);
+        }
+        // CActionSeq::Play (0x1554A0: a0 the sequence; + 0x33 x 4 its character): DC_PROBE_COPIES=1 logs the sequence's
+        // texture-anime queue (+ 0x2F x 4, ACT_SEQ entries: type 0xF, + 4 frames, + 0x10 slot, + 0x14 on, + 0x18 off at
+        // the end, next at + 0x0C?) whenever its head changes, with its run flag (+ 0x17 x 4) and wait (+ 0x18 x 4).
+        PS2Runtime::RecompiledFunction g_actionSeqPlay = nullptr;
+        void actionSeqPlayHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            static const bool s_probe = std::getenv("DC_PROBE_COPIES") != nullptr;
+            if (s_probe)
+            {
+                const uint32_t seq = getRegU32(ctx, 4);
+                static std::unordered_map<uint32_t, uint32_t> s_head;
+                const uint32_t head = rd32(rdram, seq + 0x2Fu * 4u);
+                if (s_head[seq] != head)
+                {
+                    s_head[seq] = head;
+                    std::fprintf(stderr, "[dc:actseq] frame %llu seq %08x chara %08x run %d wait %d count %d texanime queue:",
+                                 static_cast<unsigned long long>(g_publishedFrames), seq, rd32(rdram, seq + 0x33u * 4u),
+                                 static_cast<int>(rd32(rdram, seq + 0x17u * 4u)), static_cast<int>(rd32(rdram, seq + 0x18u * 4u)),
+                                 static_cast<int>(rd32(rdram, seq + 0x11u * 4u)));
+                    for (int k = 0; k < 16 && head != 0u; ++k)
+                    {
+                        const uint32_t e = k == 0 ? head : 0u;
+                        if (e == 0u)
+                            break;
+                        std::fprintf(stderr, " [%08x: type %d frames %d slot %d on %d off-at-end %d | %08x %08x %08x %08x]", e,
+                                     static_cast<int>(rd32(rdram, e)), static_cast<int>(rd32(rdram, e + 4u)), static_cast<int>(rd32(rdram, e + 0x10u)),
+                                     static_cast<int>(rd32(rdram, e + 0x14u)), static_cast<int>(rd32(rdram, e + 0x18u)), rd32(rdram, e + 8u),
+                                     rd32(rdram, e + 0xCu), rd32(rdram, e + 0x1Cu), rd32(rdram, e + 0x20u));
+                    }
+                    std::fprintf(stderr, "\n");
+                }
+            }
+            g_actionSeqPlay(rdram, ctx, runtime);
         }
         void moveImageHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
@@ -2912,6 +3043,13 @@ namespace dc::native
                 std::fprintf(stderr, "[dc:dump] texture copy (%d,%d %dx%d) from %08x \"%.16s\" (first at its place %08x) to %08x \"%.16s\" (first %08x) at %d,%d\n",
                              r.x, r.y, r.w, r.h, src, src != 0u ? reinterpret_cast<const char *>(rdram + ((src + 8u) & 0x1FFFFFFu)) : "", recordAt(srcTex0), dst,
                              dst != 0u ? reinterpret_cast<const char *>(rdram + ((dst + 8u) & 0x1FFFFFFu)) : "", recordAt(dstTex0), dx, dy);
+            // DC_PROBE_COPIES=1 (diagnosis): every copy between two records (the face expressions), with the frame.
+            static const bool s_probeCopies = std::getenv("DC_PROBE_COPIES") != nullptr;
+            if (s_probeCopies && src != 0u && dst != 0u)
+                std::fprintf(stderr, "[dc:copies] frame %llu: (%d,%d %dx%d) of \"%.16s\" %08x to \"%.16s\" %08x at %d,%d\n",
+                             static_cast<unsigned long long>(g_publishedFrames), r.x, r.y, r.w, r.h,
+                             reinterpret_cast<const char *>(rdram + ((src + 8u) & 0x1FFFFFFu)), src,
+                             reinterpret_cast<const char *>(rdram + ((dst + 8u) & 0x1FFFFFFu)), dst, dx, dy);
             if (g_toggles.noCopies)
                 return;
             if (src == 0u || dst == 0u)
@@ -2976,6 +3114,19 @@ namespace dc::native
                 // The source, the destination before and after, as PAM files (RGBA, alpha as the GS has it).
                 static uint32_t s_copyDump = 0;
                 const uint32_t n = s_copyDump++ % 8u;
+                // And the source's texels as the game holds them (GS order for a store picture), with its record's width
+                // and height, for comparing with the store offline.
+                {
+                    const uint32_t w = rd32(rdram, src) >> 16, h = rd32(rdram, src + 4u) & 0xFFFFu, pixels = rd32(rdram, src + 0x38u);
+                    char path[96];
+                    std::snprintf(path, sizeof(path), "D:/DC_Recomp/build/copy%u_src_%ux%u.raw", n, w, h);
+                    if (FILE *out = pixels != 0u && w * h <= 0x100000u ? std::fopen(path, "wb") : nullptr)
+                    {
+                        for (uint32_t i = 0; i < w * h; ++i)
+                            std::fputc(rdram[(pixels + i) & 0x1FFFFFFu], out);
+                        std::fclose(out);
+                    }
+                }
                 const std::pair<const char *, const ps2x::native::TextureCache::Texture *> pictures[] = {
                     {"from", from.get()}, {"to", to.get()}, {"patched", patched.get()}};
                 for (const auto &[what, picture] : pictures)
@@ -3761,6 +3912,15 @@ namespace dc::native
                 runtime.registerFunction(address, &sprite3DHook);
             runtime.registerFunction(0x00171210u, &drawLineHook);
             runtime.registerFunction(0x0012F210u, &moveImageHook);
+            if ((g_actionSeqPlay = runtime.lookupFunction(0x001554A0u)))
+                runtime.registerFunction(0x001554A0u, &actionSeqPlayHook);
+            if ((g_texAnime = runtime.lookupFunction(0x00167170u)))
+                runtime.registerFunction(0x00167170u, &texAnimeHook);
+            const PS2Runtime::RecompiledFunction animeHooks[6] = {&animeCallHook<0>, &animeCallHook<1>, &animeCallHook<2>, &animeCallHook<3>,
+                                                                  &animeCallHook<4>, &animeCallHook<5>};
+            for (int k = 0; k < 6; ++k)
+                if ((g_animeCalls[k] = runtime.lookupFunction(kAnimeCallAddress[k])))
+                    runtime.registerFunction(kAnimeCallAddress[k], animeHooks[k]);
             if ((g_reloadTexture = runtime.lookupFunction(0x00133070u)))
                 runtime.registerFunction(0x00133070u, &reloadTextureHook);
             runtime.registerFunction(0x00151AD0u, &balloonHook);
@@ -3807,6 +3967,7 @@ namespace dc::native
         if (!g_enabled)
             return;
         ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+        ++g_publishedFrames;
         static uint32_t s_frames = 0;
         if (++s_frames % 300u == 0u)
         {

@@ -13,17 +13,19 @@ startup, keyed by the record's name, size and palette.
 
   tools/dc_texconv.py <game dir with DATA.HD2 / DATA.DAT> <output file, e.g. build/textures/dc_textures.bin>
 
-Store: "DCTX", version 2, count; per texture: name (32 bytes), width, height (u16), palette hash (u32, FNV-1a 32 of
-the 1024 palette bytes as the disc holds them, as EnterTexture copies them into the record), offset (u32), texel hash
-(u32, FNV-1a 32 of the first 4096 bytes of the texels in GS order, as EnterTexture leaves them in main memory: one
-name can hold many pictures with the same palette and size, Toan's expression sheets), then at the offset the palette
-as RGBA8 (256 x 4, alpha 0x80 = 255, CSM1 entry order resolved) and width x height indices.
+Store: "DCTX", version 3, count; per texture: name (32 bytes), width, height (u16), palette hash (u32, FNV-1a 32 of
+the 1024 palette bytes as the disc holds them, as EnterTexture copies them into the record), offset (u32), texel CRC
+(u32, CRC-32 of all the texels in GS order, as EnterTexture leaves them in main memory: one name can hold many
+pictures with the same palette and size, 14 of Toan's 256 x 128 expression sheets among them, all alike in their
+first rows), then at the offset the palette as RGBA8 (256 x 4, alpha 0x80 = 255, CSM1 entry order resolved) and
+width x height indices.
 Generated from the user's disc: never committed.
 """
 import struct
 import sys
+import zlib
 
-from gs_layout import twiddled8_head, untwiddle8
+from gs_layout import twiddled8, untwiddle8
 
 
 def fnv1a32(data):
@@ -110,19 +112,18 @@ def main():
                 if not texture:
                     continue
                 width, height, palette_hash, palette, indices = texture
-                head = min(4096, width * height)
-                texel_hash = fnv1a32(indices[:head] if twiddled else twiddled8_head(indices, width, height, head))
+                texel_hash = zlib.crc32(indices if twiddled else twiddled8(indices, width, height))
                 if twiddled:
                     # IM2: the texels are in GS memory order on the disc (EnterIMGFile passes EnterTexture its "already
                     # converted" flag for that magic, and EnterTexture copies them instead of running Conv8to32).
                     indices = untwiddle8(indices, width, height)
-                key = (name, width, height, palette_hash, fnv1a32(indices[:4096]))
+                key = (name, width, height, palette_hash, texel_hash)
                 if key in seen:
                     continue
                 seen.add(key)
                 store.append((name, width, height, palette_hash, texel_hash, palette, indices))
     with open(out, 'wb') as f:
-        f.write(struct.pack('<4sII', b'DCTX', 2, len(store)))
+        f.write(struct.pack('<4sII', b'DCTX', 3, len(store)))
         offset = 12 + len(store) * 48
         for name, width, height, palette_hash, texel_hash, palette, indices in store:
             f.write(struct.pack('<32sHHIII', name, width, height, palette_hash, offset, texel_hash))

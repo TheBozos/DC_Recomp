@@ -481,3 +481,15 @@ from the ELF's own symbols.
   PCSX2 live: the jaw is back. Regenerate the store: python tools/dc_texconv.py game build/textures/dc_textures.bin.
   Toggles nocopies (no MGMoveImage patches) and opaquemodels (models drawn without blending); the frame dump writes
   each copy's source, destination and result to build/copy<n>_{from,to,patched}.pam.
+- Toan's expression (2026-11-01): with the jaw back, the same scene showed a closed mouth where PCSX2 shows him
+  surprised. The event's action sequence (CActionSeq::Play) turns on the face's texture-anime slot 2 (hold -1), as on
+  the PS2, and the character draw runs ReloadTexture, TexAnime's copies, then the model, so the copy does show. The
+  sheet was wrong: the disc has 14 different 256 x 128 pictures with Toan's palette, all alike in their first rows,
+  and the converter dropped all but one as duplicates (its key hashed the first 4096 indices), which the version 2
+  texel hash (also 4096 bytes) could not tell apart. Store version 3 keys every picture by a CRC-32 of all its texels
+  in GS order (IMG pictures through gs_layout.twiddled8, the offline forward of Conv8to32, checked against 60 IM2
+  pictures of 32 sizes); the adapter takes the picture with the record's CRC. 3501 pictures (was 3458); the user
+  compared live: the right expression. Version 2 stores are read without their hash (rebuild the store).
+  DC_PROBE_COPIES=1 logs every texture copy, each TexAnime slot's keyframe, Enable / Disable / TexAnimeOn / Off /
+  ClearTexAnime calls with their caller, and each action sequence's texture-anime queue; the frame dump also writes
+  each copy source's texels as the game holds them (build/copy<n>_src_<w>x<h>.raw).

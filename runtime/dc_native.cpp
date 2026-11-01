@@ -967,6 +967,28 @@ namespace dc::native
             ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
             material.textured = setup.textureMapped && (texture != nullptr || material.fromFrame != 0u);
             g_stats.triangles += vertices.size() / 3u;
+            // The frame dump: what each draw sends after the guard band and culling (its colours' and fog's ranges, its
+            // blend and tests), for a draw that is there but not seen.
+            if (g_dump2D)
+            {
+                uint32_t lo = 0xFFFFFFFFu, hi = 0u;
+                float fogLo = 1e9f, fogHi = -1e9f;
+                for (const ps2x::native::Vertex &v : vertices)
+                {
+                    for (uint32_t b = 0; b < 32u; b += 8u)
+                    {
+                        const uint32_t c = (v.rgba >> b) & 0xFFu;
+                        lo = (lo & ~(0xFFu << b)) | (std::min(c, (lo >> b) & 0xFFu) << b);
+                        hi = (hi & ~(0xFFu << b)) | (std::max(c, (hi >> b) & 0xFFu) << b);
+                    }
+                    fogLo = std::min(fogLo, v.fog);
+                    fogHi = std::max(fogHi, v.fog);
+                }
+                std::fprintf(stderr, "[dc:dump]   %zu triangles, rgba %08x..%08x (a.b.g.r), fog %s %.2f..%.2f, blend %d test %d/%u depth %d/%d, %s\n",
+                             vertices.size() / 3u, lo, hi, material.fog ? "on" : "off", fogLo, fogHi, static_cast<int>(material.blend),
+                             material.alphaTest ? 1 : 0, material.alphaRef, material.depthTest ? 1 : 0, material.depthWrite ? 1 : 0,
+                             material.textured ? (material.fromFrame != 0u ? "frame" : "textured") : "untextured");
+            }
             if (material.textured && material.fromFrame != 0u)
                 renderer.draw(material, setup.toScreen.m, vertices.data(), static_cast<uint32_t>(vertices.size()));
             else if (material.textured)
@@ -1617,6 +1639,7 @@ namespace dc::native
             ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
             static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
             const uint8_t work = targetFor(kShadowWork);
+            renderer.setTargetSharesDepth(work, true); // the marks are depth-tested against the characters
             static int s_passLogged = 0;
             if (std::getenv("DC_PROBE_SHADOW") && (s_passLogged++ % 300) == 0)
             {
@@ -2094,6 +2117,7 @@ namespace dc::native
             for (auto it = g_targetOfBase.begin(); it != g_targetOfBase.end();)
                 it = it->second == n ? g_targetOfBase.erase(it) : std::next(it);
             ps2x::native::Renderer::instance().setTargetSize(n, 0, 0); // a new place: the window's size until told otherwise
+            ps2x::native::Renderer::instance().setTargetSharesDepth(n, false); // and a depth of its own
             g_targetRows[n] = 224.0f;
             return g_targetOfBase[base] = n;
         }
@@ -2807,6 +2831,21 @@ namespace dc::native
             shape.depthTest = false;
             shape.depthWrite = false;
             shape.target = balloon;
+            // DC_PROBE_BALLOON=1 (diagnosis): each balloon's fields and what is drawn, every 60th.
+            static const bool s_probe = std::getenv("DC_PROBE_BALLOON") != nullptr;
+            static uint32_t s_calls = 0;
+            if (s_probe && s_calls++ % 60u == 0u)
+            {
+                float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
+                for (const ps2x::native::Vertex &v : vertices)
+                {
+                    lo[0] = std::min(lo[0], v.x), hi[0] = std::max(hi[0], v.x);
+                    lo[1] = std::min(lo[1], v.y), hi[1] = std::max(hi[1], v.y);
+                }
+                std::fprintf(stderr, "[dc:balloon] cls %08x type %d t %g size %d x %d (%g x %g) from (%d %d) to (%d %d) top %d tail %d: %zu vertices x %.0f..%.0f y %.0f..%.0f target %u\n",
+                             cls, type, t, i32(0x4C), i32(0x50), fw, fh, i32(0x3C), i32(0x40), i32(0x44), i32(0x48), top, i32(0x58),
+                             vertices.size(), lo[0], hi[0], lo[1], hi[1], balloon);
+            }
             drawScreen(shape, vertices);
         }
 

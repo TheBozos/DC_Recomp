@@ -409,3 +409,9 @@ from the ELF's own symbols.
   NormalLightMatrix normalized with w; division by zero (DivVector, RotTransPers' w) gave 0 instead of the VU's largest
   float; FTOI did not saturate. Left: DropShadowMatrix / ViewScreenMatrix dividing by an exact zero, and code that
   reads VU0 registers a libvu0 call left behind (the stubs set none).
+- Empty speech balloons (2026-11-01): since offscreen targets of the frame's size shared the frame's depth (for the
+  shadow pass), the balloons' target (fukidashibase) showed nothing: the dialogue's text was drawn over the scene with
+  no balloon (the key-hole notice, the Mayor). Sharing is now asked per target (Renderer::setTargetSharesDepth): only
+  the shadow pass's work target shares; every other place gets a depth of its own (targetFor), and a target that
+  shared gets its own depth back before raylib unloads it (raylib deletes the depth attached to a framebuffer it
+  unloads, which was the frame's). DC_PROBE_BALLOON=1 prints the balloons' fields and shapes.

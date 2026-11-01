@@ -493,3 +493,10 @@ from the ELF's own symbols.
   DC_PROBE_COPIES=1 logs every texture copy, each TexAnime slot's keyframe, Enable / Disable / TexAnimeOn / Off /
   ClearTexAnime calls with their caller, and each action sequence's texture-anime queue; the frame dump also writes
   each copy source's texels as the game holds them (build/copy<n>_src_<w>x<h>.raw).
+- The more-text triangle (2026-11-01): DrawMesWin draws "syst04" (16 x 16, CT32, TBW 1) centred under the last line,
+  blinking. It showed as a flat sliver on the last line: recordTexture read a texture's rows TBW x 64 texels apart,
+  but ReloadTexture sends level 0 with LoadImage (0x132E90) as a w x h rectangle (its 9th / 10th arguments), so in
+  main memory the rows are packed at the record's own width. A texture narrower than its buffer kept every fourth
+  row (16 of 64): the triangle's rows 0, 4, 8, 12. Rows are now read at the record's width; any texture narrower
+  than 64 texels (128 for 8-bit) decoded wrong before. The user compared live: the triangle is right.
+  DC_PROBE_COPIES=1 also logs the triangle's corners and writes its texture (build/syst04.pam).

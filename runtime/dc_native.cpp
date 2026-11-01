@@ -826,7 +826,11 @@ namespace dc::native
             texture->version = ++g_textureVersion;
             ++g_frameWork.decodes;
             g_frameWork.decodedTexels += static_cast<uint64_t>(texture->width) * texture->height;
-            const uint32_t rowTexels = tbw * 64u;
+            // Rows as ReloadTexture sends them (LoadImage, 0x132E90: a w x h rectangle into the place, its buffer TBW x 64
+            // wide): packed at the record's own width in main memory. They were read TBW x 64 apart, and every texture
+            // narrower than its buffer lost rows (the message windows' 16 x 16 more-text triangle kept its rows 0, 4, 8,
+            // 12, squashed into its top quarter).
+            const uint32_t rowTexels = w != 0u ? w : tbw * 64u;
             const uint32_t bitsPerTexel = psm == 0x13u ? 8u : psm == 0x14u ? 4u : psm == 0x01u ? 24u : 32u;
             const uint32_t rows = bytes * 8u / (rowTexels * bitsPerTexel);
             // Texel alpha as the GS has it (0x80 is 1.0): the renderer scales it by 255 / 128, as the GS's blending reads
@@ -2282,6 +2286,7 @@ namespace dc::native
         // the source rectangle in texels, the colours. Each is a sprite or a 4-vertex strip with PRIM ABE (the ALPHA
         // the game last set: setAlphaFlag / MGSetGsALPHA), Z test ALWAYS, no Z write. The CRect is (x, y, w, h).
         uint64_t g_alpha2D = 0x44; // (Cs - Cd) As + Cd
+        uint64_t g_publishedFrames = 0; // frames published (publish)
         // The game's gp (SetEnv's, each frame). The sprite routines write TEX1 = linear << 5 | 0x41: MMAG from the
         // game's linear (gp - 0x7908), 0 nearest; MMIN 1 (linear, but the 2D is drawn 1:1).
         uint32_t g_gp = 0;
@@ -2349,6 +2354,30 @@ namespace dc::native
         {
             if (g_toggles.no2D)
                 return;
+            // DC_PROBE_COPIES=1 (diagnosis): the message windows' more-text triangle ("syst04"), each change of its
+            // corners, and its decoded texture once (build/syst04.pam).
+            static const bool s_probeTriangle = std::getenv("DC_PROBE_COPIES") != nullptr;
+            if (s_probeTriangle && record != 0u && std::strncmp(reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)), "syst04", 7) == 0)
+            {
+                static float s_last[4] = {};
+                if (s_last[0] != c[0].x || s_last[1] != c[0].y || s_last[2] != c[3].x || s_last[3] != c[3].y)
+                {
+                    s_last[0] = c[0].x, s_last[1] = c[0].y, s_last[2] = c[3].x, s_last[3] = c[3].y;
+                    std::fprintf(stderr, "[dc:triangle] frame %llu (%.1f %.1f)-(%.1f %.1f) uv (%.0f %.0f)-(%.0f %.0f) rgba %08x tex0 %016llx\n",
+                                 static_cast<unsigned long long>(g_publishedFrames), c[0].x, c[0].y, c[3].x, c[3].y, c[0].u, c[0].v, c[3].u, c[3].v,
+                                 c[0].rgba, static_cast<unsigned long long>(rd64(rdram, record + 0x28u)));
+                }
+                static bool s_written = false;
+                if (!s_written)
+                    if (const auto texture = recordTexture(rdram, record))
+                        if (FILE *out = std::fopen("D:/DC_Recomp/build/syst04.pam", "wb"))
+                        {
+                            s_written = true;
+                            std::fprintf(out, "P7\nWIDTH %u\nHEIGHT %u\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n", texture->width, texture->height);
+                            std::fwrite(texture->rgba.data(), 4u, texture->rgba.size(), out);
+                            std::fclose(out);
+                        }
+            }
             if (g_dump2D)
                 std::fprintf(stderr, "[dc:dump] sprite %08x \"%.32s\" tex0 %016llx pixels %08x (%.1f %.1f)-(%.1f %.1f) uv (%.0f %.0f)-(%.0f %.0f) rgba %08x alpha %llx flat %d\n",
                              record, record ? reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)) : "",
@@ -2858,7 +2887,6 @@ namespace dc::native
         // a copy MGMoveImage made into them. Places are shared (Toan's face and a piece of his house), and the game sends
         // a group's textures again before drawing them: a copy into the face's place must patch the face, and is undone
         // for whatever record is sent there next.
-        uint64_t g_publishedFrames = 0; // frames published (publish)
         constexpr uint64_t kTexturePlace = 0x3FFFull | 0x3Full << 20; // TBP0, PSM
         std::unordered_map<uint64_t, uint32_t> g_resident;
         std::unordered_set<uint32_t> g_patchedRecords;

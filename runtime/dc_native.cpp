@@ -670,7 +670,11 @@ namespace dc::native
             const uint32_t kind = rd32(rdram, record + 4u) >> 16;
             const uint64_t tex0 = rd64(rdram, record + 0x28u);
             const uint32_t pixels = rd32(rdram, record + 0x38u);
-            const uint32_t palette = kind == 1u ? paletteOf(rdram, record) : 0u;
+            // A picture LoadTexture (TM2) put in the record says kind 0 whatever its format: its texels and palette follow
+            // its TEX0 (the map title card is 4-bit, with a palette).
+            const uint32_t tm2Indexed = kind == 0u && (((tex0 >> 20) & 0x3Fu) == 0x13u || ((tex0 >> 20) & 0x3Fu) == 0x14u)
+                                            ? static_cast<uint32_t>((tex0 >> 20) & 0x3Fu) : 0u;
+            const uint32_t palette = kind == 1u || tm2Indexed != 0u ? paletteOf(rdram, record) : 0u;
             if (kind == 1u && rd32(rdram, record + 0x4Cu) != 0u)
             {
                 // Kept in GS order by the game: from the offline conversion of the disc's pictures.
@@ -692,7 +696,7 @@ namespace dc::native
             }
             // ReloadTexture's level 0: kind x w x h / 16 qwords; the kind is the bytes per texel (1: 8-bit with a palette,
             // 3: 24-bit, 4: 32-bit).
-            const uint32_t bytes = (kind == 1u ? 1u : kind == 3u ? 3u : 4u) * w * h;
+            const uint32_t bytes = tm2Indexed == 0x14u ? w * h / 2u : (kind == 1u || tm2Indexed != 0u ? 1u : kind == 3u ? 3u : 4u) * w * h;
             const uint32_t tbw = std::max<uint32_t>((tex0 >> 14) & 0x3Fu, 1u);
             // PSMT8H (0x1B, the 8-bit texels kept in the top byte of 32-bit GS words: EnterFixTextureZ's menu sheet) is sent
             // as plain 8-bit texels: decoded as PSMT8.
@@ -3098,6 +3102,23 @@ namespace dc::native
         }
         void vsyncLoadHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
+            // DC_PROBE_LOADCARD=1 (diagnosis): the callback's state every 30 calls (end_flag, nl_start_cnt, map_title_no,
+            // col_cnt) and how long the main loop has not published.
+            static const bool s_probe = std::getenv("DC_PROBE_LOADCARD") != nullptr;
+            static uint32_t s_calls = 0;
+            if (s_probe && s_calls++ % 30u == 0u)
+            {
+                float colour;
+                std::memcpy(&colour, rdram + 0x2A25C0u, 4);
+                const uint32_t card = 0x01CFB390u; // the picture the callback draws
+                std::fprintf(stderr, "[dc:load] end %u start %d title %x colour %g, main loop quiet %lld ms; picture \"%.16s\" tex0 %016llx pixels %08x %s\n",
+                             rd32(rdram, 0x2A1ED0u), static_cast<int32_t>(rd32(rdram, 0x2A25BCu)), rd32(rdram, 0x2A25D0u), colour,
+                             static_cast<long long>(nowMs() - g_lastMainPublish.load(std::memory_order_relaxed)),
+                             reinterpret_cast<const char *>(rdram + card + 8u), static_cast<unsigned long long>(rd64(rdram, card + 0x28u)),
+                             rd32(rdram, card + 0x38u), recordTexture(rdram, card) ? "decoded" : "NOT decoded");
+                std::fprintf(stderr, "[dc:load]   record words %08x %08x, palette %08x, +0x4c %08x\n", rd32(rdram, card), rd32(rdram, card + 4u),
+                             rd32(rdram, card + 0x48u), rd32(rdram, card + 0x4Cu));
+            }
             g_vsyncLoad(rdram, ctx, runtime);
             if (nowMs() - g_lastMainPublish.load(std::memory_order_relaxed) > 100)
             {
@@ -3156,15 +3177,25 @@ namespace dc::native
         void enterFixZHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t file = getRegU32(ctx, 5);
+            if (std::getenv("DC_PROBE_2D"))
+                std::fprintf(stderr, "[dc:2d] EnterFixTextureZ(file %08x)\n", file);
             g_enterFixZ(rdram, ctx, runtime);
             const uint32_t picture = file + rd32(rdram, file + 0x30u);
             if ((rd32(rdram, picture + 0x24u) & 0xFFFFu) != 0x280u || (rd32(rdram, picture + 0x24u) >> 16) != 0xE0u)
+            {
+                std::fprintf(stderr, "[dc:2d] fixed Z texture from file %08x: not a 640 x 224 picture (%08x), left to the game\n", file,
+                             rd32(rdram, picture + 0x24u));
                 return;
+            }
             const uint32_t pixels = picture + 0x10u + (rd32(rdram, picture + 0x1Cu) & 0xFFFFu);
             const uint32_t palette = pixels + rd32(rdram, picture + 0x18u);
             const uint32_t record = textureRecord(rdram, file + 0x10u);
             if (record == 0u)
+            {
+                std::fprintf(stderr, "[dc:2d] fixed Z texture \"%.32s\" from file %08x: no record of that name\n",
+                             reinterpret_cast<const char *>(rdram + ((file + 0x10u) & 0x1FFFFFFu)), file);
                 return;
+            }
             auto wr32 = [rdram](uint32_t address, uint32_t value) { std::memcpy(rdram + (address & 0x1FFFFFFu), &value, 4); };
             const uint32_t keptPixels = rd32(rdram, record + 0x38u), keptPalette = rd32(rdram, record + 0x48u), keptOrder = rd32(rdram, record + 0x4Cu);
             wr32(record + 0x38u, pixels);

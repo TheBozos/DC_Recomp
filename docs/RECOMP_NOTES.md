@@ -415,3 +415,8 @@ from the ELF's own symbols.
   the shadow pass's work target shares; every other place gets a depth of its own (targetFor), and a target that
   shared gets its own depth back before raylib unloads it (raylib deletes the depth attached to a framebuffer it
   unloads, which was the frame's). DC_PROBE_BALLOON=1 prints the balloons' fields and shapes.
+- The map title card (2026-11-01): entering a map, VSyncCallBack_Load fades the map's name picture ("maptitle",
+  record 0x1CFB390, 4-bit PSMT4 with a CT32 palette, 384 x 128, from LoadTexture(TM2)) in and out; the screen stayed
+  black. LoadTexture leaves the record's kind at 0 whatever the format, and the decoder took kind 0 as 32-bit without
+  a palette: an indexed TEX0 in a kind-0 record now decodes with the record's palette (+ 0x48) and its own texel size.
+  DC_PROBE_LOADCARD=1 prints the callback's state and the picture's decode.

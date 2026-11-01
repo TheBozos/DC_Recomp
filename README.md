@@ -27,7 +27,7 @@ Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program on 
 
 **Bring-up, not playable yet.** The game boots, shows the SCEA and Level-5 logos, plays its 3D intro, shows the
 title screen and its attract demo, and New game plays the opening in the Dark Shrine and Norune's first scenes at 60
-fps with music. The goal, as for the other ports of the fork, is no PS2 emulation at all; paraLLEl-GS is never used.
+fps with music; Georama (Norune's rebuilding) and its menus work, and the game saves to and loads from its memory card. The goal, as for the other ports of the fork, is no PS2 emulation at all; paraLLEl-GS is never used.
 
 **No GS at all.** The picture is the native renderer's alone (`runtime/dc_native.cpp`, OpenGL): the 3D models from
 the game's own data (its MDT models, RenderInfo's camera and lights, the object's state, its textures from the game's
@@ -44,7 +44,9 @@ not read at all (each ends at once), VU1 runs no microcode, and there is no GS p
 | DMA channels other than VIF1 / GIF, EE kernel HLE, IPU (movies) | the runtime's hardware layer |
 
 Known defects: cloth grids with runaway vertices (dropped by the guard band as the PS2 drops them, but the cloth
-simulation itself is not checked), the title's cloud trails sharper than on the PS2, some menus not checked yet.
+simulation itself is not checked); the characters' shadow plane matched against PCSX2 rather than traced through the
+shadow microprogram; the towns' frame-copy surface ("work") not yet seen on screen; dungeons, fights and most in-game
+menus not checked yet.
 
 | Milestone | |
 |---|:---:|
@@ -62,7 +64,7 @@ simulation itself is not checked), the title's cloud trails sharper than on the 
 | First dungeon (Divine Beast Cave) | ⏳ |
 | Sound and music: SDRDRV, EzMIDI and LIBSD native, voice transfers complete | 🔧 |
 | Native frame loop (no vblank pacing): 60 fps on the PC clock | ✅ |
-| Memory card saves | ⏳ |
+| Memory card saves (save and load) | ✅ |
 | Linux build | ⏳ |
 | Widescreen, higher internal resolution | ⏳ |
 

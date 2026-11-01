@@ -500,3 +500,10 @@ from the ELF's own symbols.
   row (16 of 64): the triangle's rows 0, 4, 8, 12. Rows are now read at the record's width; any texture narrower
   than 64 texels (128 for 8-bit) decoded wrong before. The user compared live: the triangle is right.
   DC_PROBE_COPIES=1 also logs the triangle's corners and writes its texture (build/syst04.pam).
+- The balloons' parchment (2026-11-01): MakeFukidashi (0x151AD0) clears the balloon picture, draws the shape grey 0xBF
+  with alpha 0x80, then tiles "fuki256" (0x299A88, 128 x 128, opaque) as 5 x 4 Myset2DSprites over the picture (128 x 64
+  GS pixels each, alpha the window's fade + 0x16D4) under the destination alpha test (TEST DATE 1, DATM 1): the
+  parchment lands only inside the shape. balloonHook drew the shape only (grey balloons). Natively, depth stands in
+  for the destination alpha: the clear writes the near end, the shape the far end, the parchment is drawn with the
+  depth test at the far end. Compared with a PCSX2 shot of the same scene: the parchment's mean colour 164/150/121
+  against 160/146/117. DC_PROBE_BALLOON=1 also logs the parchment texture's alpha range and the fade.

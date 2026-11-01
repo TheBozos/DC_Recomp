@@ -3182,8 +3182,7 @@ namespace dc::native
         // texture (0x299A78), clears it and draws the balloon's shape there (MakeFukidashi_sub 0x150F50: a fan of 15
         // points from its table 0x253FA0, or DrawMaru's ellipses 0x150BB0, then the tail), grey 0xBF with alpha 0x80;
         // DrawMesWin then lays that texture on the screen. Here the shape goes to offscreen target 1, which the
-        // balloon texture's sprites sample. Its patterned fill (a texture drawn under the destination alpha test) is
-        // not drawn yet.
+        // balloon texture's sprites sample, then the parchment over it where the shape is.
         void balloonFan(std::vector<ps2x::native::Vertex> &out, const std::vector<std::pair<float, float>> &points)
         {
             for (size_t i = 1; i + 1 < points.size(); ++i)
@@ -3234,15 +3233,16 @@ namespace dc::native
             auto i32 = [&](uint32_t offset) { return static_cast<int32_t>(rd32(rdram, cls + offset)); };
             const float t = rdf(rdram, cls + 0x90u);
             auto lerp = [&](uint32_t a, uint32_t b) { return static_cast<int32_t>(static_cast<float>(i32(a)) + (static_cast<float>(i32(b)) - static_cast<float>(i32(a))) * t); };
-            // The target cleared.
+            // The target cleared, its depth to the near end: the shape below writes the far end, which the parchment's
+            // depth test then reads as the shape (in place of the GS's destination alpha test).
             ps2x::native::Material clear;
             clear.textured = false;
             clear.blend = ps2x::native::Material::Blend::Opaque;
             clear.depthTest = false;
-            clear.depthWrite = false;
+            clear.depthWrite = true;
             clear.target = balloon;
             std::vector<ps2x::native::Vertex> vertices;
-            quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, 0.0f, 0u);
+            quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, 1.0e30f, 0u);
             drawScreen(clear, vertices);
             vertices.clear();
             // MakeFukidashi_sub: the shape.
@@ -3325,7 +3325,7 @@ namespace dc::native
             shape.textured = false;
             shape.blend = ps2x::native::Material::Blend::Alpha;
             shape.depthTest = false;
-            shape.depthWrite = false;
+            shape.depthWrite = true; // z 0: the far end, where the parchment may go
             shape.target = balloon;
             // DC_PROBE_BALLOON=1 (diagnosis): each balloon's fields and what is drawn, every 60th.
             static const bool s_probe = std::getenv("DC_PROBE_BALLOON") != nullptr;
@@ -3343,6 +3343,38 @@ namespace dc::native
                              vertices.size(), lo[0], hi[0], lo[1], hi[1], balloon);
             }
             drawScreen(shape, vertices);
+            // The parchment: "fuki256" (0x299A88, 128 x 128 of it) as 5 x 4 sprites over the picture (Myset2DSprite, DC's
+            // 640 x 448 view: 128 x 64 GS pixels each), colour 0x80 and the window's fade (+ 0x16D4, at most 0x80) for
+            // alpha, blended; MakeFukidashi sets the destination alpha test (DATE, DATM 1) for them, so they land only
+            // where the shape left alpha 0x80. Here the depth test does it: the shape is the only far depth.
+            if (const uint32_t fill = textureRecord(rdram, 0x00299A88u))
+                if (const auto texture = recordTexture(rdram, fill))
+                {
+                    ps2x::native::Material parchment;
+                    parchment.textured = true;
+                    parchment.tex0 = rd64(rdram, fill + 0x28u);
+                    parchment.blend = ps2x::native::Material::Blend::Alpha;
+                    parchment.depthTest = true;
+                    parchment.depthWrite = false;
+                    parchment.target = balloon;
+                    const uint32_t fade = static_cast<uint32_t>(std::clamp(i32(0x16D4), 0, 0x80));
+                    const float u1 = 128.0f / static_cast<float>(texture->width), v1 = 128.0f / static_cast<float>(texture->height);
+                    std::vector<ps2x::native::Vertex> tiles;
+                    for (int32_t row = 0; row < 4; ++row)
+                        for (int32_t column = 0; column < 5; ++column)
+                            quad(tiles, kOriginX + static_cast<float>(column * 128), kOriginY + static_cast<float>(row * 64),
+                                 kOriginX + static_cast<float>(column * 128 + 128), kOriginY + static_cast<float>(row * 64 + 64), 0.0f,
+                                 0x00808080u | fade << 24, 0.0f, 0.0f, u1, v1);
+                    if (s_probe && s_calls % 60u == 1u)
+                    {
+                        uint32_t alphaLo = 255u, alphaHi = 0u;
+                        for (uint32_t texel : texture->rgba)
+                            alphaLo = std::min(alphaLo, texel >> 24), alphaHi = std::max(alphaHi, texel >> 24);
+                        std::fprintf(stderr, "[dc:balloon] parchment %ux%u alpha %u..%u fade %u\n", texture->width, texture->height, alphaLo,
+                                     alphaHi, fade);
+                    }
+                    drawScreen(parchment, tiles, texture);
+                }
         }
 
         // MoveImageTest (0x140660: a1 / a2 / a3 the source's base, width and format, t0 the rectangle, t1 / t2 / t3 the

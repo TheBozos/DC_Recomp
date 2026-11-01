@@ -122,8 +122,8 @@ namespace dc::native
             return out;
         }
 
-        // Every MSCAL VIF1 meets is skipped: VU1 runs no microcode. VIF1 numbers the programs it skips (1, 2, ...)
-        // and the native batches carry the same numbers (renderer groups), so they sit where VU1's output would be.
+        // VU1 skips every program it is asked to run: it runs no microcode. The counters below count the skipped
+        // programs by their start address.
         std::atomic<uint64_t> g_gateByPc[4]{}; // diagnosis: skipped at pc 0, 8 (the models'), at another pc, the last other
         bool gate(const uint8_t *, uint32_t pc)
         {

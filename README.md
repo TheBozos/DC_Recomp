@@ -4,10 +4,10 @@
 
 # DC_Recomp
 
-**A native Windows and Linux port of *Dark Cloud* (NTSC-U, `SCUS-97111`), made by statically recompiling the game's PlayStation 2 code to C++.**<br>
-Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program on a reimplementation of the PS2 hardware.
+**A native Windows port of *Dark Cloud* (NTSC-U, `SCUS-97111`), made by statically recompiling the game's PlayStation 2 code to C++.**<br>
+Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program (a Linux build is planned).
 
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-1b8cff)
+![Platform](https://img.shields.io/badge/platform-Windows-1b8cff)
 ![Compiler](https://img.shields.io/badge/compiler-GCC%20%7C%20Clang-1b8cff)
 ![Based on](https://img.shields.io/badge/based%20on-PS2Recomp-17a35b)
 ![Status](https://img.shields.io/badge/status-bring--up-d01f3c)
@@ -29,7 +29,8 @@ Not an emulator: the game's own MIPS R5900 code, rebuilt as a native program on 
 
 **Bring-up, not playable yet.** The game boots, shows the SCEA and Level-5 logos, plays its 3D intro, shows the
 title screen and its attract demo, and New game plays the opening in the Dark Shrine and Norune's first scenes at 60
-fps with music; Georama (Norune's rebuilding) and its menus work, and the game saves to and loads from its memory card. The goal, as for the other ports of the fork, is no PS2 emulation at all; paraLLEl-GS is never used.
+fps with music; Georama (Norune's rebuilding) and its menus work, and the game saves to and loads from its memory
+card. The goal, as for the other ports of the fork, is no PS2 emulation at all; paraLLEl-GS is never used.
 
 **No GS at all.** The picture is the native renderer's alone (`runtime/dc_native.cpp`, OpenGL): the 3D models from
 the game's own data (its MDT models, RenderInfo's camera and lights, the object's state, its textures from the game's
@@ -46,26 +47,25 @@ not read at all (each ends at once), VU1 runs no microcode, and there is no GS p
 | DMA channels other than VIF1 / GIF, EE kernel HLE, IPU (movies) | the runtime's hardware layer |
 | Noise, pitch modulation (DC does not use them) | not rendered yet by the native mixer |
 
-Known defects: the characters' shadow plane matched against PCSX2 rather than traced through the
-shadow microprogram; the towns' frame-copy surface ("work") not yet seen on screen; dungeons, fights and most in-game
-menus not checked yet.
+Known defects:
+
+- the sky band above Norune's hills is bluer than on a PS2;
+- a green wedge sometimes shows in Norune;
+- a Georama menu picture ("stayframe") sometimes fails to decode;
+- the characters' shadow plane is matched against PCSX2 rather than traced through the shadow microprogram;
+- the towns' frame-copy surface ("work") has not been seen on screen yet;
+- dungeons, fights and most in-game menus are not checked yet.
 
 | Milestone | |
 |---|:---:|
 | Function map from the ELF's own symbol table (main program and both overlays, no Ghidra) | ✅ |
 | Recompile the main ELF and link it with the PS2Recomp runtime (Windows) | ✅ |
 | Code overlays `TITLE.BIN` and `DUN.BIN` (one load slot, picked by their header) | ✅ |
-| 3D models drawn natively from the game's data, lit like VU1 | 🔧 |
-| Every VU1 program translated (no VU1 microcode run) | 🔧 |
-| Menus, text and 2D drawn natively (no GS packets interpreted) | 🔧 |
 | Boot: EE kernel, CD reads from the disc files, memory card detected | ✅ |
-| The game's IOP modules recompiled to native code (9 modules, nothing interpreted) | ✅ |
 | Boot logos, intro, title screen, in-game 3D scenes after the title (no GS) | ✅ |
 | New game: name entry, the Dark Shrine opening (Colonel Flag summons the Genie) | ✅ |
 | Norune village: the opening scenes after the Dark Shrine | 🔧 |
 | First dungeon (Divine Beast Cave) | ⏳ |
-| Sound and music: the drivers native, libsd taken over by a native mixer (no SPU2); title music and effects play, with libsd's reverb | 🔧 |
-| Native frame loop (no vblank pacing): 60 fps on the PC clock | ✅ |
 | Memory card saves (save and load) | ✅ |
 | Linux build | ⏳ |
 | Widescreen, higher internal resolution | ⏳ |
@@ -77,7 +77,7 @@ state machine and no copy of GS memory in between.
 | Layer | |
 |---|:---:|
 | IOP modules (9) recompiled to C++, none interpreted | ✅ |
-| Sound without the emulated SPU2 (libsd's API on a native mixer) | 🔧 |
+| Sound without the emulated SPU2: the drivers native, libsd's API on a native mixer with its reverb (music and effects play) | 🔧 |
 | No paraLLEl-GS: OpenGL on the GPU | ✅ |
 | Frame loop on the PC's clock (60 fps, no vblank pacing) | ✅ |
 | No GS: the native renderer is the only picture, no GS path left | ✅ |
@@ -94,8 +94,8 @@ what remains open.
 
 ## Screenshots
 
-The first boots on the full native path (taken with the old GS renderer, before the GS was removed; native IOP
-modules, recompiled overlays):
+The first boots on the full native path. These were taken with the old GS renderer, before the GS was removed, and
+are still to be replaced with captures of the native renderer:
 
 | | | |
 |---|---|---|
@@ -130,10 +130,14 @@ disc files (game/) ──► tools/symtab_map.py (the ELF's symbol table) ──
   PS2Recomp overlay module; at run time the one whose header is in guest memory is called.
 - The top-level `CMakeLists.txt` builds the fork's runtime, swaps its placeholder function table for the generated one
   and links everything into `ps2EntryRunner`.
-- `runtime/dc_overrides.cpp` holds the game-specific bindings; `runtime/dc_native.cpp` is the native 3D adapter: it
-  hooks `CVisualVu1::DrawVu1` (0x135000), walks the model's VU data (DIRECT TEX0, material, strips of positions,
-  normals, UVs and colours) and draws it with the fork's native renderer, lit by the microprogram's own formula
-  (lights from the DrawVu1 header, the material's colour); a VIF1 observer tells VU1 which programs to skip.
+- `runtime/dc_overrides.cpp` holds the game-specific bindings; `runtime/dc_native.cpp` is the native renderer's
+  adapter. For 3D it hooks `CVisualVu1::DrawVu1` (0x135000) and draws the piece from the model's MDT (positions,
+  normals, texture coordinates, colours and its primitives), the texture its material names and RenderInfo's camera
+  and lights, lit by the VU1 program's own formula. For 2D it hooks the game's drawing routines (sprites, text,
+  balloons, fills, frame copies) and draws from their arguments. It reads no packet built for the PS2 hardware, and
+  VU1 is told to skip every program.
+- `tools/dc_texconv.py` converts the disc's 8-bit pictures once, offline, into `build/textures/dc_textures.bin`;
+  the renderer finds each texture record's picture there.
 
 The PS2Recomp fork lives in `PS2Recomp/` (git submodule, [TheBozos/PS2Recomp](https://github.com/TheBozos/PS2Recomp),
 branch `dc/native`, cut from `native/renderer`), shared with the *Twisted Metal: Black*, *The Third Age*,
@@ -141,7 +145,7 @@ branch `dc/native`, cut from `native/renderer`), shared with the *Twisted Metal:
 
 ## Requirements
 
-- Windows 10/11 with [MSYS2](https://www.msys2.org/) (UCRT64, see below) or Linux
+- Windows 10/11 with [MSYS2](https://www.msys2.org/) (UCRT64, see below); Linux is not built yet
 - CMake 3.21+, Ninja, GCC 13+ or Clang with C++20
 - FFmpeg development libraries (`libavcodec`, `libavformat`, `libavutil`, `libswresample`, `libswscale`) and `pkg-config`
 - `bsdtar` (libarchive) to extract the disc, Python 3
@@ -203,10 +207,10 @@ scripts/bench_run.sh --alone 20 "runner build" scripts/build_runtime.sh # a buil
 | Path | Contents |
 |---|---|
 | `recomp/` | Recompiler config (analyzer output plus manual additions) and the function map |
-| `runtime/` | Game override module (game-specific bindings) |
-| `scripts/` | Extract, build tools, analyze, recomp, overlays, build runner, run, bench lock |
-| `tools/` | `symtab_map.py` (function maps from the ELF's symbols), `wrap_elf.py` (overlay to ELF, from VP2S_Recomp), `sync_tree.py` (fast sync of generated code) |
-| `docs/` | Bring-up notes |
+| `runtime/` | `dc_overrides.cpp` (game-specific bindings), `dc_native.cpp` (the native renderer's adapter), `app/` (the Windows icon and version information) |
+| `scripts/` | Extract, build tools, analyze, recomp, overlays, IOP modules, build runner, run, unattended boot test, fork tests, bench lock |
+| `tools/` | `symtab_map.py` (function maps from the ELF's symbols), `wrap_elf.py` (overlay to ELF, from VP2S_Recomp), `sync_tree.py` (fast sync of generated code), `dc_texconv.py` and `gs_layout.py` (the offline texture conversion), `find_calls.py` (a function's callers) |
+| `docs/` | Bring-up notes, screenshots, `branding/` (the logo and banner, drawn by `make_logo.py`) |
 | `PS2Recomp/` | PS2Recomp fork (submodule) |
 
 Everything derived from the game (`game/`, `generated/`, `build/`, disc images, captures) is git-ignored. Never commit or

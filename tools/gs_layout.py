@@ -64,3 +64,26 @@ def untwiddle8(data, width, height):
         for x in range(width):
             out[y * width + x] = memory[addr8(x, y, bw8)]
     return bytes(out)
+
+
+def twiddled8_head(indices, width, height, count):
+    """The first count bytes of the GS-order data the game makes of a linear PSMT8 picture (Conv8to32: the PSMCT32
+    image of width / 2 x height / 2 pixels whose bytes, read as PSMT8, are the picture), as it keeps them in main
+    memory: what untwiddle8 undoes."""
+    bw8 = max(2, (width + 127) // 128 * 2)
+    bw32 = bw8 // 2
+    cw = width // 2
+    where = {}  # a byte's address within a PSMT8 page -> its texel in the page
+    for y in range(64):
+        for x in range(128):
+            where[addr8(x, y, 2)] = (x, y)
+    out = bytearray()
+    for i in range(min(count // 4, cw * (height // 2))):
+        a = addr32(i % cw, i // cw, bw32)
+        for b in range(4):
+            page, local = (a + b) >> 13, (a + b) & 8191
+            x, y = where[local]
+            x += (page % (bw8 // 2)) * 128
+            y += (page // (bw8 // 2)) * 64
+            out.append(indices[y * width + x] if x < width and y < height else 0)
+    return bytes(out)

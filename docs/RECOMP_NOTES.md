@@ -466,3 +466,18 @@ from the ELF's own symbols.
   band shifted by waveAnimeCnt (0x1D18980) times a random factor, then writes a mask texture's alpha there keeping
   the colours (ALPHA (0 - 0) x FIX + Cd: Renderer Blend::AlphaOnly), and a "blender" 2D sprite lays the patch back.
   Taken over natively; a 2D sprite reads blendTextuer's own picture only when blendTextuer wrote the place last.
+  The haze patch now has its own target too (kHazePlace | place, at the window's resolution): in the place's own
+  640 x 224 target it came out blocky and left a hard-edged square behind Toan's head.
+- Toan's jaw (2026-11-01): in the first dungeon's cave dialogue his lower face was transparent black (live toggles
+  nocopies / opaquemodels pointed at the face expression copy). The disc holds 20+ pictures named "c01d01an" (his
+  expression sheets), all with the same palette and several of one size; the store matched a record by name, palette
+  and texel count, so the 256 x 128 sheet the game loaded got the 128 x 256 one, whose right half decodes empty, and
+  the eye strip copied from (128,40) pasted it over the jaw. Store version 2 (tools/dc_texconv.py) carries, per
+  picture, an FNV-1a 32 of its first 4096 texel bytes in GS order as EnterTexture leaves them in main memory (IM2:
+  as on the disc; IMG: the offline forward of Conv8to32, gs_layout.twiddled8_head, checked to reproduce IM2 disc bytes);
+  the adapter takes the picture whose texels are the record's, else the one of its width and height, else of its
+  texel count, and a GS-order record is decoded again when its texels change. MGMoveImage between two store pictures
+  now moves palette indices, coloured with the destination's palette, as GS memory does. The user compared with
+  PCSX2 live: the jaw is back. Regenerate the store: python tools/dc_texconv.py game build/textures/dc_textures.bin.
+  Toggles nocopies (no MGMoveImage patches) and opaquemodels (models drawn without blending); the frame dump writes
+  each copy's source, destination and result to build/copy<n>_{from,to,patched}.pam.

@@ -481,11 +481,12 @@ namespace dc::native
         bool g_dump2D = false; // the on-demand frame dump (drawStrip's [dc:dump])
         // Live toggles (diagnosis): D:/DC_Recomp/build/toggles.txt, read every 60 frames, one word per line: noshadow
         // (shadow passes not laid), nosprites3d (effect sprites not drawn), nofog, noguard, nodof (depth of field), nomade
-        // (sprites sampling a picture the game makes, frame copies), nomodels (DrawVu1 models), no2d (2D sprites).
+        // (sprites sampling a picture the game makes, frame copies), nomodels (DrawVu1 models), no2d (2D sprites), nocopies
+        // (MGMoveImage's texture patches: the face expressions), opaquemodels (models drawn without blending).
         struct Toggles
         {
             bool noShadow = false, noSprites3D = false, noFog = false, noGuard = false, noDof = false, noMade = false, noModels = false,
-                 no2D = false;
+                 no2D = false, noCopies = false, opaqueModels = false;
         } g_toggles;
         void readToggles()
         {
@@ -504,6 +505,8 @@ namespace dc::native
                     t.noMade |= word == "nomade";
                     t.noModels |= word == "nomodels";
                     t.no2D |= word == "no2d";
+                    t.noCopies |= word == "nocopies";
+                    t.opaqueModels |= word == "opaquemodels";
                 }
                 std::fclose(file);
             }
@@ -535,6 +538,7 @@ namespace dc::native
         struct StoredTexture
         {
             uint32_t width = 0, height = 0, offset = 0;
+            uint32_t texelHash = 0; // FNV-1a 32 of the first 4096 bytes of its texels in GS order (version 2; 0 unknown)
         };
         std::vector<uint8_t> g_store;
         std::unordered_map<std::string, std::vector<StoredTexture>> g_storeIndex;
@@ -566,11 +570,13 @@ namespace dc::native
                 g_store.clear();
                 return;
             }
-            uint32_t count = 0;
+            uint32_t version = 0, count = 0;
+            std::memcpy(&version, g_store.data() + 4, 4);
             std::memcpy(&count, g_store.data() + 8, 4);
-            for (uint32_t i = 0; i < count && 12u + (i + 1u) * 44u <= g_store.size(); ++i)
+            const uint32_t entryBytes = version >= 2u ? 48u : 44u;
+            for (uint32_t i = 0; i < count && 12u + (i + 1u) * entryBytes <= g_store.size(); ++i)
             {
-                const uint8_t *entry = g_store.data() + 12u + i * 44u;
+                const uint8_t *entry = g_store.data() + 12u + i * entryBytes;
                 const std::string name(reinterpret_cast<const char *>(entry), strnlen(reinterpret_cast<const char *>(entry), 32));
                 uint16_t width = 0, height = 0;
                 uint32_t paletteHash = 0;
@@ -579,6 +585,8 @@ namespace dc::native
                 std::memcpy(&height, entry + 34, 2);
                 std::memcpy(&paletteHash, entry + 36, 4);
                 std::memcpy(&texture.offset, entry + 40, 4);
+                if (version >= 2u)
+                    std::memcpy(&texture.texelHash, entry + 44, 4);
                 texture.width = width;
                 texture.height = height;
                 if (texture.offset + 1024u + texture.width * texture.height <= g_store.size())
@@ -602,9 +610,49 @@ namespace dc::native
             return found != g_clutOverride.end() ? found->second : rd32(rdram, record + 0x48u);
         }
 
-        // An 8-bit record's texture from the converted store: the record's name, its palette's hash and its size.
+        // An 8-bit record's entry in the converted store: the record's name, its palette's hash and its size; live when
+        // only the name and size match (its indices are then coloured with the record's palette as it is now).
+        const StoredTexture *findStored(const uint8_t *rdram, uint32_t record, uint32_t w, uint32_t h, bool &livePalette);
+        // A stored entry's 256 colours, alpha as the GS has it (0x80 is 1.0), by index.
+        void storedColours(const uint8_t *rdram, uint32_t record, const StoredTexture &stored, bool livePalette, uint32_t out[256])
+        {
+            const uint32_t palette = paletteOf(rdram, record);
+            const uint8_t *rgba = g_store.data() + stored.offset;
+            for (uint32_t i = 0; i < 256u; ++i)
+                if (livePalette)
+                    out[i] = rd32(rdram, palette + ((i & 0xE7u) | ((i & 0x08u) << 1) | ((i & 0x10u) >> 1)) * 4u);
+                else
+                {
+                    // The store's palettes hold alpha doubled (0x80 as 255): back to the GS's own value.
+                    uint32_t texel = 0;
+                    std::memcpy(&texel, rgba + i * 4u, 4);
+                    const uint32_t a = texel >> 24;
+                    out[i] = (texel & 0x00FFFFFFu) | (a >= 255u ? 0x80u : a / 2u) << 24;
+                }
+        }
+        // An 8-bit record's texture from the converted store.
         std::shared_ptr<ps2x::native::TextureCache::Texture> storedTexture(const uint8_t *rdram, uint32_t record,
                                                                            uint32_t w, uint32_t h, uint32_t tw, uint32_t th)
+        {
+            bool livePalette = false;
+            const StoredTexture *stored = findStored(rdram, record, w, h, livePalette);
+            if (!stored)
+                return nullptr;
+            auto texture = std::make_shared<ps2x::native::TextureCache::Texture>();
+            texture->width = 1u << tw;
+            texture->height = 1u << th;
+            texture->rgba.assign(static_cast<size_t>(texture->width) * texture->height, 0u);
+            ++g_frameWork.storeDecodes;
+            g_frameWork.decodedTexels += static_cast<uint64_t>(texture->width) * texture->height;
+            const uint8_t *indices = g_store.data() + stored->offset + 1024;
+            uint32_t colours[256];
+            storedColours(rdram, record, *stored, livePalette, colours);
+            for (uint32_t y = 0; y < stored->height && y < texture->height; ++y)
+                for (uint32_t x = 0; x < stored->width && x < texture->width; ++x)
+                    texture->rgba[static_cast<size_t>(y) * texture->width + x] = colours[indices[y * stored->width + x]];
+            return texture;
+        }
+        const StoredTexture *findStored(const uint8_t *rdram, uint32_t record, uint32_t w, uint32_t h, bool &livePalette)
         {
             if (!g_storeLoaded)
                 loadStore();
@@ -615,18 +663,34 @@ namespace dc::native
             if (palette == 0u)
                 return nullptr;
             const uint32_t paletteHash = fnv1a32(rdram, palette, 1024u);
+            // One name holds many pictures with the same palette (Toan's expression sheets, 128 x 256 and 256 x 128 among
+            // them): the one whose texels are the record's (as EnterTexture left them, in GS order), else the one of the
+            // record's width and height, else of its texel count.
+            const uint32_t pixels = rd32(rdram, record + 0x38u);
+            const uint32_t texelHash = pixels != 0u ? fnv1a32(rdram, pixels, std::min(4096u, w * h)) : 0u;
+            uint32_t best = 0;
+            auto consider = [&](const StoredTexture &candidate) {
+                if (candidate.width * candidate.height != w * h)
+                    return false;
+                const uint32_t score = 1u + (candidate.width == w && candidate.height == h ? 2u : 0u) +
+                                       (candidate.texelHash != 0u && candidate.texelHash == texelHash ? 4u : 0u);
+                if (score <= best)
+                    return false;
+                best = score;
+                return true;
+            };
             const StoredTexture *stored = nullptr;
             if (const auto found = g_storeIndex.find(std::string(name) + '|' + std::to_string(paletteHash)); found != g_storeIndex.end())
                 for (const StoredTexture &candidate : found->second)
-                    if (candidate.width * candidate.height == w * h)
+                    if (consider(candidate))
                         stored = &candidate;
             // The record's palette is not the disc's (the game changed it after loading): the converted indices of that
             // name and size, coloured with the record's palette as it is now (plain CT32 in main memory, CSM1 order).
-            bool livePalette = false;
+            livePalette = false;
             if (!stored)
                 if (const auto named = g_storeByName.find(name); named != g_storeByName.end())
                     for (const StoredTexture &candidate : named->second)
-                        if (candidate.width * candidate.height == w * h)
+                        if (consider(candidate))
                         {
                             stored = &candidate;
                             livePalette = true;
@@ -638,39 +702,7 @@ namespace dc::native
                 std::fprintf(stderr, "[dc:native] texture \"%s\" %ux%u palette %08x not in the store%s\n", name, w, h, paletteHash,
                              stored ? ": its indices with the record's palette" : "");
             }
-            if (!stored)
-                return nullptr;
-            auto texture = std::make_shared<ps2x::native::TextureCache::Texture>();
-            texture->width = 1u << tw;
-            texture->height = 1u << th;
-            texture->rgba.assign(static_cast<size_t>(texture->width) * texture->height, 0u);
-            ++g_frameWork.storeDecodes;
-            g_frameWork.decodedTexels += static_cast<uint64_t>(texture->width) * texture->height;
-            const uint8_t *rgba = g_store.data() + stored->offset, *indices = rgba + 1024;
-            uint32_t live[256];
-            if (livePalette)
-                for (uint32_t i = 0; i < 256u; ++i)
-                {
-                    const uint32_t c = rd32(rdram, palette + ((i & 0xE7u) | ((i & 0x08u) << 1) | ((i & 0x10u) >> 1)) * 4u);
-                    live[i] = c; // the GS's own alpha (0x80 is 1.0, as the renderer reads a texel's alpha)
-                }
-            for (uint32_t y = 0; y < stored->height && y < texture->height; ++y)
-                for (uint32_t x = 0; x < stored->width && x < texture->width; ++x)
-                {
-                    const uint8_t index = indices[y * stored->width + x];
-                    uint32_t texel = 0;
-                    if (livePalette)
-                        texel = live[index];
-                    else
-                    {
-                        // The store's palettes hold alpha doubled (0x80 as 255): back to the GS's own value.
-                        std::memcpy(&texel, rgba + index * 4u, 4);
-                        const uint32_t a = texel >> 24;
-                        texel = (texel & 0x00FFFFFFu) | (a >= 255u ? 0x80u : a / 2u) << 24;
-                    }
-                    texture->rgba[static_cast<size_t>(y) * texture->width + x] = texel;
-                }
-            return texture;
+            return stored;
         }
 
         uint64_t contentHash(const uint8_t *rdram, uint32_t address, uint32_t bytes, uint64_t hash)
@@ -717,7 +749,9 @@ namespace dc::native
             {
                 // Kept in GS order by the game: from the offline conversion of the disc's pictures.
                 const uint32_t tw = (tex0 >> 26) & 0xFu, th = (tex0 >> 30) & 0xFu;
-                const uint64_t hash = contentHash(rdram, palette, 1024u, 0x5354u ^ (static_cast<uint64_t>(palette) << 16) ^ tex0);
+                // Its texels' head too: a record can be given another picture of the same palette and size.
+                const uint64_t hash = contentHash(rdram, pixels, std::min(4096u, w * h),
+                                                  contentHash(rdram, palette, 1024u, 0x5354u ^ (static_cast<uint64_t>(palette) << 16) ^ tex0));
                 auto &slot = g_decoded[record];
                 if (slot.second && slot.first == hash)
                     return slot.second;
@@ -1169,6 +1203,8 @@ namespace dc::native
             material.textured = false;
             material.depthTest = true;
             applyObjectState(g_objectState, material);
+            if (g_toggles.opaqueModels)
+                material.blend = ps2x::native::Material::Blend::Opaque;
             float madeU = 1.0f, madeV = 1.0f; // a made picture's texture coordinates (see the record lookup below)
             material.fog = setup.fog;
             material.fogColour = setup.fogColour;
@@ -2256,6 +2292,9 @@ namespace dc::native
         }
         constexpr uint32_t kBlendedPlace = 0x40000000u;                  // blendTextuer's picture of a place: its own target
         std::unordered_map<uint32_t, bool> g_blendedLast;                // place -> blendTextuer wrote it last (not blendTextuerTest)
+        constexpr uint32_t kHazePlace = 0x20000000u;                     // blendTextuerTest's patch of a place: its own target, at
+                                                                         // the window's resolution (the place's may be 640 x 224)
+        std::unordered_map<uint32_t, bool> g_hazeLast;                   // place -> blendTextuerTest wrote it last
         std::unordered_map<uint32_t, std::pair<int32_t, int32_t>> g_blendedExtent; // place -> the corner it blends
         // The renderer source for a place (0: not one of the game's own pictures); sets the material to sample it.
         bool sampleMade(uint32_t base, ps2x::native::Material &material)
@@ -2292,6 +2331,9 @@ namespace dc::native
             // ("frame_image") is a picture the game makes there; inside the corner blendTextuer blends ("blender"), the
             // picture it made.
             uint32_t madeBase = record != 0u ? static_cast<uint32_t>(rd64(rdram, record + 0x28u) & 0x3FFFu) : 0u;
+            if (g_hazeLast[madeBase] && g_targetOfBase.count(madeBase | kHazePlace) != 0u)
+                madeBase |= kHazePlace;
+            else
             if (const auto blended = g_blendedExtent.find(madeBase); blended != g_blendedExtent.end() && g_blendedLast[madeBase] &&
                 std::max(c[0].u, c[3].u) <= static_cast<float>(blended->second.first) + 1.0f &&
                 std::max(c[0].v, c[3].v) <= static_cast<float>(blended->second.second) + 1.0f &&
@@ -2857,7 +2899,21 @@ namespace dc::native
                 dst = resident->second;
             else
                 dst = recordAt(dstTex0);
-            const uint32_t src = recordAt(srcTex0);
+            // The source too is what was sent to its place last: places are shared (the face expressions' sheet with
+            // other pictures), and the first record of that place copied another picture's transparent black onto
+            // Toan's jaw.
+            uint32_t src = 0u;
+            if (const auto resident = g_resident.find(srcTex0 & kTexturePlace);
+                resident != g_resident.end() && (rd64(rdram, resident->second + 0x28u) & kTexturePlace) == (srcTex0 & kTexturePlace))
+                src = resident->second;
+            else
+                src = recordAt(srcTex0);
+            if (g_dump2D)
+                std::fprintf(stderr, "[dc:dump] texture copy (%d,%d %dx%d) from %08x \"%.16s\" (first at its place %08x) to %08x \"%.16s\" (first %08x) at %d,%d\n",
+                             r.x, r.y, r.w, r.h, src, src != 0u ? reinterpret_cast<const char *>(rdram + ((src + 8u) & 0x1FFFFFFu)) : "", recordAt(srcTex0), dst,
+                             dst != 0u ? reinterpret_cast<const char *>(rdram + ((dst + 8u) & 0x1FFFFFFu)) : "", recordAt(dstTex0), dx, dy);
+            if (g_toggles.noCopies)
+                return;
             if (src == 0u || dst == 0u)
             {
                 ++g_stats.textureCopiesMissed;
@@ -2876,6 +2932,23 @@ namespace dc::native
             auto patched = std::make_shared<ps2x::native::TextureCache::Texture>(*to);
             ++g_frameWork.patches;
             g_frameWork.decodedTexels += static_cast<uint64_t>(patched->width) * patched->height;
+            // GS memory holds 8-bit pictures as palette indices: the copy moves indices, and the destination shows them
+            // through its own palette (a face's expression sheet and the face). Both from the converted store: the
+            // source's stored indices, coloured with the destination's colours.
+            auto storeEntry = [&](uint32_t record, bool &live) -> const StoredTexture * {
+                const uint64_t tex0 = rd64(rdram, record + 0x28u);
+                if ((rd32(rdram, record + 4u) >> 16) != 1u || rd32(rdram, record + 0x4Cu) == 0u || ((tex0 >> 20) & 0x3Fu) != 0x13u)
+                    return nullptr;
+                return findStored(rdram, record, rd32(rdram, record) >> 16, rd32(rdram, record + 4u) & 0xFFFFu, live);
+            };
+            bool srcLive = false, dstLive = false;
+            const StoredTexture *srcStored = storeEntry(src, srcLive), *dstStored = storeEntry(dst, dstLive);
+            const bool byIndex = srcStored != nullptr && dstStored != nullptr;
+            uint32_t colours[256] = {};
+            if (byIndex)
+                storedColours(rdram, dst, *dstStored, dstLive, colours);
+            const uint8_t *srcIndices = byIndex ? g_store.data() + srcStored->offset + 1024 : nullptr;
+            uint32_t mapped = 0, unmapped = 0;
             for (int32_t y = 0; y < r.h; ++y)
                 for (int32_t x = 0; x < r.w; ++x)
                 {
@@ -2884,9 +2957,39 @@ namespace dc::native
                         sy >= static_cast<int32_t>(from->height) || tx >= static_cast<int32_t>(patched->width) ||
                         ty >= static_cast<int32_t>(patched->height))
                         continue;
-                    patched->rgba[static_cast<size_t>(ty) * patched->width + static_cast<size_t>(tx)] =
-                        from->rgba[static_cast<size_t>(sy) * from->width + static_cast<size_t>(sx)];
+                    uint32_t texel = from->rgba[static_cast<size_t>(sy) * from->width + static_cast<size_t>(sx)];
+                    if (byIndex)
+                    {
+                        if (static_cast<uint32_t>(sx) < srcStored->width && static_cast<uint32_t>(sy) < srcStored->height)
+                            texel = colours[srcIndices[static_cast<size_t>(sy) * srcStored->width + static_cast<size_t>(sx)]], ++mapped;
+                        else
+                            ++unmapped;
+                    }
+                    patched->rgba[static_cast<size_t>(ty) * patched->width + static_cast<size_t>(tx)] = texel;
                 }
+            if (g_dump2D)
+            {
+                std::fprintf(stderr, "[dc:dump]   copy %s: store %ux%u%s -> %ux%u%s, %u texels through the destination's colours, %u outside the source\n",
+                             byIndex ? "by index" : "by colour", srcStored ? srcStored->width : 0u, srcStored ? srcStored->height : 0u,
+                             srcLive ? " (live palette)" : "", dstStored ? dstStored->width : 0u, dstStored ? dstStored->height : 0u,
+                             dstLive ? " (live palette)" : "", mapped, unmapped);
+                // The source, the destination before and after, as PAM files (RGBA, alpha as the GS has it).
+                static uint32_t s_copyDump = 0;
+                const uint32_t n = s_copyDump++ % 8u;
+                const std::pair<const char *, const ps2x::native::TextureCache::Texture *> pictures[] = {
+                    {"from", from.get()}, {"to", to.get()}, {"patched", patched.get()}};
+                for (const auto &[what, picture] : pictures)
+                {
+                    char path[96];
+                    std::snprintf(path, sizeof(path), "D:/DC_Recomp/build/copy%u_%s.pam", n, what);
+                    if (FILE *out = std::fopen(path, "wb"))
+                    {
+                        std::fprintf(out, "P7\nWIDTH %u\nHEIGHT %u\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n", picture->width, picture->height);
+                        std::fwrite(picture->rgba.data(), 4u, picture->rgba.size(), out);
+                        std::fclose(out);
+                    }
+                }
+            }
             patched->version = ++g_textureVersion;
             auto &slot = g_decoded[dst];
             if (slot.second == to)
@@ -3179,8 +3282,9 @@ namespace dc::native
             ps2x::native::Material copy;
             if (!sampleMade(g_frameBase, copy))
                 return;
-            const uint8_t target = targetFor(place);
+            const uint8_t target = targetFor(place | kHazePlace);
             g_blendedLast[place] = false;
+            g_hazeLast[place] = true;
             copy.target = target;
             copy.blend = ps2x::native::Material::Blend::Opaque;
             copy.depthTest = false;
@@ -3209,6 +3313,18 @@ namespace dc::native
                 }
             }
             drawScreen(copy, vertices);
+            if (g_dump2D)
+            {
+                const auto texture = mask != 0u ? recordTexture(rdram, mask) : nullptr;
+                uint32_t alphaLo = 255u, alphaHi = 0u;
+                if (texture)
+                    for (uint32_t texel : texture->rgba)
+                        alphaLo = std::min(alphaLo, texel >> 24), alphaHi = std::max(alphaHi, texel >> 24);
+                std::fprintf(stderr, "[dc:dump] haze (%d,%d %dx%d) of the frame, mask %08x \"%.16s\" %s alpha %u..%u from (%d,%d %dx%d) to (%d,%d %dx%d)\n",
+                             frame.x, frame.y, frame.w, frame.h, mask, mask != 0u ? reinterpret_cast<const char *>(rdram + ((mask + 8u) & 0x1FFFFFFu)) : "",
+                             texture ? "decoded" : "NOT decoded", alphaLo, alphaHi, maskFrom.x, maskFrom.y, maskFrom.w, maskFrom.h, maskTo.x, maskTo.y,
+                             maskTo.w, maskTo.h);
+            }
             // The mask's alpha into the place, its colours kept.
             if (mask != 0u)
                 if (const auto texture = recordTexture(rdram, mask))
@@ -3251,6 +3367,7 @@ namespace dc::native
             const uint8_t target = targetFor(place | kBlendedPlace);
             g_blendedExtent[place] = {std::max(toA.x + toA.w, toB.x + toB.w), std::max(toA.y + toA.h, toB.y + toB.h)};
             g_blendedLast[place] = true;
+            g_hazeLast[place] = false;
             // The work texture's rows are the GS's (y = 1936 + y, not halved as the frame's 448-line view).
             auto sprite = [&](const Rect &to, const Rect &from, uint32_t record, ps2x::native::Material::Blend blend, bool textured) {
                 ps2x::native::Material material;

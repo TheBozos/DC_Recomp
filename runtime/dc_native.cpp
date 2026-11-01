@@ -1410,7 +1410,39 @@ namespace dc::native
                 }
             }
             std::snprintf(g_drawWhat, sizeof(g_drawWhat), "cloth %08x %dx%d flags %x", cloth, rows, columns, rd32(rdram, renderInfo + 0x310u));
+            // DC_PROBE_CLOTH=1 (diagnosis): a cloth's grid every 300 calls: its size, where its vertices lie, how many
+            // are far off (|x| > 1e6 or not finite), the guard's drops before and after it.
+            static const bool s_probe = std::getenv("DC_PROBE_CLOTH") != nullptr;
+            static uint32_t s_calls = 0;
+            const uint64_t guardedBefore = g_stats.guarded;
+            const bool report = s_probe && (s_calls++ % 300u) < 3u;
+            if (report)
+            {
+                float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+                int far = 0;
+                for (int32_t r = 0; r < rows; ++r)
+                    for (int32_t c = 0; c < columns; ++c)
+                    {
+                        const uint32_t at = cloth + static_cast<uint32_t>(r) * 0x100u + static_cast<uint32_t>(c) * 0x10u + 0x1110u;
+                        for (int k = 0; k < 3; ++k)
+                        {
+                            const float v = rdf(rdram, at + static_cast<uint32_t>(k) * 4u);
+                            if (!std::isfinite(v) || std::fabs(v) > 1e6f)
+                            {
+                                ++far;
+                                continue;
+                            }
+                            lo[k] = std::min(lo[k], v);
+                            hi[k] = std::max(hi[k], v);
+                        }
+                    }
+                std::fprintf(stderr, "[dc:cloth] %08x %dx%d tex %s far %d x %.1f..%.1f y %.1f..%.1f z %.1f..%.1f l2w t (%.1f %.1f %.1f) tris %zu\n",
+                             cloth, rows, columns, texture ? "yes" : "no", far, lo[0], hi[0], lo[1], hi[1], lo[2], hi[2],
+                             rdf(rdram, localToWorld + 0x30u), rdf(rdram, localToWorld + 0x34u), rdf(rdram, localToWorld + 0x38u), vertices.size() / 3u);
+            }
             submit(setup, material, texture, vertices);
+            if (report)
+                std::fprintf(stderr, "[dc:cloth]   guarded %llu\n", static_cast<unsigned long long>(g_stats.guarded - guardedBefore));
         }
 
         // CVisualShadow::DrawVu1 (0x136290), taken over: no VU data, packet or VU1 program. The shadow (the model's

@@ -44,8 +44,7 @@ not read at all (each ends at once), VU1 runs no microcode, and there is no GS p
 | DMA channels other than VIF1 / GIF, EE kernel HLE, IPU (movies) | the runtime's hardware layer |
 | Noise, pitch modulation (DC does not use them) | not rendered yet by the native mixer |
 
-Known defects: cloth grids with runaway vertices (dropped by the guard band as the PS2 drops them, but the cloth
-simulation itself is not checked); the characters' shadow plane matched against PCSX2 rather than traced through the
+Known defects: the characters' shadow plane matched against PCSX2 rather than traced through the
 shadow microprogram; the towns' frame-copy surface ("work") not yet seen on screen; dungeons, fights and most in-game
 menus not checked yet.
 

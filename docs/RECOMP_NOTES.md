@@ -285,8 +285,8 @@ from the ELF's own symbols.
   (2) The guard band: without RenderInfo + 0x310 bit 1, the program does not clip. Its loops keep a triangle only if
   every vertex's screen x / w, y / w and w lie strictly inside VU 20 / 21 (RenderInfo + 0x210 / + 0x220: FMAND of the
   signs of VU21 - v and v - VU20, mask 0xD0). In Norune those are x, y in (0, 4095.9) and w in (6, 65535). Otherwise
-  ADC drops it whole. The adapter now does the same (`DC_NO_GUARD=1` turns it off). Cloth grids hold runaway
-  vertices (about 1e37) that the PS2 never shows for that reason; they were the streaks across Norune.
+  ADC drops it whole. The adapter now does the same (`DC_NO_GUARD=1` turns it off). The cloth grids' runaway
+  vertices (about 1e37) were a runtime bug, not the game's (see "Toan's poncho").
 - IM2 archives (2026-10-31): 2,546 of DC's texture directories use "IM2\0" instead of "IMG\0", with the same layout
   (the map pieces' textures, s140101...). `tools/dc_texconv.py` reads both: 3,615 distinct 8-bit textures (was 921).
   A store miss falls back to the converted indices of that name and size, coloured with the record's current
@@ -395,3 +395,8 @@ from the ELF's own symbols.
   position (| 1 << 24 in the second half). MMIX (param 0x0800) and the input volumes (0x0D80 / 0x0E80) route it;
   sceSdInit's mixes (0xFF0, 0xFFC) are the defaults, which DC keeps.
   Not yet: noise, pitch modulation, the SPU2 IRQ callback.
+- Toan's poncho (2026-11-01): the cloth (CCloth::Step, 0x13B8A0) flew apart a few seconds into Norune (most vertices
+  past 1e6, all dropped by the guard band), so Toan had no poncho. The runtime's stand-ins for libvu0 differed from
+  it: sceVu0ScaleVector took its scale from a2 whenever $f12 was 0 (the cloth's wind scaled by 0 became a huge
+  push), and sceVu0Normalize / sceVu0InnerProduct counted w. They now do what libvu0 does (scale in $f12; xyz only,
+  normalize's w = 0). DC_PROBE_CLOTH=1 prints a cloth's grid bounds, its far vertices and the guard's drops.

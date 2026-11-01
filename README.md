@@ -42,7 +42,7 @@ not read at all (each ends at once), VU1 runs no microcode, and there is no GS p
 | VU1 programs not translated yet (screen-space sprites, particles, other effects) | not drawn (VU1 runs nothing) |
 | 2D routines not translated yet (some menus, the movies' frames, CDebugFont) | not drawn |
 | DMA channels other than VIF1 / GIF, EE kernel HLE, IPU (movies) | the runtime's hardware layer |
-| Noise, pitch modulation, the sound data input (streamed PCM) | not rendered yet by the native mixer |
+| Noise, pitch modulation (DC does not use them) | not rendered yet by the native mixer |
 
 Known defects: cloth grids with runaway vertices (dropped by the guard band as the PS2 drops them, but the cloth
 simulation itself is not checked); the characters' shadow plane matched against PCSX2 rather than traced through the

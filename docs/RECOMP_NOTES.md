@@ -389,5 +389,9 @@ from the ELF's own symbols.
   Transfer callbacks: after sceSdVoiceTrans (and a one-shot sceSdBlockTrans) the channel's handler
   (sceSdSetTransIntrHandler) or callback (sceSdSetTransCallback) runs shortly after, as an interrupt handler
   (native::queueInterruptCall), for drivers that wait on it (VP2's). DC registers none.
-  Not yet: noise, pitch modulation, the sound data input (looping sceSdBlockTrans: DC never calls it; logged), the
-  SPU2 IRQ callback.
+  The sound data input (sceSdBlockTrans, for VP2's streams; DC never calls it): the driver's buffer played from IOP
+  memory as the console's input format (1024-byte blocks: 256 left samples, then 256 right), looping or once, with the
+  channel's transfer interrupt at each half; mode 2 stops it and returns where it was, sceSdBlockTransStatus gives the
+  position (| 1 << 24 in the second half). MMIX (param 0x0800) and the input volumes (0x0D80 / 0x0E80) route it;
+  sceSdInit's mixes (0xFF0, 0xFFC) are the defaults, which DC keeps.
+  Not yet: noise, pitch modulation, the SPU2 IRQ callback.

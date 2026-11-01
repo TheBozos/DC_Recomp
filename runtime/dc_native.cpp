@@ -1507,9 +1507,13 @@ namespace dc::native
             // the screen; PCSX2 shows them at the feet (short at noon, long and to one side at dusk). For MGDrawShadowFast /
             // MGDrawShadow (+ 0x320 = 1 / 2) the plane is put through the model's origin, the feet. (Matched against PCSX2;
             // the microprogram's own handling of the 12.8 is not traced. DrawVu1 copies + 0x2B0 / + 0x2C0, the point
-            // 12.8 lower and the normal DrawShadow gives, and does not use them.)
+            // 12.8 lower and the normal DrawShadow gives, and does not use them.) MGDrawShade (+ 0x320 = 8, the buildings'
+            // shades: CMapObject::DrawShade) draws a flat mesh laid on the ground under the building through the same
+            // matrix, whatever the last shadow left there: through the plane 12.8 below, it was pushed along the light
+            // (a dark rectangle in front of the stairs) and under the ground (hidden by the ground's depth). Its plane is
+            // put through its origin too: the mesh stays where it lies.
             Matrix shadowMatrix = load(rdram, renderInfo + 0x2D0u);
-            if (const uint32_t mode = rd32(rdram, renderInfo + 0x320u); mode == 1u || mode == 2u)
+            if (const uint32_t mode = rd32(rdram, renderInfo + 0x320u); mode == 1u || mode == 2u || mode == 8u)
             {
                 shadowMatrix.m[12] = 0.0f;
                 shadowMatrix.m[13] = 0.0f;

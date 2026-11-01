@@ -420,3 +420,8 @@ from the ELF's own symbols.
   black. LoadTexture leaves the record's kind at 0 whatever the format, and the decoder took kind 0 as 32-bit without
   a palette: an indexed TEX0 in a kind-0 record now decodes with the record's palette (+ 0x48) and its own texel size.
   DC_PROBE_LOADCARD=1 prints the callback's state and the picture's decode.
+- Buildings' shades (2026-11-01): CMapObject::DrawShade -> MGDrawShade (0x130760) draws a flat mesh laid on the ground
+  under a building inside the shadow pass, with RenderInfo + 0x320 = 8, and DrawVu1 projects it through + 0x2D0 like
+  any shadow draw. With the plane 12.8 below, the mesh was pushed along the light (a dark rectangle in front of
+  Norune's stairs) and below the ground (hidden once the marks were depth-tested). Mode 8 gets its plane through its
+  origin as modes 1 / 2 do: the shade lies under the platform, as in PCSX2.

@@ -479,6 +479,39 @@ namespace dc::native
         std::unordered_map<uint32_t, std::pair<uint64_t, std::shared_ptr<const ps2x::native::TextureCache::Texture>>> g_decoded;
         uint64_t g_textureVersion = 0;
         bool g_dump2D = false; // the on-demand frame dump (drawStrip's [dc:dump])
+        // Live toggles (diagnosis): D:/DC_Recomp/build/toggles.txt, read every 60 frames, one word per line: noshadow
+        // (shadow passes not laid), nosprites3d (effect sprites not drawn), nofog, noguard, nodof (depth of field), nomade
+        // (sprites sampling a picture the game makes, frame copies), nomodels (DrawVu1 models), no2d (2D sprites).
+        struct Toggles
+        {
+            bool noShadow = false, noSprites3D = false, noFog = false, noGuard = false, noDof = false, noMade = false, noModels = false,
+                 no2D = false;
+        } g_toggles;
+        void readToggles()
+        {
+            Toggles t;
+            if (FILE *file = std::fopen("D:/DC_Recomp/build/toggles.txt", "rb"))
+            {
+                char line[64];
+                while (std::fgets(line, sizeof(line), file))
+                {
+                    const std::string word(line, std::strcspn(line, "\r\n \t"));
+                    t.noShadow |= word == "noshadow";
+                    t.noSprites3D |= word == "nosprites3d";
+                    t.noFog |= word == "nofog";
+                    t.noGuard |= word == "noguard";
+                    t.noDof |= word == "nodof";
+                    t.noMade |= word == "nomade";
+                    t.noModels |= word == "nomodels";
+                    t.no2D |= word == "no2d";
+                }
+                std::fclose(file);
+            }
+            if (std::memcmp(&t, &g_toggles, sizeof(t)) != 0)
+                std::fprintf(stderr, "[dc:toggles] noshadow %d nosprites3d %d nofog %d noguard %d\n", t.noShadow, t.noSprites3D, t.noFog,
+                             t.noGuard);
+            g_toggles = t;
+        }
         // DC_PROBE_SEQ=1 (diagnosis): each frame's draws in order, one letter each (C clear, Z clear Z, M model, s
         // sprite, P / F / T sprite of the previous frame / the frame / a target, S stretch), for frames with a stretch.
         std::string g_seq;
@@ -619,8 +652,7 @@ namespace dc::native
                 for (uint32_t i = 0; i < 256u; ++i)
                 {
                     const uint32_t c = rd32(rdram, palette + ((i & 0xE7u) | ((i & 0x08u) << 1) | ((i & 0x10u) >> 1)) * 4u);
-                    const uint32_t a = c >> 24;
-                    live[i] = (c & 0x00FFFFFFu) | (a >= 0x80u ? 255u : a * 2u) << 24;
+                    live[i] = c; // the GS's own alpha (0x80 is 1.0, as the renderer reads a texel's alpha)
                 }
             for (uint32_t y = 0; y < stored->height && y < texture->height; ++y)
                 for (uint32_t x = 0; x < stored->width && x < texture->width; ++x)
@@ -630,7 +662,12 @@ namespace dc::native
                     if (livePalette)
                         texel = live[index];
                     else
+                    {
+                        // The store's palettes hold alpha doubled (0x80 as 255): back to the GS's own value.
                         std::memcpy(&texel, rgba + index * 4u, 4);
+                        const uint32_t a = texel >> 24;
+                        texel = (texel & 0x00FFFFFFu) | (a >= 255u ? 0x80u : a / 2u) << 24;
+                    }
                     texture->rgba[static_cast<size_t>(y) * texture->width + x] = texel;
                 }
             return texture;
@@ -729,7 +766,10 @@ namespace dc::native
             const uint32_t rowTexels = tbw * 64u;
             const uint32_t bitsPerTexel = psm == 0x13u ? 8u : psm == 0x14u ? 4u : psm == 0x01u ? 24u : 32u;
             const uint32_t rows = bytes * 8u / (rowTexels * bitsPerTexel);
-            auto alpha = [](uint32_t a) { return a >= 0x80u ? 255u : a * 2u; };
+            // Texel alpha as the GS has it (0x80 is 1.0): the renderer scales it by 255 / 128, as the GS's blending reads
+            // it. It was doubled here as well, and every partly transparent texture (the dungeon torches' glows) drew at
+            // twice its strength.
+            auto alpha = [](uint32_t a) { return a; };
             auto colour = [&](uint32_t c) { return (c & 0x00FFFFFFu) | alpha(c >> 24) << 24; };
             for (uint32_t y = 0; y < texture->height && y < rows; ++y)
                 for (uint32_t x = 0; x < texture->width && x < rowTexels; ++x)
@@ -741,7 +781,7 @@ namespace dc::native
                     {
                         // 24-bit (the title's backdrop "bg"): RGB as stored, opaque.
                         const uint32_t at = pixels + (y * rowTexels + x) * 3u;
-                        texel = rdram[at & 0x1FFFFFFu] | rdram[(at + 1u) & 0x1FFFFFFu] << 8 | rdram[(at + 2u) & 0x1FFFFFFu] << 16 | 0xFF000000u;
+                        texel = rdram[at & 0x1FFFFFFu] | rdram[(at + 1u) & 0x1FFFFFFu] << 8 | rdram[(at + 2u) & 0x1FFFFFFu] << 16 | 0x80000000u;
                     }
                     else
                     {
@@ -822,7 +862,7 @@ namespace dc::native
             setup.uvScale = g_lights.uvScale;
             setup.textureMapped = rd32(rdram, renderInfo + 0x320u) == 0u && rd32(rdram, renderInfo + 0x340u) == 0u;
             static const bool s_noGuard = [] { const char *e = std::getenv("DC_NO_GUARD"); return e && e[0] == '1'; }();
-            setup.guard = !s_noGuard && (rd32(rdram, renderInfo + 0x310u) & 2u) == 0u;
+            setup.guard = !s_noGuard && !g_toggles.noGuard && (rd32(rdram, renderInfo + 0x310u) & 2u) == 0u;
             for (uint32_t c = 0; c < 4u; ++c)
             {
                 const float a = rdf(rdram, renderInfo + 0x210u + c * 4u), b = rdf(rdram, renderInfo + 0x220u + c * 4u);
@@ -996,6 +1036,37 @@ namespace dc::native
                 if (material.tex0 != 0u)
                     std::fprintf(stderr, "[dc:dump]     tex0 %016llx%s\n", static_cast<unsigned long long>(material.tex0),
                                  texture ? "" : " (no texture)");
+                // Where the draw lands on the screen (GS pixels) and its widest triangle: object coordinates and w.
+                float sxLo = 1e30f, syLo = 1e30f, sxHi = -1e30f, syHi = -1e30f, widest = -1.0f;
+                size_t widestAt = 0;
+                const float *t = setup.toScreen.m;
+                for (size_t k = 0; k + 2u < vertices.size(); k += 3u)
+                {
+                    float sx[3], sy[3];
+                    for (int j = 0; j < 3; ++j)
+                    {
+                        const ps2x::native::Vertex &v = vertices[k + static_cast<size_t>(j)];
+                        const float w = t[3] * v.x + t[7] * v.y + t[11] * v.z + t[15];
+                        sx[j] = (t[0] * v.x + t[4] * v.y + t[8] * v.z + t[12]) / w;
+                        sy[j] = (t[1] * v.x + t[5] * v.y + t[9] * v.z + t[13]) / w;
+                        sxLo = std::min(sxLo, sx[j]), sxHi = std::max(sxHi, sx[j]);
+                        syLo = std::min(syLo, sy[j]), syHi = std::max(syHi, sy[j]);
+                    }
+                    const float span = std::max({std::fabs(sx[0] - sx[1]), std::fabs(sx[1] - sx[2]), std::fabs(sx[0] - sx[2]),
+                                                 std::fabs(sy[0] - sy[1]), std::fabs(sy[1] - sy[2]), std::fabs(sy[0] - sy[2])});
+                    if (span > widest)
+                        widest = span, widestAt = k;
+                }
+                if (!vertices.empty())
+                {
+                    std::fprintf(stderr, "[dc:dump]     screen x %.0f..%.0f y %.0f..%.0f, widest triangle %.0f:", sxLo, sxHi, syLo, syHi, widest);
+                    for (int j = 0; j < 3; ++j)
+                    {
+                        const ps2x::native::Vertex &v = vertices[widestAt + static_cast<size_t>(j)];
+                        std::fprintf(stderr, " (%g %g %g w %g)", v.x, v.y, v.z, t[3] * v.x + t[7] * v.y + t[11] * v.z + t[15]);
+                    }
+                    std::fprintf(stderr, "\n");
+                }
             }
             if (material.textured && material.fromFrame != 0u)
                 renderer.draw(material, setup.toScreen.m, vertices.data(), static_cast<uint32_t>(vertices.size()));
@@ -1063,7 +1134,7 @@ namespace dc::native
             DrawSetup setup = drawSetup(rdram, localToWorld, renderInfo);
             setup.cull = (rd32(rdram, renderInfo + 0x310u) & 4u) != 0u;
             static const bool s_noFog = std::getenv("DC_NO_FOG") != nullptr; // diagnosis
-            setup.fog = !s_noFog && rd32(rdram, renderInfo + 0x324u) != 0u && rd32(rdram, renderInfo + 0x320u) == 0u;
+            setup.fog = !s_noFog && !g_toggles.noFog && rd32(rdram, renderInfo + 0x324u) != 0u && rd32(rdram, renderInfo + 0x320u) == 0u;
             // DC_PROBE_FOG=1 (diagnosis): the fog of the first RenderInfos seen.
             static int s_fogLogged = 0;
             if (std::getenv("DC_PROBE_FOG") && s_fogLogged < 12 && setup.fog)
@@ -1401,7 +1472,7 @@ namespace dc::native
             }
             // DC_SKIP_MDT=<hex address> (diagnosis): models with that MDT are not drawn.
             static const uint32_t s_skipMdt = [] { const char *v = std::getenv("DC_SKIP_MDT"); return v ? static_cast<uint32_t>(std::strtoul(v, nullptr, 16)) : 0u; }();
-            if (s_skipMdt != 0u && mdt == s_skipMdt)
+            if ((s_skipMdt != 0u && mdt == s_skipMdt) || g_toggles.noModels)
             {
                 g_objectState.valid = false;
                 return;
@@ -1674,8 +1745,25 @@ namespace dc::native
             seq('E');
             if (g_dump2D)
                 std::fprintf(stderr, "[dc:dump] shadow pass end, %zu shadow draws\n", g_shadowDraws.size());
-            if (g_shadowDraws.empty())
+            if (g_dump2D)
+                for (const ShadowDraw &draw : g_shadowDraws)
+                {
+                    float sxLo = 1e30f, syLo = 1e30f, sxHi = -1e30f, syHi = -1e30f;
+                    const float *t = draw.toScreen.m;
+                    for (const ps2x::native::Vertex &v : draw.vertices)
+                    {
+                        const float w = t[3] * v.x + t[7] * v.y + t[11] * v.z + t[15];
+                        const float x = (t[0] * v.x + t[4] * v.y + t[8] * v.z + t[12]) / w, y = (t[1] * v.x + t[5] * v.y + t[9] * v.z + t[13]) / w;
+                        sxLo = std::min(sxLo, x), sxHi = std::max(sxHi, x), syLo = std::min(syLo, y), syHi = std::max(syHi, y);
+                    }
+                    std::fprintf(stderr, "[dc:dump]   shadow draw: %zu triangles, screen x %.0f..%.0f y %.0f..%.0f, strength %u\n",
+                                 draw.vertices.size() / 3u, sxLo, sxHi, syLo, syHi, strength);
+                }
+            if (g_shadowDraws.empty() || g_toggles.noShadow)
+            {
+                g_shadowDraws.clear();
                 return;
+            }
             g_pendingShadows.push_back({strength, std::move(g_shadowDraws)});
             g_shadowDraws.clear();
         }
@@ -1764,7 +1852,7 @@ namespace dc::native
             const int32_t haze = static_cast<int32_t>(getRegU32(ctx, 7));
             ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
             const float zScale = renderer.gsZScale();
-            if (g_group == 0u || !(zScale > 0.0f))
+            if (g_group == 0u || !(zScale > 0.0f) || g_toggles.noDof)
                 return;
             ++g_stats.depthOfFields;
             const Matrix toScreen = load(rdram, 0x01C75570u);
@@ -2188,6 +2276,8 @@ namespace dc::native
         // by one ([dc:dump]), then the flag removed.
         void drawStrip(const uint8_t *rdram, uint32_t record, const Corner (&c)[4], bool flat = false)
         {
+            if (g_toggles.no2D)
+                return;
             if (g_dump2D)
                 std::fprintf(stderr, "[dc:dump] sprite %08x \"%.32s\" tex0 %016llx pixels %08x (%.1f %.1f)-(%.1f %.1f) uv (%.0f %.0f)-(%.0f %.0f) rgba %08x alpha %llx flat %d\n",
                              record, record ? reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)) : "",
@@ -2203,7 +2293,7 @@ namespace dc::native
                 ++g_stats.madeDraws[std::min<uint32_t>(made.source, 8u)];
                 seq(made.source == ps2x::native::Material::kPreviousFrame ? 'P' : made.source == 0u ? 'F' : 'T');
                 static const bool s_noMade = std::getenv("DC_NO_MADE") != nullptr; // diagnosis
-                if (s_noMade)
+                if (s_noMade || g_toggles.noMade)
                     return;
                 static int s_logged = 0, s_loggedTargets = 0;
                 if (std::getenv("DC_PROBE_2D") &&
@@ -2551,6 +2641,8 @@ namespace dc::native
         void draw3D(const uint8_t *rdram, uint32_t record, const Point3 (&p)[4], const float (&u)[4], const float (&v)[4],
                     const uint32_t (&rgba)[4], bool fog, bool flat)
         {
+            if (g_toggles.noSprites3D)
+                return;
             std::shared_ptr<const ps2x::native::TextureCache::Texture> texture = record != 0u ? recordTexture(rdram, record) : nullptr;
             if (record != 0u && !texture)
                 return;
@@ -2576,6 +2668,18 @@ namespace dc::native
                 k[i].rgba = flat ? flatColour(rgba[i], rgba[i] >> 8, rgba[i] >> 16, rgba[i] >> 24) : rgba[i];
             }
             const std::vector<ps2x::native::Vertex> vertices = {k[0], k[1], k[2], k[1], k[3], k[2]};
+            // The frame dump: each effect sprite, its texture (record, TEX0, size, its alpha range), colour and ALPHA.
+            if (g_dump2D)
+            {
+                uint32_t alphaLo = 255u, alphaHi = 0u;
+                if (texture)
+                    for (uint32_t texel : texture->rgba)
+                        alphaLo = std::min(alphaLo, texel >> 24), alphaHi = std::max(alphaHi, texel >> 24);
+                std::fprintf(stderr, "[dc:dump] 3D sprite \"%.16s\" tex0 %016llx %ux%u alpha %u..%u uv (%.0f %.0f)-(%.0f %.0f) rgba %08x ALPHA %llx blend %d fog %d at (%.0f %.0f)\n",
+                             record != 0u ? reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)) : "", static_cast<unsigned long long>(material.tex0),
+                             texture ? texture->width : 0u, texture ? texture->height : 0u, alphaLo, alphaHi, u[0], v[0], u[3], v[3], rgba[0],
+                             static_cast<unsigned long long>(g_alpha2D), static_cast<int>(material.blend), fog ? 1 : 0, p[0].x, p[0].y);
+            }
             drawScreen(material, vertices, texture);
         }
         // set3DColSprite (0x15D1B0: a1..a4 the points, t0..t3 their spRGBA): untextured, Gouraud.
@@ -3551,6 +3655,9 @@ namespace dc::native
             g_dump2D = false;
             std::fprintf(stderr, "[dc:dump] frame end\n");
         }
+        static uint32_t s_toggleCheck = 0;
+        if (++s_toggleCheck % 60u == 0u)
+            readToggles();
         static uint32_t s_dumpCheck = 0;
         if (++s_dumpCheck % 30u == 0u)
             if (FILE *flag = std::fopen("D:/DC_Recomp/build/dump2d.flag", "rb"))

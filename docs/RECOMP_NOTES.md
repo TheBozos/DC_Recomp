@@ -443,3 +443,14 @@ from the ELF's own symbols.
   as GS memory holds it there: the upper sky is pale as in PCSX2 (the user compared live); the band above the hills
   is still bluer than PCSX2's. DC_WORK_NOT_PREVIOUS=1 restores the untextured gradient; DC_SKIP_MDT=<hex> skips a
   model; the frame dump prints each draw's ALPHA, TEX0, first vertex colour and lighting.
+- Texture alpha doubled (2026-11-01): the renderer reads a texel's alpha as the GS does (0x80 is 1.0, scaled by
+  255 / 128), and DC's decoders (recordTexture, the store's live palettes) had already doubled it (0x80 as 255), as had
+  the offline store's palettes. Every partly transparent texture drew at twice its strength: the dungeon torches'
+  glows ("lightling", alpha up to 0x3F, ALPHA 0x48 additive) came out as bright squares. DC now hands the GS's own
+  alpha; the store's doubled palettes are halved back when used.
+- Live toggles (diagnosis): D:/DC_Recomp/build/toggles.txt, read every 60 frames, one word per line: noshadow,
+  nosprites3d, nofog, noguard, nodof, nomade, nomodels, no2d. The frame dump also lists the effect sprites (texture,
+  alpha range, ALPHA), each 3D draw's screen extent and widest triangle, and the shadow draws.
+- Test runs open their window without the focus (PS2X_WINDOW_NO_FOCUS=1, scripts/boot_test.sh), and the host input
+  follows the system's foreground window on Windows (VP2S's fork 7318752 / 0d79208): a run in the background no
+  longer reads the player's pad.

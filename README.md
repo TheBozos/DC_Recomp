@@ -133,7 +133,7 @@ disc files (game/) ──► tools/symtab_map.py (the ELF's symbol table) ──
   normals, UVs and colours) and draws it with the fork's native renderer, lit by the microprogram's own formula
   (lights from the DrawVu1 header, the material's colour); a VIF1 observer tells VU1 which programs to skip.
 
-The PS2Recomp fork lives in `PS2Recomp/` (git submodule, [boubou666/PS2Recomp](https://github.com/boubou666/PS2Recomp),
+The PS2Recomp fork lives in `PS2Recomp/` (git submodule, [TheBozos/PS2Recomp](https://github.com/TheBozos/PS2Recomp),
 branch `dc/native`, cut from `native/renderer`), shared with the *Twisted Metal: Black*, *The Third Age*,
 *Jade Cocoon 2*, *Valkyrie Profile 2* and *Drakengard* recompilations.
 

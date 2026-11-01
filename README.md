@@ -149,7 +149,7 @@ branch `dc/native`, cut from `native/renderer`), shared with the *Twisted Metal:
 ## Build and run
 
 ```bash
-git clone --recurse-submodules https://github.com/boubou666/DC_Recomp.git
+git clone --recurse-submodules https://github.com/TheBozos/DC_Recomp.git
 cd DC_Recomp
 scripts/extract_iso.sh "/path/to/Dark Cloud (USA).iso"   # disc files -> game/
 scripts/build_tools.sh                                   # ps2_recomp, ps2_analyzer, ps2_vu_aot -> build/tools

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Dark Cloud",
+  "wikidata": "Q1166169",
+  "system": "PS2",
+  "type": "recomp",
+  "original": {
+    "region": "USA",
+    "serial": "SCUS-97111"
+  },
+  "project": "DC_Recomp",
+  "status": "in-progress",
+  "targets": ["Windows"],
+  "toolchain": "Ps2recomp",
+  "approach": "Static recompilation with a PS2Recomp fork; the game's models and 2D drawn by a native PC renderer from its own data, native sound and timing, no GS, VU1 or SPU2 emulation.",
+  "started": "2026-10-30",
+  "maintainers": [
+    { "name": "boubou666", "link": "https://github.com/boubou666" },
+    { "name": "Arzaroth", "link": "https://github.com/Arzaroth" }
+  ],
+  "links": [
+    { "label": "RecompWatcher (The Bozos' projects)", "url": "https://thebozos.github.io/RecompWatcher/" }
+  ],
+  "help": [
+    "Comparing scenes against a PS2 or PCSX2 (dungeons, fights, menus)",
+    "A Linux build (not done yet)"
+  ],
+  "notes": "Bring-up, not playable yet: boots through the intro and title, New game plays the Dark Shrine opening and Norune's first scenes at 60 fps with music; Georama and memory card saves work. Next: the first dungeon, the remaining VU1 effects and 2D menus."
+}

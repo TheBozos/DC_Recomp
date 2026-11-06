@@ -56,3 +56,8 @@
 # The retained SDK send acknowledges completed native work; it reads no packet.
 0x0012d680 0x8f828bd4 0x00000000 # no packet-object lookup before completion
 0x0012d688 0x8c450004 0x24050000 # pass no packet/source pointer; retain channel/IRQ semantics
+# CVisualMDTVu1 raw draw: retain selected buffer metadata, temporary allocation
+# extent, all native draw arguments/results, and the post-draw buffer restore.
+# Its native draw reads MDT assets, so copying console VIF output is unused.
+0x00136164 0x8f828bc0 0x0804d862 # skip memcpy setup/call to native draw setup 0x136188
+0x00136168 0x00021080 0x00000000 # discard unused source-index shift in jump delay slot

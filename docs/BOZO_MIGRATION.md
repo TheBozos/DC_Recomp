@@ -4,7 +4,7 @@ Implemented on 2026-11-06. The active build uses only the `BozoEngine` submodule
 
 The graphics cleanup includes the DC adapters, regression fixtures, guarded offline adaptations and published
 BozoEngine pin `4a8f70a` together. References to local/unpublished work in the milestone sections below describe
-the state at those earlier checks. The latest validation is 24/24 suites and both 5,800-frame routes; remaining
+the state at those earlier checks. The latest validation is 27/27 suites and both 5,800-frame routes; remaining
 coverage and packet-work limits are listed in the final section.
 
 ## Ownership boundary
@@ -492,3 +492,46 @@ Evidence in `build/native-cleanup9/`:
 BozoEngine stays clean on published `4a8f70a`; this uses its existing completion API and adds no engine change.
 F2F received publication status and the callback-preservation checks. Generic MGDraw cursor/reservation, remaining
 frame setup/display builders, legacy extents and broader game coverage remain open; full campaign is unqualified.
+
+## Native frame dispatch and unused MDT copy retirement
+
+`MGDraw` and the `CFrameVu1` packet overload now call the original raw virtual frame method with no console
+output buffer. The resident vtable audit found base `CFrame` and `CFrameVu1` methods; unexpected methods reject
+explicitly. Their compiled hierarchy, LOD, matrix and lighting calculations remain in place. Raw frame code only
+forwards the output pointer to material/visual/child draws, whose native implementations emit zero words; the
+wrapper rejects a nonzero completed result. The null `MGDraw` case retains its void-return behavior. Packet
+alignment, cursor lookup and reservation are retired from these two outer wrappers.
+
+Two guarded offline adaptations also skip the unused console-buffer `memcpy` in the raw `CVisualMDTVu1` draw
+wrapper. Buffer selection, temporary allocation extent, all eight native draw arguments, signed draw result and
+the post-draw reload of the current buffer index remain intact. The native renderer reads the retained MDT asset,
+not that output buffer. The distinct MDT packet overload was already a metadata-only wrapper and is unchanged.
+This uses existing engine APIs; the BozoEngine pin stays `4a8f70a`.
+
+Evidence in `build/native-cleanup10/`:
+
+- **27/27 suites pass** (`tests.log`). Each frame wrapper has **32 original/native cases** using the owner's
+  hash-checked original code and actual compiled packet helpers around controlled virtual methods. The native
+  dispatcher matches the frame/RenderInfo inputs and logical callback side effect, preserves saved registers and
+  return/stack, and leaves every other RAM byte untouched even with inaccessible packet addresses. Null dispatch,
+  unknown virtual methods and nonzero output results are checked separately. These tests isolate wrapper behavior;
+  they do not independently qualify the retained hierarchy/light arithmetic.
+- **386 MDT cases** compare original/adapted code using exactly the two production patch words. These cover both
+  buffers, four sizes and arena offsets, copy flags, callback-driven buffer-index changes and signed draw results.
+  Allocation extent, draw inputs, logical state and all non-stack RAM match after excluding only the original
+  unused output copy. Native buffer addresses can be inaccessible. The retained allocator is the compiled original.
+- Both **5,800-frame routes complete** (`headless.log`, `gameplay.log`) with zero register/unknown accesses, zero
+  VU0 microprogram calls and zero GIF SDK submissions. The last published counter blocks record **40,869 headless /
+  63,453 windowed MGDraw dispatches**. The member overload counter is zero: its qualification is fixture-only in
+  this route. No separate live MDT-wrapper coverage count was collected. Remaining native VIF1 completion jobs
+  number 5,686 headless / 6,063 windowed; sync calls number 6,884 / 7,261. These are bounded observations, not a
+  performance or exact-clock comparison.
+- Directly inspected all seven captures: attract, Norune, pause, running with foot dust, movement, menu and
+  dismissal. Headless 48 kHz stereo PCM has 4,680,762 frames, RMS 3,592.501, last-ten-second RMS 3,434.538 and peak
+  28,775. Windowed PCM has 5,074,790 frames, RMS 3,559.784, tail RMS 2,869.712 and peak 32,766. Output remains active;
+  no subjective listening, bit-exact timing, console parity or full-campaign claim is made.
+
+F2F received the scope and test progress; both lanes were checked for DC-Recomp, @all and @WindowsRecomp mentions.
+TMB's typed hierarchy/light work remains separate, and VP2's newer generic engine scheduling/CD work is acknowledged
+without changing this batch's pin. Remaining frame setup/display builders, mixed console-data builders, legacy
+arena extents, unsupported readbacks and broader gameplay still need auditing.

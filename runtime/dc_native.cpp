@@ -23,6 +23,7 @@
 #include "dc_visibility.h"
 #include "bozo/render/renderer.h"
 #include "bozo/libs/guest.h"
+#include "bozo/runtime_api.h"
 
 #include <array>
 #include <algorithm>
@@ -48,6 +49,35 @@ namespace dc::native
     namespace
     {
         constexpr uint32_t kVisualDrawVu1 = 0x00135000u;      // CVisualVu1::DrawVu1(uint *, float (*)[4], RenderInfo *, ...)
+        uint64_t g_nativeFrameDraws = 0, g_nativeFrameMemberDraws = 0;
+        // The raw frame methods retain DC's hierarchy, LOD and lighting work.
+        // Their output pointer only reaches native material/visual draws, which
+        // return zero packet words. The outer wrappers no longer need a packet.
+        void frameDrawHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        {
+            const bool global = ctx->pc == 0x0012ED80u; // MGDraw(CFrame *)
+            const uint32_t caller = ctx->r[31].uw[0];
+            bozo::libs::Guest guest(*runtime, ctx);
+            const uint32_t frame = guest.arg(0);
+            if (global && frame == 0u)
+            {
+                ctx->pc = caller;
+                return;
+            }
+            const uint32_t method = guest.read32(guest.read32(frame + 0x250u) + 8u);
+            if (method != 0x00129400u && method != 0x0012A1A0u)
+                throw std::runtime_error("native frame draw: unsupported virtual method");
+            ++(global ? g_nativeFrameDraws : g_nativeFrameMemberDraws);
+            ctx->r[5] = {}; // no console output buffer
+            if (global)
+            {
+                ctx->r[6] = {};
+                ctx->r[6].uw[0] = 0x01C75520u;
+            }
+            bozo_call_indirect(rdram, ctx, runtime, method);
+            if (ctx->pc == caller && !ctx->leaving && ctx->r[2].uw[0] != 0u)
+                throw std::runtime_error("native frame draw: unexpected console output words");
+        }
         constexpr uint32_t kCreateFromMdt = 0x00135AA0u;      // CVisualVu1::CreateVUdataFromMDT(uint *, uint *, int)
         constexpr uint32_t kCreateFromMdtRemake = 0x00135E50u; // CVisualVu1::CreateVUdataFromMDTRemake(uint *, uint *, int)
         constexpr uint32_t kSetGsReg3 = 0x00129360u;          // SetGsReg3(uint *, ulong *TEST, ulong *ZBUF, ulong *ALPHA)
@@ -4236,6 +4266,8 @@ namespace dc::native
                 if ((hook.original = runtime.functions.generated(hook.address)))
                     registry.registerFunction(hook.address, &countHook);
         registry.registerFunction(kVisualDrawVu1, &drawVu1Hook);
+        registry.registerFunction(0x0012ED80u, &frameDrawHook);
+        registry.registerFunction(0x0012A110u, &frameDrawHook);
         registry.registerFunction(0x00134BC0u, &drawVu1Hook);
         registry.registerFunction(kCreateFromMdt, &createFromMdtHook);
         registry.registerFunction(kCreateFromMdtRemake, &createFromMdtRemakeHook);
@@ -4347,6 +4379,8 @@ namespace dc::native
                          static_cast<unsigned long long>(g_nativeWindowRects), static_cast<unsigned long long>(g_retiredEnvelopes));
             std::fprintf(stderr, "[dc:native] model packet wrappers retired: %llu\n",
                          static_cast<unsigned long long>(g_retiredModelEnvelopes));
+            std::fprintf(stderr, "[dc:native] frame packet wrappers retired: %llu MGDraw, %llu member\n",
+                         static_cast<unsigned long long>(g_nativeFrameDraws), static_cast<unsigned long long>(g_nativeFrameMemberDraws));
             std::fprintf(stderr, "[dc:native] asset builders cumulative: %llu models, %llu remakes, %llu shadows, %llu cloths; %llu bytes of legacy output extents bypassed\n",
                          static_cast<unsigned long long>(g_nativeModelBuilds), static_cast<unsigned long long>(g_nativeModelRemakes),
                          static_cast<unsigned long long>(g_nativeShadowBuilds), static_cast<unsigned long long>(g_nativeClothBuilds),

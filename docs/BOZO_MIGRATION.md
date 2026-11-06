@@ -614,3 +614,46 @@ Evidence in `build/native-cleanup12/`:
 F2F received the scope, conditional-sync correction and qualification progress. Both lanes were checked for
 DC-Recomp, @all and @WindowsRecomp; TMB shader and VP2 transfer/loader work remain independently owned.
 Other mixed builders, setup/display producers, legacy extents, unsupported readbacks and wider gameplay remain open.
+
+## Texture-animation flush envelope retirement
+
+Four guarded offline words retire the leading and trailing TEXFLUSH packet envelopes in
+`CTextureAnime::TexAnime` (`0x167170`). The function's compiled 24-slot passes, dependent-slot Enable calls,
+group selection, direct/additional copy inputs, scrolling arithmetic, pause policy, counters and keyframe chains
+remain in place. The native `MGMoveImage` adapter still receives the original texture identifiers and rectangles.
+Both new jumps validate their original delay slots, which only zero a caller-volatile argument. No runtime
+packet parsing or shared engine change is introduced; BozoEngine remains pinned to `4a8f70a`.
+
+Evidence in `build/native-cleanup13/`:
+
+- **32/32 suites pass** (`tests.log`), including **432 whole-function original/adapted cases**. These cover empty,
+  sparse and full slot sets, absent entries, matching/mismatched/negative groups, direct/additional copies,
+  scrolling at negative/zero/interior/overflow offsets, paused/unpaused updates, indefinite/finite/zero holds,
+  counter overflow and chained keyframes. The reference executes the actual compiled packet builders, Enable
+  and float conversion. The native-copy helper is a controlled boundary: ordered texture-identifier, rectangle
+  and destination inputs and a logical copy side effect are compared. Across both variants the cases reach
+  7,872 copy and 2,016 Enable calls; these are fixture counts, not gameplay or performance totals.
+- Each reference case invokes twelve packet helpers; each adapted case invokes zero, even with an inaccessible
+  packet pointer. Complete saved registers, stack/return, floating-point status, logical animation state and all
+  other non-stack RAM match after excluding the original unused packet output. The adapted packet region remains
+  untouched. This qualifies the wrapper and retained arithmetic, not the controlled helper's texture-copy math.
+- Both **5,800-frame headless/windowed routes complete** (`headless.log`, `gameplay.log`) with zero device-register
+  or unknown accesses, zero VU0 microprogram calls and zero GIF SDK submissions. Remaining native VIF1 completion
+  counts are 5,686 / 6,034 and sync counts 6,884 / 7,232. Texture-animation probes record 667 / 898 sampled keyframe
+  rows, including both direct-copy and scrolling kinds; native-copy probes record 5,792 / 9,744 rows. These confirm
+  bounded live coverage, not exact TexAnime call counts or performance.
+- Directly inspected ten captures: Sony presentation (100), fading logo (300), attract (2,000), load confirmation
+  (2,800), Norune (3,400), pause (3,550), running (4,800), movement (5,100), readable menu/help (5,501) and dismissal
+  (5,799). The requested 5,500 menu capture was written at 5,501. No pixel-parity or full-game claim is made.
+- Headless 48 kHz stereo PCM contains 4,680,762 frames, RMS 3,592.501, last-ten-second RMS 3,434.535 and peak 28,775.
+  Windowed PCM contains 5,076,393 frames, RMS 3,539.924, tail RMS 2,849.656 and peak 32,766. Audio output is active;
+  subjective listening and bit-exact timing remain unqualified.
+
+Texture identifiers still use the game's console-format fields at the native-copy boundary; the adapter
+translates those identifiers to native texture records without GS memory or packet reads. Other mixed builders,
+the main packet reset, console setup/display producers, legacy allocation extents, unsupported readbacks and
+broader gameplay remain separate audits. Full campaign and console visual parity remain unqualified.
+
+F2F received the scope, original/native fixture results and live qualification. Both lanes were checked for
+DC-Recomp, @all and @WindowsRecomp; TMB's macro/scalar audit and VP2's compiled module-provider work remain
+independently owned. No retail assets or generated game code enter the repository.

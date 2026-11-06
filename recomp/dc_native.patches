@@ -79,3 +79,9 @@
 0x0015469c 0x8c25b374 0x24050000 # completion has no packet source
 0x001546c4 0x8f828bc0 0x080551cb # skip half-offset/display/cache setup to buffer toggle 0x15472c
 0x001546c8 0x10400005 0x00000000 # discard obsolete environment-selection branch
+# TexAnime: native texture copies require no leading/trailing TEXFLUSH packets.
+# Retain slot setup, copy rectangles, scrolling math and keyframe advancement.
+0x001671a0 0x8f848bd4 0x08059c81 # skip leading envelope to slot-loop setup 0x167204
+0x001671a4 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
+0x0016778c 0x8f848bd4 0x08059dfc # skip trailing envelope to epilogue 0x1677f0
+0x00167790 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot

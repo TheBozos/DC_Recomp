@@ -4,7 +4,7 @@ Implemented on 2026-11-06. The active build uses only the `BozoEngine` submodule
 
 The graphics cleanup includes the DC adapters, regression fixtures, guarded offline adaptations and published
 BozoEngine pin `4a8f70a` together. References to local/unpublished work in the milestone sections below describe
-the state at those earlier checks. The latest validation is 31/31 suites and both 5,800-frame routes; remaining
+the state at those earlier checks. The latest validation is 33/33 suites and both 5,800-frame routes; remaining
 coverage and packet-work limits are listed in the final section.
 
 ## Ownership boundary
@@ -657,3 +657,45 @@ broader gameplay remain separate audits. Full campaign and console visual parity
 F2F received the scope, original/native fixture results and live qualification. Both lanes were checked for
 DC-Recomp, @all and @WindowsRecomp; TMB's macro/scalar audit and VP2's compiled module-provider work remain
 independently owned. No retail assets or generated game code enter the repository.
+
+## Fire sprite state envelope retirement
+
+Six guarded offline words retire the two conditional GS-state envelopes and the final restore envelope in
+`CFireOmni::DrawFire` (`0x161ac0`). Its existing native wrapper supplies the additive blend; native fog sprites
+receive the retained texture, source rectangle, projected corners, colour/alpha and fog data directly. Texture
+initialization, both mode bits, compiled camera/vector math, counter/PRNG updates and projection gates remain.
+All three jumps guard their harmless caller-volatile zero delay slot. The main packet reset and unrelated
+producers are unchanged. No shared service change is required; BozoEngine remains pinned to `4a8f70a`.
+`DC_PROBE_FIRE=1` enables bounded coverage samples without changing default rendering.
+
+Evidence in `build/native-cleanup14/`:
+
+- **33/33 suites pass** (`tests.log`), including **512 whole-function original/adapted cases** across all four
+  combinations of the two relevant mode bits, four texture initialization/cache profiles, four counter values
+  including wrap, signed seeds, zero/negative/positive scales and eight projection-acceptance masks. The reference
+  executes the actual compiled packet builders, camera/vector helpers and `srand`/`rand`. Texture lookup,
+  projection and native fog-sprite submission are controlled boundaries comparing ordered semantic inputs and
+  logical sprite side effects. Across both variants these cases reach 768 sprite and 128 random calls.
+- Each reference executes nine packet helpers per enabled leading envelope plus nine for the final restore.
+  The adapted version invokes none, with an inaccessible packet pointer. Logical fire/PRNG/sprite state, complete
+  saved registers, stack/return, saved float registers and floating-point status match. All other non-stack RAM
+  stays unchanged after excluding original unused packet output; adapted packet storage stays untouched. A strict
+  host rejects unexpected device/library/VU0-program accesses. This qualifies the wrapper, not the controlled
+  projection or native renderer's math, and does not assert whole-function clock equivalence.
+- Both **5,800-frame headless/windowed routes complete**, with zero device-register or unknown accesses, zero VU0
+  microprogram calls and zero GIF SDK submissions. Native VIF1 completion counts are 5,686 / 6,074 and sync counts
+  6,884 / 7,272. Fire probes produce 38 / 42 sampled rows, both with mode 15 (the two retained low bits enabled),
+  reaching uncached textures, initialized textures and counters 0 through 4. These confirm bounded function/state
+  coverage, not exact calls, visible fire pixels or performance totals.
+- Inspected all ten captures: Sony presentation (100), black transition (300), attract (2,000), load confirmation
+  (2,800), Norune (3,400), pause (3,550), running (4,800), movement (5,100), readable menu/help (5,500) and dismissal
+  (5,799). No dedicated fire-only picture or pixel-parity qualification is claimed.
+- Headless 48 kHz stereo PCM contains 4,680,762 frames, RMS 3,592.501, last-ten-second RMS 3,434.534 and peak 28,775.
+  Windowed PCM contains 5,085,629 frames, RMS 3,567.576, tail RMS 2,838.462 and peak 32,766. Audio remains active;
+  subjective listening, exact timing and full-campaign/console parity remain unqualified.
+
+F2F received the audit, fixture correction and qualification results. Both lanes were checked for DC-Recomp,
+@all and @WindowsRecomp. TMB's separate projection-math work and VP2's native module/semaphore work remain with
+those owners. Other mixed console builders, main packet reset, setup/display producers, legacy extents,
+console-format native-copy identifiers, unsupported readbacks and broader gameplay remain open. No retail data
+or generated game code is committed.

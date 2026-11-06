@@ -30,6 +30,8 @@ base, end, helpers = {
     'loading': (0x154320, 0x154770, [0x10cc58, 0x120c18, 0x1110b0, 0x15c310,
         0x120de0, 0x120c28, 0x1145d0, 0x10c6f8, 0x113e48, 0x114c50, 0x112ea0]),
     'texanime': (0x167170, 0x167820, [0x167b40, 0x12f210, 0x1110b0]),
+    'fire': (0x161ac0, 0x162280, [0x1312d0, 0x124670, 0x1246a0, 0x1217b8,
+        0x121648, 0x1217e8, 0x12e740, 0x15dca0, 0x15d9a0, 0x1046e8, 0x1046f8]),
 }[kind]
 phoff = struct.unpack_from('<I', data, 28)[0]
 for i in range(struct.unpack_from('<H', data, 44)[0]):
@@ -68,7 +70,7 @@ target.with_suffix('.externals').write_text(''.join(f'override 0x{pc:x}\n' for p
 selected = [line for line in patches.read_text().splitlines()
             if line.split('#')[0].strip() and span_start <= int(line.split()[0], 16) < end]
 expected = {'frame_close': 2, 'frame_draw': 0, 'frame_member': 0, 'mdt_draw': 2,
-            'message': 2, 'edit_state': 2, 'menu_state': 2, 'loading': 9}.get(kind, 4)
+            'message': 2, 'edit_state': 2, 'menu_state': 2, 'loading': 9, 'fire': 6}.get(kind, 4)
 if len(selected) != expected:
     raise SystemExit('wrapper fixture requires its complete guarded production adaptation subset')
 target.with_suffix('.patches').write_text('\n'.join(selected) + '\n')

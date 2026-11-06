@@ -75,6 +75,18 @@ Native thread/timer/file contracts, logical addresses and transfer-completion ac
 compatibility services. Unknown native calls, unsupported module code and device-address accesses fail explicitly.
 Movies use FFmpeg; configuring this port without the native decoder fails.
 
+The native graphics boundary retains no GS register bank or transfer history. Environment submissions and graphics
+completion never inspect GIF packets. Visibility queries read the native GPU depth cache directly from the game's
+query coordinates. Some recompiled routines and SDK output builders still construct unused console-format buffers;
+the renderer does not consume them. Material and texture formats in game structures are translated to native draws.
+The model draw, material setter, and three environment/blend setters now produce native output only. Packet-only
+TEST/ZBUF setters return without reading their arguments or constructing console output. BozoEngine
+answers the graphics DMA send/sync APIs directly, including completion handlers, without packet reads or busy polling.
+The tested native route now reaches **zero device-register accesses**: vblank fields use the native frame counter,
+display submission and DMA configuration use SDK services, and console CPU/free-time diagnostics and channel tag-bit
+updates are retired during guarded code generation. Native mode rejects access to retired graphics registers.
+See [the cleanup and validation notes](docs/BOZO_MIGRATION.md#native-graphics-cleanup) for the remaining compatibility work.
+
 Known defects carried over from the earlier build:
 
 - the sky band above Norune's hills is bluer than on a PS2;
@@ -190,6 +202,21 @@ engine with game-free fixtures and validates the offline tools/scripts; retail g
 `--pad-script <file>` accepts entries such as `1200:START/6,1500:CROSS/6`; `--live-pad <file>` reloads changed script
 text starting at the current game frame. `--frames 0` runs until the window closes (the window's default).
 `--capture-dir`, `--capture-frame` and `--wav` provide native captures. There is no fallback switch.
+`--profile-io` prints remaining register accesses by guest PC/address after a bounded run; the validated Norune route
+prints a zero total. The guarded adaptations in `recomp/dc_native.patches` are applied automatically by CMake.
+MDT creation/remaking, shadow-model and cloth preparation now retain native asset bookkeeping without serializing
+console buffers. Their old arena extents remain for caller compatibility; 1,064 synthetic cases check those sizes
+against the original compiled builders. See [migration validation](docs/BOZO_MIGRATION.md) for scope and limitations.
+Texture-group reload also uses native bookkeeping, and texture-load wrappers retain asset parsing while skipping
+upload packet work; 666 manager-state and 60 texture-record comparisons cover those boundaries.
+Fixed and fixed-Z texture insertion uses native records and bindings without image/cache/DMA builders; another
+224 comparisons check the original allocation and metadata contracts. The latest 5,800-frame headless and windowed
+routes also report zero GIF SDK submissions.
+The model packet overload and GIF envelope/TEXA wrappers also skip obsolete output. Window setters retain the
+logical rectangle directly. Visibility reduces native depth tiles into query results without an SDK readback
+packet or scratch tile; 144 original-loop comparisons check depth patterns, boundaries and arena bookkeeping.
+Water and running-effect wrappers also bypass their packet-only state envelopes while keeping native draws and
+game bookkeeping. Another 96 water and 384 effect comparisons check their retained callbacks, data and ABI.
 
 ## Disc facts
 

@@ -20,7 +20,9 @@
 // Always on: Dark Cloud's picture has no other path (no GS).
 
 #include "dc_native_api.h"
+#include "dc_visibility.h"
 #include "bozo/render/renderer.h"
+#include "bozo/libs/guest.h"
 
 #include <array>
 #include <algorithm>
@@ -35,6 +37,7 @@
 #include <string>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -50,8 +53,8 @@ namespace dc::native
         constexpr uint32_t kSetGsReg3 = 0x00129360u;          // SetGsReg3(uint *, ulong *TEST, ulong *ZBUF, ulong *ALPHA)
         constexpr uint32_t kVtVisualMdtVu1 = 0x002A11A0u;     // __vt__13CVisualMDTVu1
         constexpr uint32_t kTextureManager = 0x01C75870u;     // the CTextureManager every MDT material's texture is in
-        RecompiledFunction g_drawVu1 = nullptr, g_createFromMdt = nullptr, g_createFromMdtRemake = nullptr,
-                                       g_setGsReg3 = nullptr;
+        uint64_t g_nativeModelBuilds = 0, g_nativeModelRemakes = 0, g_nativeShadowBuilds = 0, g_nativeClothBuilds = 0;
+        uint64_t g_retiredModelBytes = 0;
         uint64_t g_group = 0;
 
         struct Stats
@@ -185,11 +188,95 @@ namespace dc::native
         };
         std::unordered_map<uint32_t, MdtCopy> g_mdtCopies; // VU data -> its MDT, a copy, its texture records
         uint32_t boundRecord(const uint8_t *rdram, uint32_t name); // GetTexture(GetTextureHandle(name))
-        void noteMdt(const uint8_t *rdram, uint32_t data, uint32_t mdt, bool bind)
+        struct MdtPrimitive
         {
-            const uint32_t size = rd32(rdram, mdt + 8u);
-            if (rd32(rdram, mdt) != kMdtMagic || size < 0x40u || size > 0x800000u)
-                return;
+            uint32_t count, kind;
+            int32_t material;
+        };
+        struct MdtDescription
+        {
+            uint32_t size, stride, materials;
+            std::vector<MdtPrimitive> primitives;
+        };
+        MdtDescription describeMdt(bozo::libs::Guest &guest, uint32_t mdt, bool shadow)
+        {
+            guest.in(mdt, 0x40u);
+            MdtDescription model{guest.read32(mdt + 8u), static_cast<int32_t>(guest.read32(mdt + 0x20u)) > 0 ? 4u : 3u,
+                                 guest.read32(mdt + 0x38u), {}};
+            if (guest.read32(mdt) != kMdtMagic || model.size < 0x40u || model.size > 0x800000u)
+                throw std::runtime_error("native model: invalid MDT header");
+            guest.in(mdt, model.size);
+            const auto require = [&](uint32_t offset, uint64_t bytes) {
+                if (offset > model.size || bytes > model.size - offset)
+                    throw std::runtime_error("native model: MDT range outside asset");
+            };
+            uint32_t at = guest.read32(mdt + 0x28u);
+            require(at, 16);
+            const uint32_t count = guest.read32(mdt + at + 8u);
+            if (count > 4096u) throw std::runtime_error("native model: too many MDT primitives");
+            at += 16u;
+            for (uint32_t p = 0; p < count; ++p)
+            {
+                require(at, 12);
+                const MdtPrimitive primitive{guest.read32(mdt + at + 4u), guest.read32(mdt + at),
+                                             static_cast<int32_t>(guest.read32(mdt + at + 8u))};
+                const uint64_t bytes = 12ull + static_cast<uint64_t>(primitive.count) * model.stride * 4u;
+                require(at, bytes);
+                if (shadow && primitive.count % 3u != 0u)
+                    throw std::runtime_error("native shadow: incomplete triangle");
+                if (!shadow && primitive.material != -1)
+                {
+                    if (primitive.material < 0) throw std::runtime_error("native model: invalid material index");
+                    const uint64_t offset = static_cast<uint64_t>(model.materials) + static_cast<uint32_t>(primitive.material) * 0x60ull;
+                    if (offset > model.size) throw std::runtime_error("native model: material outside asset");
+                    require(static_cast<uint32_t>(offset), 0x60u);
+                }
+                model.primitives.push_back(primitive);
+                at += static_cast<uint32_t>(bytes);
+            }
+            return model;
+        }
+        // The caller still advances its shared arena by this extent. Preserve that ABI while
+        // retiring every byte of VIF/material/vertex serialization into the supplied buffer.
+        uint32_t textureAllocationQwords(bozo::libs::Guest &guest, uint32_t record, uint32_t gp)
+        {
+            uint64_t textureMode = 0;
+            if (record) std::memcpy(&textureMode, guest.in(record + 0x30u, 8), 8);
+            if (!textureMode) std::memcpy(&textureMode, guest.in(gp - 0x7420u, 8), 8);
+            return textureMode ? 4u : 3u;
+        }
+        uint32_t modelAllocationQwords(const MdtDescription &model, bool shadow, bool remake,
+                                       bozo::libs::Guest &guest, const uint8_t *ram, uint32_t mdt, uint32_t gp)
+        {
+            uint64_t qwords = 0;
+            for (const auto &primitive : model.primitives)
+            {
+                ++qwords;
+                if (shadow)
+                {
+                    const uint32_t triangles = primitive.count / 3u;
+                    qwords += triangles * 6ull + ((triangles + 9u) / 10u) * 3ull;
+                    continue;
+                }
+                if (primitive.material != -1)
+                    qwords += 5u + (remake ? 4u : textureAllocationQwords(guest, boundRecord(ram, mdt + model.materials +
+                                         static_cast<uint32_t>(primitive.material) * 0x60u + 0x34u), gp));
+                const uint32_t limit = model.stride == 4u ? 33u : 54u;
+                uint32_t remaining = primitive.count;
+                while (remaining)
+                {
+                    const uint32_t vertices = std::min(remaining, limit);
+                    qwords += vertices * model.stride + 4u;
+                    remaining -= vertices;
+                    if (primitive.kind == 4u && remaining) remaining += 2u;
+                }
+            }
+            if (qwords > 0x1ffffffu / 16u) throw std::runtime_error("native model: allocation extent too large");
+            return static_cast<uint32_t>(qwords);
+        }
+        void noteMdt(const uint8_t *rdram, uint32_t data, uint32_t mdt, bool bind, const MdtDescription &model)
+        {
+            const uint32_t size = model.size;
             auto copy = std::make_shared<std::vector<uint8_t>>(size);
             for (uint32_t i = 0; i < size; ++i)
                 (*copy)[i] = rdram[(mdt + i) & 0x1FFFFFFu];
@@ -197,17 +284,9 @@ namespace dc::native
             if (bind)
             {
                 records = std::make_shared<std::vector<uint32_t>>();
-                const uint32_t stride = static_cast<int32_t>(rd32(rdram, mdt + 0x20u)) > 0 ? 4u : 3u;
-                const uint32_t materials = mdt + rd32(rdram, mdt + 0x38u), list = mdt + rd32(rdram, mdt + 0x28u);
-                const uint32_t primitives = rd32(rdram, list + 8u);
-                uint32_t at = list + 0x10u;
-                for (uint32_t p = 0; p < primitives && p < 4096u && at - mdt < size; ++p)
-                {
-                    const uint32_t count = rd32(rdram, at + 4u);
-                    const int32_t material = static_cast<int32_t>(rd32(rdram, at + 8u));
-                    records->push_back(material != -1 ? boundRecord(rdram, materials + static_cast<uint32_t>(material) * 0x60u + 0x34u) : 0u);
-                    at += 12u + count * stride * 4u;
-                }
+                for (const auto &primitive : model.primitives)
+                    records->push_back(primitive.material != -1 ? boundRecord(rdram, mdt + model.materials +
+                                       static_cast<uint32_t>(primitive.material) * 0x60u + 0x34u) : 0u);
             }
             std::lock_guard<std::mutex> lock(g_mdtMutex);
             MdtCopy &entry = g_mdtCopies[data];
@@ -216,16 +295,27 @@ namespace dc::native
             entry.mdt = mdt;
             entry.copy = std::move(copy);
         }
-        void createFromMdtHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        void createModel(uint8_t *rdram, R5900Context *ctx, Runtime *runtime, bool remake, bool shadow)
         {
-            noteMdt(rdram, getRegU32(ctx, 5), getRegU32(ctx, 6), true);
-            g_createFromMdt(rdram, ctx, runtime);
+            bozo::libs::Guest guest(*runtime, ctx);
+            const uint32_t visual = getRegU32(ctx, 4), data = getRegU32(ctx, 5), mdt = getRegU32(ctx, 6);
+            const auto model = describeMdt(guest, mdt, shadow);
+            const uint32_t qwords = modelAllocationQwords(model, shadow, remake, guest, rdram, mdt, getRegU32(ctx, 28));
+            guest.in(visual + 0x18u, 8);
+            noteMdt(rdram, data, mdt, !remake && !shadow, model);
+            guest.write32(visual + 0x18u, data);
+            guest.write32(visual + 0x1cu, qwords);
+            ++(shadow ? g_nativeShadowBuilds : remake ? g_nativeModelRemakes : g_nativeModelBuilds);
+            g_retiredModelBytes += qwords * 16ull;
+            setReturnS32(ctx, static_cast<int32_t>(qwords));
+            ctx->pc = getRegU32(ctx, 31);
         }
+        void createFromMdtHook(uint8_t *ram, R5900Context *ctx, Runtime *rt) { createModel(ram, ctx, rt, false, false); }
         void createFromMdtRemakeHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
-            noteMdt(rdram, getRegU32(ctx, 5), getRegU32(ctx, 6), false);
-            g_createFromMdtRemake(rdram, ctx, runtime);
+            createModel(rdram, ctx, runtime, true, false);
         }
+        void createShadowHook(uint8_t *ram, R5900Context *ctx, Runtime *rt) { createModel(ram, ctx, rt, false, true); }
         Model modelOf(const uint8_t *rdram, uint32_t visual)
         {
             Model model;
@@ -253,29 +343,47 @@ namespace dc::native
 
         // The object state CFrameVu1::DrawVu1 hands SetGsReg3 just before it draws its visual: TEST (alpha test
         // reference), ZBUF (Z write) and ALPHA (translucency), the game's own values.
-        struct ObjectState
+        struct ObjectMaterial
         {
             bool valid = false;
-            uint64_t test = 0, zbuf = 0, alpha = 0;
+            bozo::render::Material::Blend blend = bozo::render::Material::Blend::Alpha;
+            bool depthWrite = true, alphaTest = false;
+            uint8_t alphaRef = 0;
         } g_objectState;
-        void setGsReg3Hook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        void setGsReg3Hook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            // Translate the game's scalar material arguments at the call boundary. Retain
+            // native draw properties, never a bank of TEST/ZBUF/ALPHA register values.
+            const uint64_t test = rd64(rdram, getRegU32(ctx, 5));
+            const uint64_t zbuf = rd64(rdram, getRegU32(ctx, 6));
+            const uint64_t alpha = rd64(rdram, getRegU32(ctx, 7));
+            g_objectState = {};
             g_objectState.valid = true;
-            g_objectState.test = rd64(rdram, getRegU32(ctx, 5));
-            g_objectState.zbuf = rd64(rdram, getRegU32(ctx, 6));
-            g_objectState.alpha = rd64(rdram, getRegU32(ctx, 7));
-            g_setGsReg3(rdram, ctx, runtime);
+            g_objectState.blend = bozo::render::blendOf(alpha);
+            g_objectState.depthWrite = ((zbuf >> 32) & 1u) == 0u;
+            const uint32_t ate = test & 1u, atst = (test >> 1) & 7u, aref = (test >> 4) & 0xffu;
+            if (ate != 0u && ((test >> 12) & 3u) == 0u && (atst == 5u || atst == 6u))
+            {
+                g_objectState.alphaTest = atst == 6u || aref > 0u;
+                g_objectState.alphaRef = static_cast<uint8_t>(atst == 5u && aref > 0u ? aref - 1u : aref);
+            }
+            // The original only serialized these values into a DMA/GIF output buffer.
+            // Native materials need no packet words and do not advance the caller's cursor.
+            setReturnS32(ctx, 0);
+            ctx->pc = getRegU32(ctx, 31);
         }
 
-        void applyObjectState(const ObjectState &state, bozo::render::Material &material)
+        void applyObjectState(const ObjectMaterial &state, bozo::render::Material &material)
         {
             material.blend = bozo::render::Material::Blend::Alpha;
             material.depthWrite = true;
             material.alphaTest = false;
             if (!state.valid)
                 return;
-            material.blend = bozo::render::blendOf(state.alpha);
-            material.depthWrite = ((state.zbuf >> 32) & 1u) == 0u;
+            material.blend = state.blend;
+            material.depthWrite = state.depthWrite;
+            material.alphaTest = state.alphaTest;
+            material.alphaRef = state.alphaRef;
             // DC_FORCE_ZWRITE=1 (diagnosis): Z written whatever the object's ZBUF says.
             static const bool s_forceZWrite = [] { const char *v = std::getenv("DC_FORCE_ZWRITE"); return v && v[0] == '1'; }();
             if (!material.depthWrite)
@@ -284,15 +392,12 @@ namespace dc::native
                 if (s_forceZWrite)
                     material.depthWrite = true;
             }
-            // TEST: ATE, ATST (5 GEQUAL, 6 GREATER), AREF; a failing pixel kept out entirely (AFAIL KEEP) is a cut-out.
-            const uint32_t ate = state.test & 1u, atst = (state.test >> 1) & 7u, aref = (state.test >> 4) & 0xFFu;
-            const uint32_t afail = (state.test >> 12) & 3u;
-            if (ate != 0u && afail == 0u && (atst == 5u || atst == 6u))
-            {
-                const uint32_t ref = atst == 5u ? (aref > 0u ? aref - 1u : 0u) : aref;
-                material.alphaTest = atst == 6u || aref > 0u;
-                material.alphaRef = static_cast<uint8_t>(std::min<uint32_t>(ref, 255u));
-            }
+        }
+
+        uint64_t g_depthSamples = 0, g_depthPending = 0, g_visibilityBatches = 0;
+        void depthReadbackHook(uint8_t *, R5900Context *, Runtime *)
+        {
+            throw std::runtime_error("DC readback caller needs a native implementation; visibility no longer uses SDK readbacks");
         }
 
         // The VU1 program's lighting (image 8c7dbae50f1ab651, its setup at pc 0x50; f256fcac190325a3 for the models):
@@ -1485,11 +1590,19 @@ namespace dc::native
             submit(setup, material, nullptr, vertices);
         }
 
-        void drawVu1Hook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        uint64_t g_retiredModelEnvelopes = 0;
+        void drawVu1Hook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            // The sceVif1Packet overload (0x134BC0) forwards these same native
+            // inputs. Its old packet termination/cursor/reservation is unnecessary.
+            if (ctx->pc == 0x00134BC0u) ++g_retiredModelEnvelopes;
             const uint32_t visual = getRegU32(ctx, 4), localToWorld = getRegU32(ctx, 6);
             const uint32_t renderInfo = getRegU32(ctx, 7), program = getRegU32(ctx, 8);
             const bool newLights = getRegU32(ctx, 11) == 0u; // DrawVu1's last argument: 0 sends RenderInfo's lights
+            // The original's only nonlocal output was its console packet. Native drawing
+            // already computes the matrices/lights below; no packet or packet-sized return.
+            setReturnS32(ctx, 0);
+            ctx->pc = getRegU32(ctx, 31);
             ++g_stats.calls;
             {
                 uint32_t water = 0;
@@ -1507,9 +1620,7 @@ namespace dc::native
                     return;
                 }
             }
-            // The game still builds its packet (the GS stream keeps its place: the renderer groups); nothing reads it.
-            g_drawVu1(rdram, ctx, runtime);
-            const ObjectState state = g_objectState;
+            const ObjectMaterial state = g_objectState;
             g_objectState.valid = false;
             if (rd32(rdram, visual + 0x18u) == 0u || rd32(rdram, visual + 0x1Cu) == 0u)
                 return; // DrawVu1 drew nothing (no VU data)
@@ -1534,8 +1645,8 @@ namespace dc::native
             if (g_dump2D)
             {
                 const Matrix world = load(rdram, localToWorld);
-                std::fprintf(stderr, "[dc:dump] %s shadow %u at (%g %g %g) alpha %016llx%s\n", g_drawWhat, rd32(rdram, renderInfo + 0x320u),
-                             world.m[12], world.m[13], world.m[14], static_cast<unsigned long long>(state.alpha), state.valid ? "" : " (no state)");
+                std::fprintf(stderr, "[dc:dump] %s shadow %u at (%g %g %g) native blend %u%s\n", g_drawWhat, rd32(rdram, renderInfo + 0x320u),
+                             world.m[12], world.m[13], world.m[14], static_cast<unsigned>(state.blend), state.valid ? "" : " (no material)");
             }
             // DC_SKIP_MDT=<hex address> (diagnosis): models with that MDT are not drawn.
             static const uint32_t s_skipMdt = [] { const char *v = std::getenv("DC_SKIP_MDT"); return v ? static_cast<uint32_t>(std::strtoul(v, nullptr, 16)) : 0u; }();
@@ -1556,10 +1667,26 @@ namespace dc::native
         // CreateVUData (0x13C5F0) lays them out (the two rows swapped when the row's flag at + 0x7110 is set), with its
         // material at + 0x60 (texture name at + 0x94). It draws with RenderInfo's lights, as its DrawVu1 call asks.
         constexpr uint32_t kClothDrawVu1 = 0x0013C470u;
+        uint32_t textureRecord(const uint8_t *rdram, uint32_t name);
+        void clothCreateHook(uint8_t *ram, R5900Context *ctx, Runtime *runtime)
+        {
+            bozo::libs::Guest guest(*runtime, ctx);
+            const uint32_t cloth = getRegU32(ctx, 4);
+            const int32_t rows = static_cast<int32_t>(guest.read32(cloth + 0x2cu));
+            const int32_t columns = static_cast<int32_t>(guest.read32(cloth + 0x30u));
+            if (rows < 0 || rows > 16 || columns < 0 || columns > 16)
+                throw std::runtime_error("native cloth: grid outside simulation storage");
+            const uint32_t qwords = 6u + textureAllocationQwords(guest, textureRecord(ram, cloth + 0x94u), getRegU32(ctx, 28)) +
+                                    static_cast<uint32_t>(std::max(0, rows - 1)) * (4u + static_cast<uint32_t>(columns) * 6u);
+            ++g_nativeClothBuilds;
+            g_retiredModelBytes += qwords * 16ull;
+            setReturnS32(ctx, static_cast<int32_t>(qwords));
+            ctx->pc = getRegU32(ctx, 31);
+        }
         void clothDrawHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             const uint32_t cloth = getRegU32(ctx, 4), localToWorld = getRegU32(ctx, 6), renderInfo = getRegU32(ctx, 7);
-            const ObjectState state = g_objectState;
+            const ObjectMaterial state = g_objectState;
             g_objectState.valid = false;
             setReturnS32(ctx, 0); // nothing added to the game's packet
             ctx->pc = getRegU32(ctx, 31);
@@ -2890,19 +3017,40 @@ namespace dc::native
         std::unordered_set<uint32_t> g_patchedRecords;
         // ReloadTexture (0x133070: a0 the texture manager, a2 the group): sends the group's records (their first half-word,
         // the group) to GS memory when the group is not the current one or not loaded yet.
-        RecompiledFunction g_reloadTexture = nullptr;
+        uint64_t g_nativeTextureReloads = 0, g_nativeTextureSelections = 0, g_nativeTextureTm2 = 0, g_nativeTextureFiles = 0;
         void reloadTextureHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
+            bozo::libs::Guest guest(*runtime, ctx);
             const uint32_t manager = getRegU32(ctx, 4);
             const int32_t group = static_cast<int32_t>(getRegU32(ctx, 6));
-            const bool sends = group >= 0 && group < 0x48 &&
-                               (static_cast<int32_t>(rd32(rdram, manager + 0xCu)) != group ||
-                                rd32(rdram, manager + static_cast<uint32_t>(group * 0xF + 0x10) * 4u) == 0u);
-            g_reloadTexture(rdram, ctx, runtime);
-            if (!sends)
+            ++g_nativeTextureReloads;
+            ctx->pc = getRegU32(ctx, 31);
+            if (group < 0 || group >= 0x48)
+            {
+                guest.write32(manager + 0xcu, 0xffffffffu);
                 return;
-            const int32_t count = static_cast<int32_t>(rd32(rdram, manager));
-            for (int32_t i = 1; i < std::min(count, 1024); ++i)
+            }
+            guest.in(manager, 0x10f8u);
+            const uint32_t selected = manager + static_cast<uint32_t>(group) * 60u;
+            if (static_cast<int32_t>(guest.read32(manager + 0xcu)) == group && guest.read32(selected + 0x40u))
+                return;
+            const int32_t count = static_cast<int32_t>(guest.read32(manager));
+            if (count < 0 || count > 1024) throw std::runtime_error("native texture reload: invalid record count");
+            guest.in(manager + 0x10f8u, static_cast<uint32_t>(count) * 0x50u);
+            const int32_t start = static_cast<int32_t>(guest.read32(selected + 0x3cu));
+            // Preserve the manager's group-overlap bookkeeping. Native texture records
+            // replace the old flush/upload packets; no packet pointer or mip chain is read.
+            for (uint32_t other = 0; other < 72u; ++other)
+            {
+                const uint32_t pending = manager + other * 60u + 0x48u;
+                if (other != static_cast<uint32_t>(group) && static_cast<int32_t>(guest.read32(pending)) < start)
+                    guest.write32(pending, static_cast<uint32_t>(start));
+            }
+            guest.write32(manager + 0xcu, static_cast<uint32_t>(group));
+            guest.write32(selected + 0x48u, 0);
+            guest.write32(selected + 0x40u, 1);
+            ++g_nativeTextureSelections;
+            for (int32_t i = 1; i < count; ++i)
             {
                 const uint32_t record = manager + 0x10F8u + static_cast<uint32_t>(i) * 0x50u;
                 if (static_cast<int16_t>(rd32(rdram, record) & 0xFFFFu) != group)
@@ -3673,7 +3821,6 @@ namespace dc::native
         }
 
         // The ALPHA the game sets for its 2D (setAlphaFlag 0x15BC20: a1 its sceGsAlpha; MGSetGsALPHA 0x12EF90: a0).
-        RecompiledFunction g_setAlphaFlag = nullptr, g_setGsAlpha = nullptr, g_setEnv = nullptr;
         // DC_PROBE_2D=1: each distinct (routine, caller, ALPHA) that sets the 2D blend, once.
         void noteAlpha(const char *who, R5900Context *ctx)
         {
@@ -3710,26 +3857,60 @@ namespace dc::native
             g_alpha2D = saved;
         }
         // SetEnv (0x140DA0): the frame's default state, ALPHA among it (mgAlpha, gp - 0x7408).
-        void setEnvHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        void setEnvHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             g_gp = getRegU32(ctx, 28);
             g_alpha2D = rd64(rdram, g_gp - 0x7408u);
             noteAlpha("SetEnv", ctx);
-            g_setEnv(rdram, ctx, runtime);
+            setReturnS32(ctx, 0);
+            ctx->pc = getRegU32(ctx, 31);
         }
-        void setAlphaFlagHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        void setAlphaFlagHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             g_alpha2D = rd64(rdram, getRegU32(ctx, 5));
             noteAlpha("setAlphaFlag", ctx);
-            g_setAlphaFlag(rdram, ctx, runtime);
+            setReturnS32(ctx, 0);
+            ctx->pc = getRegU32(ctx, 31);
         }
-        void setGsAlphaHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        void setGsAlphaHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             // A null argument restores the game's default, mgAlpha (gp - 0x7408), as MGSetGsALPHA does.
             const uint32_t alpha = getRegU32(ctx, 4);
             g_alpha2D = rd64(rdram, alpha != 0u ? alpha : getRegU32(ctx, 28) - 0x7408u);
             noteAlpha(alpha != 0u ? "MGSetGsALPHA" : "MGSetGsALPHA(default)", ctx);
-            g_setGsAlpha(rdram, ctx, runtime);
+            setReturnS32(ctx, 0);
+            ctx->pc = getRegU32(ctx, 31);
+        }
+
+        uint64_t g_retiredStateCalls = 0;
+        void discardConsoleStateHook(uint8_t *, R5900Context *ctx, Runtime *)
+        {
+            // MGSetGsTEST/ZBUF/TEXA only serialized a register argument into the frame
+            // packet. They changed no game data; native draw materials are explicit.
+            // Even the optional argument/default scalar need not be read here.
+            ++g_retiredStateCalls;
+            ctx->pc = getRegU32(ctx, 31);
+        }
+
+        uint64_t g_retiredEnvelopes = 0, g_nativeWindowRects = 0;
+        void discardConsoleEnvelopeHook(uint8_t *, R5900Context *ctx, Runtime *)
+        {
+            // openGiftag/closeGiftag only wrapped obsolete packet output. Native
+            // draws submit directly and need neither a packet pointer nor a tag.
+            ++g_retiredEnvelopes;
+            ctx->pc = getRegU32(ctx, 31);
+        }
+        void setWindowRectHook(uint8_t *, R5900Context *ctx, Runtime *runtime)
+        {
+            // Keep CRect's four full-width game fields. The original additionally
+            // packed a hardware scissor command, which has no native consumer.
+            std::array<uint32_t, 4> rectangle{0, 0, 640, 224};
+            bozo::libs::Guest guest(*runtime, ctx);
+            if (ctx->pc == 0x0012DAE0u)
+                std::memcpy(rectangle.data(), guest.in(getRegU32(ctx, 4), sizeof(rectangle)), sizeof(rectangle));
+            guest.write(0x01C75510u, rectangle.data(), sizeof(rectangle));
+            ++g_nativeWindowRects;
+            ctx->pc = getRegU32(ctx, 31);
         }
 
         // VSyncCallBack_Load (0x154320): while the game loads, its vsync callback draws the loading picture (the SCE and
@@ -3773,7 +3954,7 @@ namespace dc::native
             }
         }
 
-        RecompiledFunction g_loadTm2 = nullptr, g_loadTexture = nullptr;
+        RecompiledFunction g_textureInfoTm2 = nullptr, g_textureInfoFile = nullptr;
         void pinRecord(const uint8_t *rdram, uint32_t record)
         {
             g_pinned.erase(record);
@@ -3785,12 +3966,76 @@ namespace dc::native
         // argument set when 8-bit texels are in GS order): sends a fixed texture (the menus' "stayframe", "window"...) to
         // GS memory once, from a buffer the record never points at (+ 0x38 and + 0x48 stay as they were). Decoded right
         // after it, with those pointers put in the record for the decode and the record then restored as it was.
-        RecompiledFunction g_enterFix = nullptr;
+        uint64_t g_nativeFixedTextures = 0, g_nativeFixedZTextures = 0;
+        uint32_t freeTextureRecord(bozo::libs::Guest &guest, uint32_t manager)
+        {
+            guest.in(manager, 0x10f8u + 196u * 0x50u);
+            for (uint32_t i = 1; i < 196u; ++i)
+            {
+                const uint32_t record = manager + 0x10f8u + i * 0x50u;
+                if (!guest.read8(record + 8u)) return record;
+            }
+            throw std::runtime_error("native fixed texture: no free texture record");
+        }
+        uint64_t signedWord(uint32_t v) { return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(v))); }
+        void insertFixedTexture(R5900Context *ctx, Runtime *runtime)
+        {
+            bozo::libs::Guest guest(*runtime, ctx);
+            const uint32_t manager = guest.arg(0), nameAt = guest.arg(1), pixels = guest.arg(2);
+            const auto name = guest.string(nameAt, 32);
+            if (name.empty()) return;
+            const uint32_t kind = guest.arg(5);
+            if (kind != 1u && kind != 3u && kind != 4u) return;
+            const uint32_t width = guest.arg(3), height = guest.arg(4);
+            if (!width || !height || width > 65535u || height > 65535u ||
+                static_cast<uint64_t>(width) * height * kind > 0x7fffffffu)
+                throw std::runtime_error("native fixed texture: invalid dimensions");
+            const bool mipmaps = pixels && guest.arg(8) && guest.arg(9);
+            const uint64_t filter = mipmaps ? guest.arg64(12) : 0;
+            const uint32_t bytes = width * height * kind;
+            uint32_t extent = bytes >> 8;
+            if (mipmaps) extent += (bytes >> 12) + (bytes >> 10);
+            extent = (extent + 31u) & ~31u;
+            // Preserve the caller's allocation/record ABI, without creating an upload,
+            // retaining GS memory or reading any mip/pixel stream to serialize it.
+            const uint32_t record = freeTextureRecord(guest, manager);
+            uint32_t remaining = guest.read32(manager + 20u) - extent;
+            const uint32_t base = remaining;
+            uint32_t paletteBase = 0;
+            if ((pixels && kind == 1u) || (!pixels && kind != 4u))
+            {
+                paletteBase = pixels ? remaining - 32u : remaining;
+                remaining -= 32u;
+            }
+            const auto exponent = [](uint32_t n) { uint32_t e = 0, power = 1; while (power < n) { power <<= 1; ++e; } return e; };
+            const uint32_t format = kind == 1u ? 0x13u : kind == 3u ? 1u : 0u;
+            uint64_t descriptor = signedWord(base) | (static_cast<uint64_t>(std::max(1u, width >> 6)) << 14) |
+                                  (static_cast<uint64_t>(format) << 20) | (static_cast<uint64_t>(exponent(width)) << 26) |
+                                  (static_cast<uint64_t>(exponent(height)) << 30) | (1ull << 34);
+            if (kind == 1u) descriptor |= signedWord(paletteBase) << 37 | (1ull << 61);
+            guest.write(record + 8u, name.c_str(), static_cast<uint32_t>(name.size() + 1u));
+            guest.write16(record, 0xffffu);
+            guest.write16(record + 2u, static_cast<uint16_t>(width));
+            guest.write16(record + 4u, static_cast<uint16_t>(height));
+            guest.write16(record + 6u, static_cast<uint16_t>(kind));
+            guest.write(record + 0x28u, &descriptor, 8);
+            if (pixels && kind != 1u) guest.write32(record + 0x48u, 0);
+            if (mipmaps)
+            {
+                const uint64_t mode = filter ? ((((filter >> 16) & 0x1fu) >> 3) << 19) | 0x368u |
+                                               (((filter >> 32) & 0xfffu) << 32) : 0xffffff8800000368ull;
+                guest.write(record + 0x30u, &mode, 8);
+            }
+            guest.write32(manager + 20u, remaining);
+            guest.write32(manager, 195u);
+            ++g_nativeFixedTextures;
+        }
         void enterFixHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint32_t name = getRegU32(ctx, 5), pixels = getRegU32(ctx, 6), palette = getRegU32(ctx, 10);
             const uint32_t gsOrder = stackArg(rdram, ctx, 5);
-            g_enterFix(rdram, ctx, runtime);
+            insertFixedTexture(ctx, runtime);
+            ctx->pc = getRegU32(ctx, 31);
             const uint32_t record = pixels != 0u ? textureRecord(rdram, name) : 0u;
             if (record == 0u)
                 return;
@@ -3818,20 +4063,30 @@ namespace dc::native
         // EnterFixTextureZ (0x132930: a1 a picture file): a 640 x 224 8-bit picture (the menus' "stayframe" sheet) sent once
         // as PSMT8H to 0x1180, its palette to 0x3FE0, from the file's buffer; the record holds neither pointer. Decoded
         // right after it, as EnterFixTexture's are.
-        RecompiledFunction g_enterFixZ = nullptr;
         void enterFixZHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint32_t file = getRegU32(ctx, 5);
             if (std::getenv("DC_PROBE_2D"))
                 std::fprintf(stderr, "[dc:2d] EnterFixTextureZ(file %08x)\n", file);
-            g_enterFixZ(rdram, ctx, runtime);
-            const uint32_t picture = file + rd32(rdram, file + 0x30u);
-            if ((rd32(rdram, picture + 0x24u) & 0xFFFFu) != 0x280u || (rd32(rdram, picture + 0x24u) >> 16) != 0xE0u)
-            {
-                std::fprintf(stderr, "[dc:2d] fixed Z texture from file %08x: not a 640 x 224 picture (%08x), left to the game\n", file,
-                             rd32(rdram, picture + 0x24u));
+            bozo::libs::Guest guest(*runtime, ctx);
+            guest.in(file, 0x34u);
+            const uint32_t offset = guest.read32(file + 0x30u);
+            if (offset > 0xffffffffu - file) throw std::runtime_error("native fixed Z texture: picture address overflow");
+            const uint32_t picture = file + offset;
+            guest.in(picture, 0x28u);
+            ctx->pc = getRegU32(ctx, 31);
+            if (guest.read32(picture + 0x24u) != 0x00e00280u || guest.read8(picture + 0x23u) != 5u)
                 return;
-            }
+            const auto name = guest.string(file + 0x10u, 32);
+            const uint32_t inserted = freeTextureRecord(guest, getRegU32(ctx, 4));
+            guest.write(inserted + 8u, name.c_str(), static_cast<uint32_t>(name.size() + 1u));
+            guest.write16(inserted, 0x49u);
+            guest.write16(inserted + 2u, 640u);
+            guest.write16(inserted + 4u, 224u);
+            guest.write16(inserted + 6u, 1u);
+            const uint64_t descriptor = 0x2007fc0629b29180ull;
+            guest.write(inserted + 0x28u, &descriptor, 8);
+            ++g_nativeFixedZTextures;
             const uint32_t pixels = picture + 0x10u + (rd32(rdram, picture + 0x1Cu) & 0xFFFFu);
             const uint32_t palette = pixels + rd32(rdram, picture + 0x18u);
             const uint32_t record = textureRecord(rdram, file + 0x10u);
@@ -3860,17 +4115,39 @@ namespace dc::native
                              reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)), record, texture ? "decoded" : "NOT decoded");
         }
         // LoadTexture(TM2_head *, CTexture *, tbp, cbp) and LoadTexture(char *, u8 *, CTexture *, tbp, cbp).
+        void finishTextureLoad(uint8_t *ram, R5900Context *ctx, Runtime *rt, uint32_t record, uint32_t tbp, uint32_t cbp, uint32_t caller)
+        {
+            bozo::libs::Guest guest(*rt, ctx);
+            uint64_t descriptor;
+            std::memcpy(&descriptor, guest.in(record + 0x28u, 8), 8);
+            descriptor = (descriptor & ~0x3fffull) | (tbp & 0x3fffu);
+            descriptor |= 1ull << 34;
+            descriptor = (descriptor & 0xfff8001fffffffffull) | (static_cast<uint64_t>(cbp & 0x3fffu) << 37);
+            guest.write(record + 0x28u, &descriptor, 8);
+            pinRecord(ram, record);
+            ctx->pc = caller;
+        }
         void loadTm2Hook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
-            const uint32_t record = getRegU32(ctx, 5);
-            g_loadTm2(rdram, ctx, runtime);
-            pinRecord(rdram, record);
+            const uint32_t source = getRegU32(ctx, 4), record = getRegU32(ctx, 5);
+            const uint32_t tbp = getRegU32(ctx, 6), cbp = getRegU32(ctx, 7), caller = getRegU32(ctx, 31);
+            ctx->r[4].ud[0] = record;
+            ctx->r[5].ud[0] = 0x00299bf0u; // the original wrapper's default asset name
+            ctx->r[6].ud[0] = source;
+            g_textureInfoTm2(rdram, ctx, runtime); // asset parsing only, no upload/packet builder
+            finishTextureLoad(rdram, ctx, runtime, record, tbp, cbp, caller);
+            ++g_nativeTextureTm2;
         }
         void loadTextureHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
-            const uint32_t record = getRegU32(ctx, 6);
-            g_loadTexture(rdram, ctx, runtime);
-            pinRecord(rdram, record);
+            const uint32_t name = getRegU32(ctx, 4), source = getRegU32(ctx, 5), record = getRegU32(ctx, 6);
+            const uint32_t tbp = getRegU32(ctx, 7), cbp = getRegU32(ctx, 8), caller = getRegU32(ctx, 31);
+            ctx->r[4].ud[0] = record;
+            ctx->r[5].ud[0] = name;
+            ctx->r[6].ud[0] = source;
+            g_textureInfoFile(rdram, ctx, runtime); // file directory/name selection only
+            finishTextureLoad(rdram, ctx, runtime, record, tbp, cbp, caller);
+            ++g_nativeTextureFiles;
         }
 
         bool g_enabled = false;
@@ -3879,6 +4156,50 @@ namespace dc::native
     bool enabled()
     {
         return g_enabled;
+    }
+
+    void resolveVisibility(Runtime &runtime, R5900Context &ctx, const DepthSampler &sample)
+    {
+        bozo::libs::Guest guest(runtime, &ctx);
+        for (uint32_t slot = 0; slot < 16; ++slot)
+        {
+            const uint32_t query = 0x01C751C0u + slot * 16u;
+            if (guest.read32(query) == 0) continue;
+            const int32_t x = static_cast<int32_t>(guest.read32(query + 4));
+            const int32_t y = static_cast<int32_t>(guest.read32(query + 8));
+            if (x < 4 || x >= 637 || y < 4 || y >= 445)
+            {
+                guest.write32(query + 12, 0xffffffffu);
+                continue;
+            }
+            // Preserve the shared arena's logical extent, without allocating or
+            // writing a readback tile. The old loop reset it for every valid query.
+            const uint32_t arena = guest.read32(getRegU32(&ctx, 28) - 0x7468u);
+            if (static_cast<int32_t>(guest.read32(arena + 12)) < 0x800)
+                throw std::runtime_error("DC visibility arena is smaller than its legacy extent");
+            guest.write32(arena + 8, 0x800);
+            uint32_t minimum = 0x00ffffff;
+            for (int row = 0; row < 8; ++row)
+                for (int col = 0; col < 8; ++col)
+                    minimum = std::min(minimum, sample(x - 4 + col, y / 2 - 4 + row) & 0x00ffffffu);
+            guest.write32(query + 12, minimum);
+        }
+    }
+
+    void queryVisibility(Runtime &runtime, R5900Context &ctx)
+    {
+        ++g_visibilityBatches;
+        auto &renderer = bozo::render::Renderer::instance();
+        bool requested = false;
+        resolveVisibility(runtime, ctx, [&](int32_t x, int32_t y) {
+            if (!requested) { renderer.wantDepth(); requested = true; }
+            // As before, an unavailable asynchronous tile (including headless
+            // mode) supplies empty/far depth until the present thread reads it.
+            uint32_t z = 0;
+            if (renderer.depthAt(1728.0f + x, 1936.0f + y, z)) ++g_depthSamples;
+            else ++g_depthPending;
+            return z;
+        });
     }
 
     void install(Runtime &runtime, bozo::port::Registry &registry)
@@ -3914,19 +4235,14 @@ namespace dc::native
             for (CountHook &hook : g_countHooks)
                 if ((hook.original = runtime.functions.generated(hook.address)))
                     registry.registerFunction(hook.address, &countHook);
-        g_drawVu1 = runtime.functions.generated(kVisualDrawVu1);
-        g_createFromMdt = runtime.functions.generated(kCreateFromMdt);
-        g_createFromMdtRemake = runtime.functions.generated(kCreateFromMdtRemake);
-        g_setGsReg3 = runtime.functions.generated(kSetGsReg3);
-        if (!g_drawVu1 || !g_createFromMdt || !g_createFromMdtRemake || !g_setGsReg3)
-        {
-            std::fprintf(stderr, "[dc:native] a hooked function is missing\n");
-            return;
-        }
         registry.registerFunction(kVisualDrawVu1, &drawVu1Hook);
+        registry.registerFunction(0x00134BC0u, &drawVu1Hook);
         registry.registerFunction(kCreateFromMdt, &createFromMdtHook);
         registry.registerFunction(kCreateFromMdtRemake, &createFromMdtRemakeHook);
+        registry.registerFunction(0x00136530u, &createShadowHook);
+        registry.registerFunction(0x0013C5F0u, &clothCreateHook);
         registry.registerFunction(kSetGsReg3, &setGsReg3Hook);
+        registry.registerFunction(0x00113758u, &depthReadbackHook);
         registry.registerFunction(kClothDrawVu1, &clothDrawHook);
         registry.registerFunction(kShadowDrawVu1, &shadowDrawHook);
         registry.registerFunction(kWaterCreateVUData, &waterCreateHook);
@@ -3971,8 +4287,7 @@ namespace dc::native
             for (int k = 0; k < 6; ++k)
                 if ((g_animeCalls[k] = runtime.functions.generated(kAnimeCallAddress[k])))
                     registry.registerFunction(kAnimeCallAddress[k], animeHooks[k]);
-            if ((g_reloadTexture = runtime.functions.generated(0x00133070u)))
-                registry.registerFunction(0x00133070u, &reloadTextureHook);
+            registry.registerFunction(0x00133070u, &reloadTextureHook);
             registry.registerFunction(0x00151AD0u, &balloonHook);
             registry.registerFunction(0x00140660u, &moveImageTestHook);
             if ((g_getFrameTex = runtime.functions.generated(0x0012F130u)) && (g_getBackTex = runtime.functions.generated(0x0012F1A0u)))
@@ -3984,25 +4299,26 @@ namespace dc::native
             registry.registerFunction(0x00162580u, &blendTextureHook);
             registry.registerFunction(0x00162D80u, &blendTextureTestHook);
             registry.registerFunction(0x0012F970u, &moveFrameBuffHook);
-            if ((g_enterFixZ = runtime.functions.generated(0x00132930u)))
-                registry.registerFunction(0x00132930u, &enterFixZHook);
-            if ((g_enterFix = runtime.functions.generated(0x001320E0u)))
-                registry.registerFunction(0x001320E0u, &enterFixHook);
-            if ((g_loadTm2 = runtime.functions.generated(0x00154950u)))
+            registry.registerFunction(0x00132930u, &enterFixZHook);
+            registry.registerFunction(0x001320E0u, &enterFixHook);
+            if ((g_textureInfoTm2 = runtime.functions.generated(0x00134760u)))
                 registry.registerFunction(0x00154950u, &loadTm2Hook);
-            if ((g_loadTexture = runtime.functions.generated(0x00154770u)))
+            if ((g_textureInfoFile = runtime.functions.generated(0x00134A90u)))
                 registry.registerFunction(0x00154770u, &loadTextureHook);
             if ((g_vsyncLoad = runtime.functions.generated(0x00154320u)))
                 registry.registerFunction(0x00154320u, &vsyncLoadHook);
             if ((g_drawFire = runtime.functions.generated(0x00161AC0u)))
                 registry.registerFunction(0x00161AC0u, &drawFireHook);
-            if ((g_setAlphaFlag = runtime.functions.generated(0x0015BC20u)) && (g_setGsAlpha = runtime.functions.generated(0x0012EF90u)))
-            {
-                registry.registerFunction(0x0015BC20u, &setAlphaFlagHook);
-                registry.registerFunction(0x0012EF90u, &setGsAlphaHook);
-            }
-            if ((g_setEnv = runtime.functions.generated(0x00140DA0u)))
-                registry.registerFunction(0x00140DA0u, &setEnvHook);
+            registry.registerFunction(0x0015BC20u, &setAlphaFlagHook);
+            registry.registerFunction(0x0012EF90u, &setGsAlphaHook);
+            registry.registerFunction(0x0012EDF0u, &discardConsoleStateHook);
+            registry.registerFunction(0x0012EEC0u, &discardConsoleStateHook);
+            registry.registerFunction(0x0012F060u, &discardConsoleStateHook);
+            registry.registerFunction(0x0013DEA0u, &discardConsoleEnvelopeHook);
+            registry.registerFunction(0x0013DF00u, &discardConsoleEnvelopeHook);
+            registry.registerFunction(0x0012D9A0u, &setWindowRectHook);
+            registry.registerFunction(0x0012DAE0u, &setWindowRectHook);
+            registry.registerFunction(0x00140DA0u, &setEnvHook);
             for (ShadowCall &call : g_shadowCalls)
                 if ((call.original = runtime.functions.generated(call.address)))
                     registry.registerFunction(call.address, &blobShadowHook);
@@ -4021,6 +4337,20 @@ namespace dc::native
         static uint32_t s_frames = 0;
         if (++s_frames % 300u == 0u)
         {
+            std::fprintf(stderr, "[dc:native] texture services cumulative: %llu reloads, %llu group selections, %llu TM2 loads, %llu file loads\n",
+                         static_cast<unsigned long long>(g_nativeTextureReloads), static_cast<unsigned long long>(g_nativeTextureSelections),
+                         static_cast<unsigned long long>(g_nativeTextureTm2), static_cast<unsigned long long>(g_nativeTextureFiles));
+            std::fprintf(stderr, "[dc:native] fixed texture services cumulative: %llu fixed, %llu fixed Z\n",
+                         static_cast<unsigned long long>(g_nativeFixedTextures), static_cast<unsigned long long>(g_nativeFixedZTextures));
+            std::fprintf(stderr, "[dc:native] packet-only state setters retired: %llu\n", static_cast<unsigned long long>(g_retiredStateCalls));
+            std::fprintf(stderr, "[dc:native] native window rectangles: %llu; packet envelopes retired: %llu\n",
+                         static_cast<unsigned long long>(g_nativeWindowRects), static_cast<unsigned long long>(g_retiredEnvelopes));
+            std::fprintf(stderr, "[dc:native] model packet wrappers retired: %llu\n",
+                         static_cast<unsigned long long>(g_retiredModelEnvelopes));
+            std::fprintf(stderr, "[dc:native] asset builders cumulative: %llu models, %llu remakes, %llu shadows, %llu cloths; %llu bytes of legacy output extents bypassed\n",
+                         static_cast<unsigned long long>(g_nativeModelBuilds), static_cast<unsigned long long>(g_nativeModelRemakes),
+                         static_cast<unsigned long long>(g_nativeShadowBuilds), static_cast<unsigned long long>(g_nativeClothBuilds),
+                         static_cast<unsigned long long>(g_retiredModelBytes));
             std::fprintf(stderr, "[dc:native] per 300 frames: %llu DrawVu1 calls (%llu without a known MDT, %llu drawn from a copy of their MDT), %llu primitives, "
                                  "%llu triangles, %llu own textures, %llu untextured for lack of one; not drawn: %llu shadows, "
                                  "%llu screen-space; %llu cloths; %llu shadow triangles; %llu waters;%llu GS-order textures not in the store; VU1 programs skipped: %llu\n",
@@ -4042,6 +4372,10 @@ namespace dc::native
                          static_cast<unsigned long long>(g_gateByPc[1].exchange(0)),
                          static_cast<unsigned long long>(g_gateByPc[2].exchange(0)),
                          static_cast<unsigned long long>(g_gateByPc[3].load()));
+            if (g_depthSamples || g_depthPending)
+                std::fprintf(stderr, "[dc:native] visibility depth samples: %llu from GPU, %llu pending (empty depth)\n",
+                             static_cast<unsigned long long>(g_depthSamples), static_cast<unsigned long long>(g_depthPending));
+            std::fprintf(stderr, "[dc:native] native visibility batches: %llu\n", static_cast<unsigned long long>(g_visibilityBatches));
             std::fprintf(stderr, "[dc:native] objects without Z write (ZBUF ZMSK): %llu; depths of field: %llu; back faces culled: %llu; outside the guard band: %llu\n",
                          static_cast<unsigned long long>(g_stats.noZWrite), static_cast<unsigned long long>(g_stats.depthOfFields),
                          static_cast<unsigned long long>(g_stats.culled), static_cast<unsigned long long>(g_stats.guarded));

@@ -17,6 +17,8 @@ if hashlib.sha1(data).hexdigest() != 'd9965d6908a334a5dfc982f3384428ad42048d54':
 base, end, helpers = {
     'water': (0x160f20, 0x1610fc, [0x161100, 0x1281b0, 0x1607e0]),
     'effect': (0x163480, 0x1638ec, [0x1312d0, 0x12e990, 0x1110b0, 0x12e740, 0x15d4b0]),
+    'frame_close': (0x12d1dc, 0x12d268, [0x120de0, 0x120c28, 0x112f98, 0x104698, 0x113f40]),
+    'frame_submit': (0x12d63c, 0x12d6a8, [0x10c3a8, 0x1145a0, 0x10c6f8]),
 }[kind]
 phoff = struct.unpack_from('<I', data, 28)[0]
 for i in range(struct.unpack_from('<H', data, 44)[0]):
@@ -26,6 +28,12 @@ for i in range(struct.unpack_from('<H', data, 44)[0]):
         break
 else:
     raise SystemExit('wrapper is not file backed')
+span_start = base
+if kind.startswith('frame_'):
+    # Isolated mid-function spans: synthetic save/return around the exact retail
+    # instructions. No device value, frame boundary or completion is fabricated.
+    base -= 4
+    code = struct.pack('<I', 0x03e0b825) + code + struct.pack('<3I', 0x02e0f825, 0x03e00008, 0)
 strings = ('\0' + kind + '_reference\0').encode()
 symbols = bytes(16) + struct.pack('<IIIBBH', 1, base, len(code), 0x12, 0, 1)
 names = b'\0.text\0.strtab\0.symtab\0.shstrtab\0'
@@ -46,7 +54,15 @@ target.write_bytes(out + b''.join(struct.pack('<10I', *s) for s in sections))
 target.with_suffix('.externals').write_text(''.join(f'override 0x{pc:x}\n' for pc in
     helpers + [0x120c80, 0x120e38, 0x120ec0, 0x121028, 0x120ed8, 0x120e90]))
 selected = [line for line in patches.read_text().splitlines()
-            if line.split('#')[0].strip() and base <= int(line.split()[0], 16) < end]
-if len(selected) != 4:
-    raise SystemExit('wrapper fixture expects the complete four guarded production adaptations')
+            if line.split('#')[0].strip() and span_start <= int(line.split()[0], 16) < end]
+if len(selected) != (2 if kind == 'frame_close' else 4):
+    raise SystemExit('wrapper fixture requires its complete guarded production adaptation subset')
 target.with_suffix('.patches').write_text('\n'.join(selected) + '\n')
+# The frame-submit reference is the published, already-native boundary: its two
+# old channel-tag adaptations are retained in BOTH versions. Only the new packet
+# object/source dependency is different. Other references use original bytes.
+baseline_sites = {0x12d65c, 0x12d670} if kind == 'frame_submit' else set()
+baseline = [line for line in selected if int(line.split()[0], 16) in baseline_sites]
+if len(baseline) != len(baseline_sites):
+    raise SystemExit('frame reference is missing a published native channel-tag adaptation')
+target.with_suffix('.baseline.patches').write_text('\n'.join(baseline) + '\n')

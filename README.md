@@ -217,6 +217,8 @@ logical rectangle directly. Visibility reduces native depth tiles into query res
 packet or scratch tile; 144 original-loop comparisons check depth patterns, boundaries and arena bookkeeping.
 Water and running-effect wrappers also bypass their packet-only state envelopes while keeping native draws and
 game bookkeeping. Another 96 water and 384 effect comparisons check their retained callbacks, data and ABI.
+Frame-end completion also runs without packet closing or packet-header reads; the native SDK completion and its
+masked callback queue remain intact, checked in 32 reference/adapted cases.
 
 ## Disc facts
 

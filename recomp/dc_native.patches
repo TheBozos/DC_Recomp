@@ -70,3 +70,12 @@
 0x00179950 0x24456100 0x00000000 # discard unused program-chain address
 0x001f620c 0x0c04b8a0 0x0807d890 # skip packet lookup/call/terminate to menu reload 0x1f6240
 0x001f6210 0x00000000 0x00000000 # guard unchanged jump delay slot
+# Loading callback: native sprites need no private packet lifecycle/source.
+# Keep fade/stage logic, native completion, field parity, buffer toggle and syncs.
+0x00154388 0x3c0201d0 0x080550e6 # skip packet Reset setup to title logic 0x154398
+0x0015438c 0x2444b370 0x00000000 # no unused packet pointer in delay slot
+0x00154664 0x3c0201d0 0x080551a2 # skip packet End/Terminate to cache call 0x154688
+0x00154668 0x2444b370 0x00000000 # no unused packet pointer in delay slot
+0x0015469c 0x8c25b374 0x24050000 # completion has no packet source
+0x001546c4 0x8f828bc0 0x080551cb # skip half-offset/display/cache setup to buffer toggle 0x15472c
+0x001546c8 0x10400005 0x00000000 # discard obsolete environment-selection branch

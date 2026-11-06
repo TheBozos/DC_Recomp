@@ -27,6 +27,8 @@ base, end, helpers = {
         0x152ee0, 0x14c4f0, 0x15c310]),
     'edit_state': (0x17990c, 0x17996c, [0x120d70, 0x177fa0]),
     'menu_state': (0x1f61fc, 0x1f624c, [0x22bdf0, 0x12e280, 0x120d70, 0x120c28, 0x22d0e0]),
+    'loading': (0x154320, 0x154770, [0x10cc58, 0x120c18, 0x1110b0, 0x15c310,
+        0x120de0, 0x120c28, 0x1145d0, 0x10c6f8, 0x113e48, 0x114c50, 0x112ea0]),
 }[kind]
 phoff = struct.unpack_from('<I', data, 28)[0]
 for i in range(struct.unpack_from('<H', data, 44)[0]):
@@ -60,19 +62,23 @@ sections = [[0]*10, [1, 1, 6, base, 0x100, len(code), 0, 0, 4, 0],
 target.parent.mkdir(parents=True, exist_ok=True)
 target.write_bytes(out + b''.join(struct.pack('<10I', *s) for s in sections))
 target.with_suffix('.externals').write_text(''.join(f'override 0x{pc:x}\n' for pc in
-    helpers + [0x120c80, 0x120e38, 0x120ec0, 0x121028, 0x120ed8, 0x120e90]))
+    helpers + [0x120c80, 0x120e38, 0x120ec0, 0x121028, 0x120ed8, 0x120e90])
+    + ('native 0x15434c\n' if kind == 'loading' else ''))
 selected = [line for line in patches.read_text().splitlines()
             if line.split('#')[0].strip() and span_start <= int(line.split()[0], 16) < end]
 expected = {'frame_close': 2, 'frame_draw': 0, 'frame_member': 0, 'mdt_draw': 2,
-            'message': 2, 'edit_state': 2, 'menu_state': 2}.get(kind, 4)
+            'message': 2, 'edit_state': 2, 'menu_state': 2, 'loading': 9}.get(kind, 4)
 if len(selected) != expected:
     raise SystemExit('wrapper fixture requires its complete guarded production adaptation subset')
 target.with_suffix('.patches').write_text('\n'.join(selected) + '\n')
-# The frame-submit reference is the published, already-native boundary: its two
-# old channel-tag adaptations are retained in BOTH versions. Only the new packet
-# object/source dependency is different. Other references use original bytes.
+# Frame-submit/loading references retain their published native changes in BOTH
+# versions. Only the new packet/environment retirement differs. Other references
+# use original bytes.
 baseline_sites = {0x12d65c, 0x12d670} if kind == 'frame_submit' else set()
+if kind == 'loading':
+    # Compare against the published native field-query boundary in BOTH versions.
+    baseline_sites = {0x15434c, 0x154350}
 baseline = [line for line in selected if int(line.split()[0], 16) in baseline_sites]
 if len(baseline) != len(baseline_sites):
-    raise SystemExit('frame reference is missing a published native channel-tag adaptation')
+    raise SystemExit('wrapper reference is missing a published native adaptation')
 target.with_suffix('.baseline.patches').write_text('\n'.join(baseline) + '\n')

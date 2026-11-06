@@ -4,7 +4,7 @@ Implemented on 2026-11-06. The active build uses only the `BozoEngine` submodule
 
 The graphics cleanup includes the DC adapters, regression fixtures, guarded offline adaptations and published
 BozoEngine pin `4a8f70a` together. References to local/unpublished work in the milestone sections below describe
-the state at those earlier checks. The latest validation is 30/30 suites and both 5,800-frame routes; remaining
+the state at those earlier checks. The latest validation is 31/31 suites and both 5,800-frame routes; remaining
 coverage and packet-work limits are listed in the final section.
 
 ## Ownership boundary
@@ -574,3 +574,43 @@ F2F received the audit and qualification progress. Both lanes were checked for D
 DC's explicit sound/system-module provider pattern and the current engine loader's path-only ABI/permissive
 fallback were shared with VP2's loader owner; no overlapping implementation was started. Other console-data
 builders, setup/display work, arena extents, unsupported readbacks and wider gameplay remain open.
+
+## Loading callback without private graphics packets
+
+Seven guarded offline words retire `VSyncCallBack_Load`'s private packet Reset/End/Terminate, its source-pointer
+read before native completion, and console-only half-offset/display-swap/cache setup. Native sprites still use
+the original rectangles, textures and alpha. Fade/title/stage/countdown logic, the already-native field query,
+buffer-index toggle and completion/cache/sync ordering remain compiled. Countdown callbacks retain their single
+final sync; callbacks that submit an image retain both syncs and exactly one native completion. The adapter still
+publishes the loading picture when the main loop waits. The main frame packet reset is separate and unchanged.
+BozoEngine remains pinned to `4a8f70a`; its existing native completion API is sufficient.
+
+Evidence in `build/native-cleanup12/`:
+
+- **31/31 suites pass** (`tests.log`). **96 whole-callback cases** cover two logical field parities, both buffer
+  indices, masked/enabled callbacks, already-ended callbacks, positive/negative countdowns, logo/title stages,
+  fade bounds and hold counters. Both versions retain the two published field-query adaptations, and invoke
+  DC's actual native parity service. The reference runs the compiled original packet/half-offset/swap/float-convert
+  helpers against the real native SDK completion/sync services. Only sprite submission is a controlled boundary;
+  its texture/rectangle/alpha inputs and logical effects are compared. Adapted code performs no packet lifecycle
+  or half-offset/swap setup, even with inaccessible private buffer pointers. Saved registers/stack/return, float
+  status and all non-stack RAM match after retaining logical state and excluding the original unused packet/display
+  writes. The adapted private packet/display records stay untouched. Retired channel/status banks also stay untouched.
+- Native submission count/channel and completion state match; enabled callbacks queue, and masked completions
+  remain pending until enabled. The initial fixture assertion incorrectly expected two syncs for countdown-only
+  callbacks; the actual original makes one. The corrected assertion checks that distinction in both versions.
+  No production sync was removed to satisfy the test, and no whole-callback clock-equivalence claim is made.
+- Both **5,800-frame headless/windowed routes finish**, with zero register/unknown accesses, zero VU0 microprogram
+  calls and zero GIF SDK submissions. Native VIF1 completion counts are 5,686 / 6,045; sync counts 6,884 / 7,243.
+  Each run records 41 sampled loading-state rows: 28 with the SCE-logo texture and 13 with the map-title texture,
+  including fade progression. These establish real callback coverage, not exact callback or draw totals.
+- Inspected ten captures: Sony presentation (100), black transition (300), attract (2,000), load confirmation
+  (2,800), Norune (3,400), pause (3,550), running (4,800), movement (5,100), menu (5,500) and dismissal (5,799).
+  Map-title fade coverage comes from the state probe, not a dedicated picture capture. Headless 48 kHz stereo PCM
+  has 4,680,761 frames, RMS 3,592.501, tail RMS 3,434.535 and peak 28,775. Windowed has 5,076,361 frames, RMS
+  3,537.832, tail RMS 2,850.981 and peak 32,766. Audio remains active; no subjective listening, exact timing,
+  console parity or full-campaign claim is made.
+
+F2F received the scope, conditional-sync correction and qualification progress. Both lanes were checked for
+DC-Recomp, @all and @WindowsRecomp; TMB shader and VP2 transfer/loader work remain independently owned.
+Other mixed builders, setup/display producers, legacy extents, unsupported readbacks and wider gameplay remain open.

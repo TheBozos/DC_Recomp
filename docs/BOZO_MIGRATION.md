@@ -745,3 +745,50 @@ setup/display work, legacy extents, native-copy identifiers and unsupported read
 `FishLineDraw` mixes real projected XYZ/ADC geometry into its AD stream and needs a native drawing boundary,
 with pole/model math retained; it cannot be retired as an unused state envelope. No retail assets or generated
 game code are committed.
+
+## Language-loop static chain retirement and terrain investigation
+
+Two guarded offline words skip `LangsetLoop`'s (`0x244c70`) append/terminate of the unused static VIF/VU1 chain
+at `0x246100`. Its complete fade/input/drawing state machine and selected-language completion remain compiled.
+The original chain-address load in the new jump's delay slot becomes a NOP. No shared runtime API or engine-pin
+change is involved; BozoEngine remains at `4a8f70a`.
+
+Evidence in `build/native-cleanup16/`:
+
+- **36/36 suites pass** (`tests.log`), including **480 whole-function original/adapted cases** over invalid/valid
+  states, fade boundaries, selected-language values and input results. The actual compiled packet and fade helpers
+  execute; input/draw helpers are controlled boundaries with compared order, inputs and logical side effects.
+  The reference appends/terminates once; adapted code makes no packet calls with an inaccessible packet pointer.
+  Saved full registers/stack/return, complete return value, float status and all non-stack logical RAM match.
+  Completion retains `selected language + 2`, including unsigned overflow. This does not qualify the controlled
+  helpers' drawing math or whole-function clock equivalence.
+- The original **5,800-frame headless and windowed routes finish**, with zero register/unknown accesses, zero VU0
+  microprogram calls and zero GIF SDK submissions. A further adapted **5,800-frame windowed requalification** also
+  completes with those zero counters, 6,057 native VIF1 completion jobs and 7,255 sync calls. Initial headless/window
+  counts were 5,686 / 6,071 completions and 6,884 / 7,269 syncs. The language loop is absent from sampled feeder
+  reports; this owner's execution remains **fixture-qualified only** on the tested route.
+- Unchanged/adapted **3,500-frame headless records are byte-for-byte identical**, including the complete header
+  and all 80-byte frame records, with no masks or excluded fields. The recorded RAM digest covers all 32 MiB;
+  scratchpad, native draw output/counts, sound/counts, scheduler and clock fields also match. Both 280,240-byte files
+  have SHA-256 `0ca305ae3b446d9e04a73466c47cbcec54cda32acfe2363a8ce99d6ae392cc45`
+  (`baseline-record.bin`, `current-record.bin`, `record_check.py`). This establishes deterministic-route agreement,
+  not real-time window or console pixel parity.
+- Directly inspected all eight final requalification captures: Norune (3,400), pause (3,550), running (4,800),
+  movement (5,100), menu (5,400), inventory with item icons/Toan preview (5,550), returned menu (5,700) and dismissal
+  (5,799). Terrain is present in this run. Earlier adapted captures show missing terrain; an earlier repeat also
+  reproduced it, while later adapted runs and initial unchanged-baseline repeats show terrain. A final paired
+  3,500-frame window check reproduced **the same missing terrain in the unchanged baseline**, with terrain present
+  in the adapted build (`baseline-paired/frame_003400.png`, `current-paired/frame_003400.png`). Both complete with
+  zero register/unknown/VU0/GIF counters. The baseline executable was built with these two adaptations removed;
+  its preparation/restore scripts and logs are retained locally. This demonstrates that the terrain failure can
+  occur without this cleanup. **Its real-time cause remains unresolved**; successful repeats are not a fix or a
+  pixel-parity claim. Preserve both failed and successful captures/logs.
+- Headless 48 kHz stereo PCM contains 4,686,527 frames, RMS 3,599.338 and last-ten-second RMS 3,496.547. The final
+  windowed requalification contains 5,094,421 frames, RMS 3,568.480 and tail RMS 2,988.911, peak 32,766. Audio is active;
+  no subjective listening, exact timing or full-campaign qualification is claimed.
+
+This batch does not remove the main packet reset, mixed packet/geometry producers, legacy allocation extents or
+console-format native-copy identifiers. `FishLineDraw` still needs a native geometry boundary. Terrain triage,
+unsupported readbacks, broader gameplay and console visual parity remain open. Coordination updates remain queued
+locally during the user-confirmed C2C/F2F outage; no peer engine work is taken over. No retail assets/generated code
+are committed.

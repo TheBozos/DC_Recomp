@@ -3,6 +3,7 @@
 #include "bozo/libs/guest.h"
 #include "bozo/libs/libraries.h"
 #include "bozo/port.h"
+#include "dc_visibility.h"
 #include <cstring>
 namespace dc::native
 {
@@ -11,6 +12,20 @@ namespace dc::native
 } // namespace dc::native
 namespace dc
 {
+    bool nativeInstruction(uint8_t *, R5900Context *ctx, Runtime *rt, uint32_t pc)
+    {
+        if (pc == 0x0012D268u)
+        {
+            dc::native::queryVisibility(*rt, *ctx);
+            return true;
+        }
+        if (pc != 0x0012C19Cu && pc != 0x0015434Cu)
+            return false;
+        // The two vblank callbacks need logical field parity, not a GS CSR read.
+        // The guarded build-time adaptations remove their obsolete >>13 extraction.
+        ctx->r[2].ud[0] = bozo::port::vblankCount(rt) & 1u;
+        return true;
+    }
     void frameEnd(uint8_t *ram, R5900Context *ctx, Runtime *rt)
     {
         auto &d = bozo::port::dispatcher(rt);
@@ -24,5 +39,6 @@ namespace dc
     {
         dc::native::install(rt, r);
         r.registerFunction(0x12d070, frameEnd);
+        r.nativeGraphics(&nativeInstruction);
     }
 } // namespace dc

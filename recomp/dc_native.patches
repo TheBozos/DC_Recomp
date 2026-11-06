@@ -1,0 +1,51 @@
+# Guarded build-time adaptations for SCUS-97111. No game files are modified.
+# address     expected    replacement
+# Retire PS2 CPU/free-time diagnostics. Gameplay time uses the native frame clock.
+0x00141648 0xac220010 0x00000000 # Timer0 mode setup
+0x00141698 0xac200000 0x00000000 # per-frame diagnostic timer reset
+0x001416a8 0x8c220000 0x24020000 # main diagnostic sample
+0x001416dc 0x8c220000 0x24020000 # main diagnostic sample
+0x0012cdac 0x8c220000 0x24020000 # MGBeginFrame diagnostic sample
+0x0012d15c 0x8c230000 0x24030000 # MGEndFrame CPU diagnostic sample
+0x0012d458 0x8c300000 0x24100000 # MGEndFrame free-time sample
+0x0012d500 0x8c220000 0x24020000 # MGEndFrame free-time sample
+0x0012d1d4 0x0c0411a6 0x00000000 # retire console CPU percentage print
+0x0012d574 0x0c0411a6 0x00000000 # retire console free-time percentage print
+# Native SDK submissions do not use the console channel's tag-transfer bit.
+# Remove those byte read/modify/write operations at their original callers.
+0x0014165c 0x90a40000 0x24040000 # main: channel byte read
+0x00141670 0xa0a20000 0x00000000 # main: channel byte store
+0x0012d43c 0x90a40000 0x24040000 # MGEndFrame: channel byte read
+0x0012d450 0xa0a20000 0x00000000 # MGEndFrame: channel byte store
+0x0012d65c 0x90a40000 0x24040000 # MGEndFrame: channel byte read
+0x0012d670 0xa0a20000 0x00000000 # MGEndFrame: channel byte store
+0x00132388 0x90450000 0x24050000 # texture upload: channel byte read
+0x0013239c 0xa0430000 0x00000000 # texture upload: channel byte store
+0x00132818 0x90440000 0x24040000 # texture upload: channel byte read
+0x00132830 0xa0430000 0x00000000 # texture upload: channel byte store
+0x00132a1c 0x90450000 0x24050000 # texture upload: channel byte read
+0x00132a30 0xa0430000 0x00000000 # texture upload: channel byte store
+0x00132b28 0x92040000 0x24040000 # texture upload: channel byte read
+0x00132b3c 0xa2020000 0x00000000 # texture upload: channel byte store
+0x0012c280 0x90a40000 0x24040000 # MGInit: channel byte read
+0x0012c294 0xa0a20000 0x00000000 # MGInit: channel byte store
+# Upstream BozoEngine native-instruction hooks return logical vblank parity directly.
+# Identity entries validate those hook sites; their obsolete CSR bit extraction becomes NOP.
+0x0012c19c 0xdc420000 0xdc420000 # native field query site guard
+0x0012c1a0 0x0002137a 0x00000000 # no CSR >>13 extraction
+0x0015434c 0xdc221000 0xdc221000 # loading callback native field query site guard
+0x00154350 0x0002137a 0x00000000 # no CSR >>13 extraction
+# Resolve visibility directly from native depth and skip the obsolete SDK tile loop.
+0x0012d268 0x70008628 0x70008628 # native visibility query batch site guard
+0x0012d26c 0x1000006f 0x10000072 # continue after the complete old loop, preserving the NOP delay slot
+# CWater::DrawVu1: retain clipping, matrix/asset bookkeeping and native virtual draw;
+# retire only the packet-only TEST envelopes before and after that work.
+0x00160f5c 0x72002628 0x080583ff # jump to GetLWMatrix setup at 0x160ffc
+0x00160f60 0x70002e28 0x70002e28 # guard retained delay slot: a1 = 0 (overwritten by matrix output)
+0x00161074 0x72002628 0x08058437 # jump to draw-result restore at 0x1610dc
+0x00161078 0x70002e28 0x70002e28 # guard retained delay slot: a1 = 0 (caller-volatile)
+# CRunEffect::Draw: preserve color, alternating texture state, projection and native sprites.
+0x00163644 0x27a300f0 0x08058db5 # jump over the packet-only ZBUF envelope to loop setup 0x1636d4
+0x00163648 0xdf828bf0 0x00000000 # discard the now-unused default ZBUF read in the jump's delay slot
+0x0016385c 0x72602628 0x08058e31 # skip packet-only restore to the original epilogue 0x1638c4
+0x00163860 0x70002e28 0x70002e28 # guard retained delay slot: a1 = 0 (caller-volatile)

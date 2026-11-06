@@ -60,6 +60,8 @@ int main(int argc, char **argv)
             wav = argv[++i];
         else if (a == "--headless")
             window = false;
+        else if (a == "--profile-io")
+            options.profileIo = true;
 #ifdef DC_WITH_WINDOW
         else if (a == "--capture-dir" && i + 1 < argc)
             windowOptions.captureDir = argv[++i];
@@ -70,7 +72,7 @@ int main(int argc, char **argv)
         {
             std::fprintf(stderr, "Usage: dc [--frames N] [--headless] [--elf FILE] [--iso FILE]\n"
                                  "          [--card-dir DIR] [--pad-script FILE | --live-pad FILE] [--wav FILE]\n"
-                                 "          [--out FILE] [--capture-dir DIR] [--capture-frame N]\n");
+                                 "          [--out FILE] [--capture-dir DIR] [--capture-frame N] [--profile-io]\n");
             return a == "--help" ? 0 : 2;
         }
     }
@@ -154,6 +156,17 @@ int main(int argc, char **argv)
             return 1;
         }
         std::printf("[dc] frames=%llu end=%s\n", (unsigned long long)frames, host.endReason().c_str());
+        const auto &stats = host.stats();
+        std::printf("[dc] compatibility: %llu register accesses, %llu unknown; %llu native VU0 calls\n",
+                    (unsigned long long)stats.ioAccesses, (unsigned long long)stats.ioUnknown,
+                    (unsigned long long)stats.vu0Calls);
+        const auto &io = host.libraries().io;
+        for (const auto &[site, counts] : stats.ioSites)
+            std::printf("[dc:io] pc=%08x address=%08x reads=%llu writes=%llu %s\n", site.first, site.second,
+                        (unsigned long long)counts[0], (unsigned long long)counts[1], host.functionAt(site.first).c_str());
+        std::printf("[dc] native transfer services: %llu VIF0, %llu VIF1, %llu GIF submissions; %llu sync calls\n",
+                    (unsigned long long)io.nativeSubmissions[0], (unsigned long long)io.nativeSubmissions[1],
+                    (unsigned long long)io.nativeSubmissions[2], (unsigned long long)io.nativeSynchronizations);
         return host.endReason().rfind("FAULT:", 0) == 0 ? 1 : 0;
     };
     int result;

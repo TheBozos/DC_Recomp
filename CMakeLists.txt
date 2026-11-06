@@ -23,10 +23,11 @@ add_custom_command(OUTPUT ${dc_images}
           game/SCUS_971.11 game/TITLE.BIN game/DUN.BIN recomp/maps/dc_title.csv recomp/maps/dc_dun.csv
   COMMENT "Preparing the resident and overlay ELF images offline")
 set(dc_externals ${dc_gen}/dc_externals.txt)
-add_custom_command(OUTPUT ${dc_externals}
+set(dc_overlay_externals ${dc_gen}/dc_overlay_externals.txt)
+add_custom_command(OUTPUT ${dc_externals} ${dc_overlay_externals}
   COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_bozo_externals.py --overrides ${CMAKE_SOURCE_DIR} ${dc_gen}/dc_overrides.txt
   COMMAND bozo-externals ${CMAKE_SOURCE_DIR}/game/SCUS_971.11 ${dc_gen}/native_externals.txt --overrides ${dc_gen}/dc_overrides.txt
-  COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_bozo_externals.py ${dc_gen}/native_externals.txt ${dc_externals}
+  COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_bozo_externals.py ${dc_gen}/native_externals.txt ${dc_externals} ${dc_overlay_externals}
   DEPENDS bozo-externals ${CMAKE_SOURCE_DIR}/tools/dc_bozo_externals.py ${CMAKE_SOURCE_DIR}/runtime/dc_native.cpp
           ${CMAKE_SOURCE_DIR}/runtime/dc_port.cpp ${CMAKE_SOURCE_DIR}/game/SCUS_971.11)
 set(dc_sources)
@@ -46,9 +47,17 @@ foreach(image dc title dun)
     endif()
     list(APPEND files ${dc_gen}/${image}_${n}.cpp)
   endforeach()
+  set(native_adaptations)
+  set(native_adaptation_inputs)
+  set(image_externals ${dc_overlay_externals})
+  if(image STREQUAL "dc")
+    set(image_externals ${dc_externals})
+    set(native_adaptation_inputs ${CMAKE_SOURCE_DIR}/recomp/dc_native.patches)
+    set(native_adaptations --patches ${native_adaptation_inputs})
+  endif()
   add_custom_command(OUTPUT ${files}
-    COMMAND bozo-recomp ${dc_gen}/${image}.elf ${dc_gen} --prefix ${image} --symbol-prefix ${image}_ --files ${chunks} --no-comments --externals ${dc_externals}
-    DEPENDS bozo-recomp ${dc_gen}/${image}.elf ${dc_externals})
+    COMMAND bozo-recomp ${dc_gen}/${image}.elf ${dc_gen} --prefix ${image} --symbol-prefix ${image}_ --files ${chunks} --no-comments --externals ${image_externals} ${native_adaptations}
+    DEPENDS bozo-recomp ${dc_gen}/${image}.elf ${image_externals} ${native_adaptation_inputs})
   list(APPEND dc_sources ${files})
 endforeach()
 add_custom_target(dc_generate DEPENDS ${dc_sources} ${dc_images})
@@ -122,4 +131,77 @@ if(DC_ENGINE_TESTS)
   enable_testing()
   set(BOZO_TEST_ELF "${dc_gen}/dc.elf")
   add_subdirectory(BozoEngine/tests engine_tests)
+  add_executable(dc-native-tests tests/dc_native_tests.cpp runtime/dc_native.cpp runtime/dc_port.cpp)
+  target_link_libraries(dc-native-tests PRIVATE bozo_host)
+  target_compile_definitions(dc-native-tests PRIVATE DC_DEFAULT_TEXTURES="")
+  if(MINGW)
+    target_link_options(dc-native-tests PRIVATE -static)
+  endif()
+  add_test(NAME dc_native_packet_boundary COMMAND dc-native-tests)
+  add_executable(dc-model-builders-tests tests/dc_model_builders_tests.cpp runtime/dc_native.cpp)
+  target_link_libraries(dc-model-builders-tests PRIVATE dc_game bozo_host)
+  target_compile_definitions(dc-model-builders-tests PRIVATE DC_DEFAULT_TEXTURES="")
+  if(MINGW)
+    target_link_options(dc-model-builders-tests PRIVATE -static)
+  endif()
+  add_test(NAME dc_native_asset_builders COMMAND dc-model-builders-tests)
+  add_executable(dc-texture-services-tests tests/dc_texture_services_tests.cpp runtime/dc_native.cpp)
+  target_link_libraries(dc-texture-services-tests PRIVATE dc_game bozo_host)
+  target_compile_definitions(dc-texture-services-tests PRIVATE DC_DEFAULT_TEXTURES="")
+  if(MINGW)
+    target_link_options(dc-texture-services-tests PRIVATE -static)
+  endif()
+  add_test(NAME dc_native_texture_services COMMAND dc-texture-services-tests)
+  add_executable(dc-window-services-tests tests/dc_window_services_tests.cpp runtime/dc_native.cpp)
+  target_link_libraries(dc-window-services-tests PRIVATE dc_game bozo_host)
+  target_compile_definitions(dc-window-services-tests PRIVATE DC_DEFAULT_TEXTURES="")
+  if(MINGW)
+    target_link_options(dc-window-services-tests PRIVATE -static)
+  endif()
+  add_test(NAME dc_native_window_services COMMAND dc-window-services-tests)
+  set(dc_visibility_gen ${CMAKE_BINARY_DIR}/visibility_reference)
+  set(dc_visibility_outputs ${dc_visibility_gen}/dcvis_000.cpp ${dc_visibility_gen}/dcvis_table.cpp
+                            ${dc_visibility_gen}/dcvis_functions.h)
+  add_custom_command(OUTPUT ${dc_visibility_outputs}
+    COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/make_visibility_fixture.py
+      ${CMAKE_SOURCE_DIR}/game/SCUS_971.11 ${dc_visibility_gen}/reference.elf
+    COMMAND bozo-recomp ${dc_visibility_gen}/reference.elf ${dc_visibility_gen} --prefix dcvis
+      --symbol-prefix dcvis_ --files 1 --no-comments --externals ${dc_visibility_gen}/reference.externals
+    DEPENDS bozo-recomp tests/make_visibility_fixture.py game/SCUS_971.11)
+  add_executable(dc-visibility-tests tests/dc_visibility_tests.cpp runtime/dc_native.cpp runtime/dc_port.cpp
+    ${dc_visibility_outputs})
+  target_link_libraries(dc-visibility-tests PRIVATE dc_game bozo_host)
+  target_include_directories(dc-visibility-tests PRIVATE runtime ${dc_visibility_gen})
+  target_compile_definitions(dc-visibility-tests PRIVATE DC_DEFAULT_TEXTURES="")
+  if(MINGW)
+    target_link_options(dc-visibility-tests PRIVATE -static)
+  endif()
+  add_test(NAME dc_native_visibility COMMAND dc-visibility-tests)
+  function(dc_packet_wrapper_fixture kind)
+    set(fixture_dir ${CMAKE_BINARY_DIR}/${kind}_reference)
+    set(outputs)
+    foreach(variant ${kind}_ref ${kind}_native)
+      list(APPEND outputs ${fixture_dir}/${variant}_000.cpp ${fixture_dir}/${variant}_table.cpp
+                          ${fixture_dir}/${variant}_functions.h)
+    endforeach()
+    add_custom_command(OUTPUT ${outputs}
+      COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/make_packet_wrapper_fixture.py ${kind}
+        ${CMAKE_SOURCE_DIR}/game/SCUS_971.11 ${CMAKE_SOURCE_DIR}/recomp/dc_native.patches ${fixture_dir}/reference.elf
+      COMMAND bozo-recomp ${fixture_dir}/reference.elf ${fixture_dir} --prefix ${kind}_ref
+        --symbol-prefix ${kind}_ref_ --files 1 --no-comments --externals ${fixture_dir}/reference.externals
+      COMMAND bozo-recomp ${fixture_dir}/reference.elf ${fixture_dir} --prefix ${kind}_native
+        --symbol-prefix ${kind}_native_ --files 1 --no-comments --externals ${fixture_dir}/reference.externals
+        --patches ${fixture_dir}/reference.patches
+      DEPENDS bozo-recomp tests/make_packet_wrapper_fixture.py game/SCUS_971.11 recomp/dc_native.patches)
+    add_executable(dc-${kind}-wrapper-tests tests/dc_${kind}_wrapper_tests.cpp ${outputs})
+    target_link_libraries(dc-${kind}-wrapper-tests PRIVATE dc_game bozo_host)
+    target_include_directories(dc-${kind}-wrapper-tests PRIVATE ${fixture_dir})
+    if(MINGW)
+      target_link_options(dc-${kind}-wrapper-tests PRIVATE -static)
+    endif()
+    add_test(NAME dc_native_${kind}_wrapper COMMAND dc-${kind}-wrapper-tests)
+  endfunction()
+  dc_packet_wrapper_fixture(water)
+  dc_packet_wrapper_fixture(effect)
+  add_test(NAME dc_external_image_boundaries COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/test_externals.py)
 endif()

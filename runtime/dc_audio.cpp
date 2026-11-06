@@ -14,7 +14,6 @@ namespace dc
     {
         sound = std::make_unique<bozo::native::irx::CompiledLibraries>(libraries, 0x80000);
         addDcAudioImages(*sound);
-        libraries.io.completeNativeGraphics = true;
         libraries.mc.slotMask = 3; // DC uses slot 1 for the physical port card.
         libraries.audioProvider = [](uint64_t cycle) { return sound->advanceTo(cycle); };
         libraries.sif.transfer = [](uint32_t address, const uint8_t *bytes, uint32_t count)

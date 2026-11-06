@@ -87,11 +87,13 @@ display submission and DMA configuration use SDK services, and console CPU/free-
 updates are retired during guarded code generation. Native mode rejects access to retired graphics registers.
 See [the cleanup and validation notes](docs/BOZO_MIGRATION.md#native-graphics-cleanup) for the remaining compatibility work.
 
+Static models now retain their captured geometry after loading buffers are reused. This fixes a source-lifetime
+failure that could remove Norune's terrain; the controlled before/after reproduction is recorded in the migration notes.
+
 Known defects, including issues carried over from the earlier build:
 
 - the sky band above Norune's hills is bluer than on a PS2;
 - a green wedge sometimes shows in Norune;
-- Norune's terrain sometimes disappears in real-time runs, including the unchanged native baseline; its cause remains under investigation;
 - a Georama menu picture ("stayframe") sometimes fails to decode;
 - the characters' shadow plane still needs tracing through the original shading logic;
 - some frame-copy surfaces, effects and in-game menus remain unchecked.

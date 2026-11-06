@@ -4,9 +4,9 @@ Implemented on 2026-11-06. The active build uses only the `BozoEngine` submodule
 
 The graphics cleanup includes the DC adapters, regression fixtures, guarded offline adaptations and published
 BozoEngine pin `4a8f70a` together. References to local/unpublished work in the milestone sections below describe
-the state at those earlier checks. The latest validation is 36/36 suites, both 5,800-frame routes and byte-identical
-3,500-frame unchanged/adapted deterministic records. Remaining coverage, terrain and packet-work limits are listed
-in the final section.
+the state at those earlier checks. The latest validation is 37/37 suites, both 5,800-frame routes and a controlled
+before/after reproduction of Norune's terrain source-lifetime failure. Remaining coverage and packet-work limits
+are listed in the final section.
 
 ## Ownership boundary
 
@@ -793,3 +793,44 @@ console-format native-copy identifiers. `FishLineDraw` still needs a native geom
 unsupported readbacks, broader gameplay and console visual parity remain open. Coordination updates remain queued
 locally during the user-confirmed C2C/F2F outage; no peer engine work is taken over. No retail assets/generated code
 are committed.
+
+## Static model source lifetime and Norune terrain
+
+`modelOf` previously switched a captured static model back to its original MDT address when the first 64 bytes
+looked unchanged. That is not an ownership check: the game can reuse the source allocation while leaving its
+header intact. Reading a replaced primitive table then drops the terrain's four primitives. A static
+`CVisualVu1` retains its built geometry, not an MDT pointer (its original `GetMDTDataAddress` returns zero).
+
+Static visuals now always draw their captured model. Explicit `CVisualMDTVu1` visuals still use their retained
+live MDT for vertex animation, and the original Remake boundary refreshes captured geometry. Texture bindings,
+allocation extents and game RAM are unchanged. No packets, device backend or engine change is introduced;
+BozoEngine remains pinned to `4a8f70a`. Temporary runtime diagnostics were removed before the qualified build.
+
+Evidence in `build/native-cleanup17/`:
+
+- The synthetic native-renderer regression fails **two checks before the fix**, then passes after it
+  (`lifetime-before.log`, `tests.log`). It builds one actual native triangle, reuses the source body while keeping
+  the complete header, and checks the published draw digest/vertices. Unrelated source vertex changes must not
+  change a static visual. Explicit Remake must change its captured geometry, complete source release must preserve
+  it, and an explicit MDT visual must still reflect live vertex animation. The fixture contains no retail data.
+- **37/37 local suites pass**. A separate disc-free configure/build also runs the lifetime regression successfully
+  (`disc-free.log`). CI now configures that small project, retaining the existing engine tests and adding this
+  native-renderer regression without requiring a disc, generated game functions or a window.
+- A controlled in-game source-reuse probe reproduces the original missing-terrain picture in the saved baseline
+  and leaves the terrain visible in the fixed executable (`reproduced-before/frame_003400.png`,
+  `reproduced-after/frame_003400.png`). Both runs retain the terrain MDT's original 64-byte header and invalidate
+  only its old source primitive count; saved RAM confirms that count is zero in both. Each completes 3,500 frames
+  with zero register/unknown accesses, zero VU0 microprogram calls and zero GIF SDK submissions. These are deliberate
+  fault-injection runs, not spontaneous bad-state RAM captures. The actual before/after images were inspected.
+- Normal **5,800-frame headless/windowed inventory routes complete** with those same zero counters. Native VIF1
+  completion counts are 5,686 / 6,078; sync counts are 6,884 / 7,276. Eight window captures are retained through idle,
+  pause, running, movement, menu, inventory, returned menu and dismissal. The controlled reproduction, rather than
+  a successful normal repeat alone, establishes the source-lifetime correction.
+- Headless 48 kHz stereo PCM contains 4,686,527 frames, RMS 3,599.338, tail RMS 3,496.547 and peak 28,775. Windowed
+  PCM contains 5,087,603 frames, RMS 3,582.394, tail RMS 3,008.184 and peak 32,766. Audio remains active; subjective
+  listening, exact timing, console visual parity and a full campaign remain unqualified.
+
+The earlier failed captures remain useful evidence; this fixes the demonstrated static-source lifetime path,
+not every possible rendering defect. Other mixed builders, main packet reset, legacy extents, native-copy
+identifiers, unsupported readbacks and FishLineDraw geometry remain separate work. Coordination updates remain
+queued locally during the C2C/F2F outage. No retail assets, RAM captures or generated code are committed.

@@ -49,3 +49,10 @@
 0x00163648 0xdf828bf0 0x00000000 # discard the now-unused default ZBUF read in the jump's delay slot
 0x0016385c 0x72602628 0x08058e31 # skip packet-only restore to the original epilogue 0x1638c4
 0x00163860 0x70002e28 0x70002e28 # guard retained delay slot: a1 = 0 (caller-volatile)
+# MGEndFrame: native rendering has no packet to close or graphics path to poll.
+# Retain frame pacing, native visibility and the later native completion callback.
+0x0012d1dc 0x8f848bd4 0x0804b49a # continue directly at native visibility 0x12d268
+0x0012d1e0 0x70002e28 0x70002e28 # guard retained delay slot: a1 = 0 (caller-volatile)
+# The retained SDK send acknowledges completed native work; it reads no packet.
+0x0012d680 0x8f828bd4 0x00000000 # no packet-object lookup before completion
+0x0012d688 0x8c450004 0x24050000 # pass no packet/source pointer; retain channel/IRQ semantics

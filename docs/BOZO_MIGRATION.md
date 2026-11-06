@@ -4,7 +4,7 @@ Implemented on 2026-11-06. The active build uses only the `BozoEngine` submodule
 
 The graphics cleanup includes the DC adapters, regression fixtures, guarded offline adaptations and published
 BozoEngine pin `4a8f70a` together. References to local/unpublished work in the milestone sections below describe
-the state at those earlier checks. The latest validation is 22/22 suites and both 5,800-frame routes; remaining
+the state at those earlier checks. The latest validation is 24/24 suites and both 5,800-frame routes; remaining
 coverage and packet-work limits are listed in the final section.
 
 ## Ownership boundary
@@ -457,3 +457,38 @@ native epoch/resolution boundary was raised with VP2 for potential BozoEngine wo
 IRQ/deadline support. Root DC edits remain local and uncommitted. MGDraw's generic packet cursor/reservation,
 frame setup/submission, other mixed builders, legacy arena extents, unsupported readbacks and broader gameplay
 coverage remain separate audits. This batch does not claim those remaining paths are retired.
+
+## Frame-end completion without packet dependencies
+
+The accumulated cleanup above is published in DC [PR #2](https://github.com/TheBozos/DC_Recomp/pull/2), merged main
+`6fb454075cafe0112b3c01e5cdacffa0006929d8` after CI passed. Subsequent tested batches are published separately.
+
+`MGEndFrame` now continues directly to native visibility after its diagnostic bookkeeping, skipping packet
+End/Terminate and the always-idle graphics-path sync/error branch. Those operations had no native rendering
+consumer. Its later native SDK completion call remains in place and still uses the original channel handle;
+the obsolete packet-object lookup is removed and its unused source argument is zero. Completion IRQ/callback
+behavior is preserved rather than dropping the SDK submission. Frame pacing, counters, display/asset policy,
+visibility, screenshots and buffer toggling outside these spans remain unchanged.
+
+Evidence in `build/native-cleanup9/`:
+
+- **24/24 suites pass** (`frame-tests.log`). Eight isolated close-span cases cover alignment and open-tag states:
+  the reference runs actual compiled packet End/Terminate and the real engine's always-idle SyncPath; the adapted
+  span makes none of those calls and leaves all guest RAM unchanged, with an inaccessible packet pointer.
+- Twenty-four submit-span cases cover counter overflow, buffer states and masked/enabled callbacks against the
+  actual BozoEngine native SDK send. Both versions submit exactly once on the same channel. Completion state
+  matches, enabled callbacks are queued and masked completions remain pending until enabled. Frame counter,
+  opaque channel handle and buffer toggle match; all other guest RAM and the retired device bank stay unchanged.
+  Both reference/native versions retain the previously published channel-tag adaptations; only the new packet
+  dependency changes. These are isolated-span checks, not whole-MGEndFrame CPU/clock equivalence claims.
+- Both **5,800-frame headless/windowed routes complete**, with zero register/unknown accesses, zero VU0 calls and
+  zero GIF SDK submissions. Headless retains 5,686 VIF1 native completion submissions and 6,884 sync calls;
+  windowed reports 6,073 and 7,271 respectively. These remaining SDK jobs are native completion contracts.
+- Directly inspected all seven final captures: attract (2,000), Norune (3,400), pause (3,550), running (4,800),
+  movement (5,100), menu (5,500) and dismissal (5,799). Headless 48 kHz stereo PCM has 4,680,762 frames, RMS
+  3,592.501 and last-ten-second RMS 3,434.538; windowed has 5,074,257 frames, RMS 3,566.111 and last-ten-second
+  RMS 2,862.050. Audio remains active; no subjective listening, bit-exact timing or console parity is claimed.
+
+BozoEngine stays clean on published `4a8f70a`; this uses its existing completion API and adds no engine change.
+F2F received publication status and the callback-preservation checks. Generic MGDraw cursor/reservation, remaining
+frame setup/display builders, legacy extents and broader game coverage remain open; full campaign is unqualified.

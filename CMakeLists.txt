@@ -189,6 +189,7 @@ if(DC_ENGINE_TESTS)
         ${CMAKE_SOURCE_DIR}/game/SCUS_971.11 ${CMAKE_SOURCE_DIR}/recomp/dc_native.patches ${fixture_dir}/reference.elf
       COMMAND bozo-recomp ${fixture_dir}/reference.elf ${fixture_dir} --prefix ${kind}_ref
         --symbol-prefix ${kind}_ref_ --files 1 --no-comments --externals ${fixture_dir}/reference.externals
+        --patches ${fixture_dir}/reference.baseline.patches
       COMMAND bozo-recomp ${fixture_dir}/reference.elf ${fixture_dir} --prefix ${kind}_native
         --symbol-prefix ${kind}_native_ --files 1 --no-comments --externals ${fixture_dir}/reference.externals
         --patches ${fixture_dir}/reference.patches
@@ -203,5 +204,7 @@ if(DC_ENGINE_TESTS)
   endfunction()
   dc_packet_wrapper_fixture(water)
   dc_packet_wrapper_fixture(effect)
+  dc_packet_wrapper_fixture(frame_close)
+  dc_packet_wrapper_fixture(frame_submit)
   add_test(NAME dc_external_image_boundaries COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/test_externals.py)
 endif()

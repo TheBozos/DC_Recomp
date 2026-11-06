@@ -103,3 +103,7 @@
 0x001b1f2c 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
 0x001b2030 0x8f848bd4 0x0806c825 # setItemToReserved: trailing envelope to epilogue 0x1b2094
 0x001b2034 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
+# Language selection: native drawing needs no static VIF/VU1 setup chain.
+# Keep the complete fade/input/draw state machine and selected-language result.
+0x00244c78 0x3c020024 0x08091327 # skip static append/terminate to state read 0x244c9c
+0x00244c7c 0x24456100 0x00000000 # discard obsolete chain pointer in delay slot

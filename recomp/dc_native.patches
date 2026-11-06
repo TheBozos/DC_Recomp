@@ -61,3 +61,12 @@
 # Its native draw reads MDT assets, so copying console VIF output is unused.
 0x00136164 0x8f828bc0 0x0804d862 # skip memcpy setup/call to native draw setup 0x136188
 0x00136168 0x00021080 0x00000000 # discard unused source-index shift in jump delay slot
+# DrawMesWin: native texture creation/draws need no packet-only TEXFLUSH envelope.
+0x00153614 0x3c020025 0x08054da2 # continue at texture lookup 0x153688 after retained MyTextureMake
+0x00153618 0x24424020 0x00000000 # discard unused GIF-tag address in delay slot
+# EditLoop/BattleMenuDraw: static VIF/VU1 program-chain calls have no native consumer.
+# Retain surrounding scene stores, EdSetFlag, menu camera and texture reload work.
+0x0017994c 0x3c020024 0x0805e659 # continue at EdSetFlag call 0x179964
+0x00179950 0x24456100 0x00000000 # discard unused program-chain address
+0x001f620c 0x0c04b8a0 0x0807d890 # skip packet lookup/call/terminate to menu reload 0x1f6240
+0x001f6210 0x00000000 0x00000000 # guard unchanged jump delay slot

@@ -4,7 +4,7 @@ Implemented on 2026-11-06. The active build uses only the `BozoEngine` submodule
 
 The graphics cleanup includes the DC adapters, regression fixtures, guarded offline adaptations and published
 BozoEngine pin `4a8f70a` together. References to local/unpublished work in the milestone sections below describe
-the state at those earlier checks. The latest validation is 27/27 suites and both 5,800-frame routes; remaining
+the state at those earlier checks. The latest validation is 30/30 suites and both 5,800-frame routes; remaining
 coverage and packet-work limits are listed in the final section.
 
 ## Ownership boundary
@@ -535,3 +535,42 @@ F2F received the scope and test progress; both lanes were checked for DC-Recomp,
 TMB's typed hierarchy/light work remains separate, and VP2's newer generic engine scheduling/CD work is acknowledged
 without changing this batch's pin. Remaining frame setup/display builders, mixed console-data builders, legacy
 arena extents, unsupported readbacks and broader gameplay still need auditing.
+
+## Message drawing and static program-chain retirement
+
+Six guarded offline words retire three more unused packet spans. `ClsMes::DrawMesWin` skips its packet-only
+TEXFLUSH envelope after the retained `MyTextureMake` call. Text layout, glyph/highlight/pulse calculations,
+texture lookup/selection, message state and native rendering helper calls remain compiled from the original
+function. `EditLoop` and `BattleMenuDraw` skip calls of the static VIF/VU1 program chain at `0x246100`; native
+rendering does not upload or execute that program. Scene stores/`EdSetFlag` before and after the edit span,
+and menu camera setup/texture reload around the menu span, remain in place. No shared engine change is required;
+the BozoEngine pin stays `4a8f70a`. The frame packet reset remains because other mixed producers still use it.
+
+Evidence in `build/native-cleanup11/`:
+
+- **30/30 local suites pass** (`tests.log`). **192 whole-message cases** compare original/adapted code across
+  early exits, balloon/background modes, pulse boundaries, valid/invalid glyphs, highlights, suppression and
+  layout variants. Texture, layout and rendering helpers are controlled callback boundaries; original scalar
+  layout/glyph/message calculations execute in both versions. Ordered callback inputs and rectangle bytes,
+  logical message/glyph state, full saved registers, stack/return, float status and non-stack RAM match.
+  The reference invokes six actual compiled packet helpers when the flush span is reached; the adapted version
+  invokes none, even with an inaccessible packet address. This does not independently qualify helper rendering math.
+- **32 edit-span and 32 menu-span cases** execute the original packet call/terminate helpers across cursor alignment,
+  open tags and input markers. The adapted versions never call them or read the packet object. Retained scene stores,
+  callback arguments/order/results and all RAM effects match apart from unused console output. The isolated-span
+  harness uses `s7` for its synthetic return, explicitly excluded from the saved-register assertion. This is not a
+  whole-edit/menu timing-equivalence test.
+- Both **5,800-frame headless/windowed routes finish** with zero register/unknown accesses, zero VU0 microprogram
+  calls and zero GIF SDK submissions. Native VIF1 completion counts are 5,686 / 6,069; sync counts 6,884 / 7,267.
+  Published feeder blocks total **2,877 / 2,116 message draws**, **2,520 / 2,737 edit-loop calls**, and
+  **1,094 / 317 battle-menu draws**, headless/windowed respectively. These show function coverage, not exact counts
+  of the skipped spans: message draws can return early. They are bounded sampled-block totals, not performance data.
+- Directly inspected all seven captures through attract, Norune, pause, running with foot dust, movement,
+  readable menu/help text and dismissal. Headless 48 kHz stereo PCM: 4,680,761 frames, RMS 3,592.501,
+  last-ten-second RMS 3,434.535, peak 28,775. Windowed: 5,078,803 frames, RMS 3,559.437, tail RMS 2,877.821,
+  peak 32,766. Audio is active; no subjective listening, exact timing, console parity or full-campaign claim.
+
+F2F received the audit and qualification progress. Both lanes were checked for DC-Recomp, @all and @WindowsRecomp.
+DC's explicit sound/system-module provider pattern and the current engine loader's path-only ABI/permissive
+fallback were shared with VP2's loader owner; no overlapping implementation was started. Other console-data
+builders, setup/display work, arena extents, unsupported readbacks and wider gameplay remain open.

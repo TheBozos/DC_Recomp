@@ -22,6 +22,11 @@ base, end, helpers = {
     'frame_draw': (0x12ed80, 0x12edec, [0x120c28, 0x120f78]),
     'frame_member': (0x12a110, 0x12a18c, [0x120c28, 0x120f78]),
     'mdt_draw': (0x1360e0, 0x136200, [0x127900, 0x1033b0, 0x135000]),
+    'message': (0x153310, 0x153f34, [0x133070, 0x151ad0, 0x1312d0, 0x15bc10,
+        0x152030, 0x152cb0, 0x152930, 0x14e380, 0x14c220, 0x14c5a0, 0x150810,
+        0x152ee0, 0x14c4f0, 0x15c310]),
+    'edit_state': (0x17990c, 0x17996c, [0x120d70, 0x177fa0]),
+    'menu_state': (0x1f61fc, 0x1f624c, [0x22bdf0, 0x12e280, 0x120d70, 0x120c28, 0x22d0e0]),
 }[kind]
 phoff = struct.unpack_from('<I', data, 28)[0]
 for i in range(struct.unpack_from('<H', data, 44)[0]):
@@ -32,7 +37,7 @@ for i in range(struct.unpack_from('<H', data, 44)[0]):
 else:
     raise SystemExit('wrapper is not file backed')
 span_start = base
-if kind in {'frame_close', 'frame_submit'}:
+if kind in {'frame_close', 'frame_submit', 'edit_state', 'menu_state'}:
     # Isolated mid-function spans: synthetic save/return around the exact retail
     # instructions. No device value, frame boundary or completion is fabricated.
     base -= 4
@@ -58,7 +63,8 @@ target.with_suffix('.externals').write_text(''.join(f'override 0x{pc:x}\n' for p
     helpers + [0x120c80, 0x120e38, 0x120ec0, 0x121028, 0x120ed8, 0x120e90]))
 selected = [line for line in patches.read_text().splitlines()
             if line.split('#')[0].strip() and span_start <= int(line.split()[0], 16) < end]
-expected = {'frame_close': 2, 'frame_draw': 0, 'frame_member': 0, 'mdt_draw': 2}.get(kind, 4)
+expected = {'frame_close': 2, 'frame_draw': 0, 'frame_member': 0, 'mdt_draw': 2,
+            'message': 2, 'edit_state': 2, 'menu_state': 2}.get(kind, 4)
 if len(selected) != expected:
     raise SystemExit('wrapper fixture requires its complete guarded production adaptation subset')
 target.with_suffix('.patches').write_text('\n'.join(selected) + '\n')

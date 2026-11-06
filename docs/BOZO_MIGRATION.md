@@ -4,8 +4,9 @@ Implemented on 2026-11-06. The active build uses only the `BozoEngine` submodule
 
 The graphics cleanup includes the DC adapters, regression fixtures, guarded offline adaptations and published
 BozoEngine pin `4a8f70a` together. References to local/unpublished work in the milestone sections below describe
-the state at those earlier checks. The latest validation is 35/35 suites and both 5,800-frame routes; remaining
-coverage and packet-work limits are listed in the final section.
+the state at those earlier checks. The latest validation is 36/36 suites, both 5,800-frame routes and byte-identical
+3,500-frame unchanged/adapted deterministic records. Remaining coverage, terrain and packet-work limits are listed
+in the final section.
 
 ## Ownership boundary
 

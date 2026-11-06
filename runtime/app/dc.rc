@@ -1,9 +1,7 @@
-// The runner's resources on Windows: its icon (Dark Cloud's variant of The Bozos' logo, the clown dressed as Toan; drawn
-// by docs/branding/make_logo.py dc, no game art; GLFW_ICON is the name GLFW gives the window's class, so the window and
-// the taskbar show it too) and its version information.
+// Native Windows executable icon and version metadata.
 #include <winver.h>
 
-GLFW_ICON ICON "dc.ico"
+1 ICON "dc.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION 1,0,0,0
@@ -17,8 +15,8 @@ BEGIN
         BEGIN
             VALUE "FileDescription", "Dark Cloud"
             VALUE "ProductName", "Dark Cloud (DC_Recomp, a native PC port)"
-            VALUE "InternalName", "ps2EntryRunner"
-            VALUE "OriginalFilename", "ps2EntryRunner.exe"
+            VALUE "InternalName", "dc"
+            VALUE "OriginalFilename", "dc.exe"
             VALUE "FileVersion", "1.0.0.0"
             VALUE "ProductVersion", "1.0.0.0"
         END

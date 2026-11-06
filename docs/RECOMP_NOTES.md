@@ -1,3 +1,5 @@
+> **2026-11-06 migration:** The active runtime is now BozoEngine; PS2Recomp references below describe historical investigation. See [BOZO_MIGRATION.md](BOZO_MIGRATION.md) for the current architecture, build and evidence. Native recompilation remains mandatory, with no emulation fallback.
+
 # Dark Cloud recompilation notes
 
 How the port is brought up: every step, every fix and how it was found, and what remains open.
@@ -507,3 +509,101 @@ from the ELF's own symbols.
   for the destination alpha: the clear writes the near end, the shape the far end, the parchment is drawn with the
   depth test at the far end. Compared with a PCSX2 shot of the same scene: the parchment's mean colour 164/150/121
   against 160/146/117. DC_PROBE_BALLOON=1 also logs the parchment texture's alpha range and the fade.
+
+### Native continuation: graphics DMA boundary (2026-11-05)
+
+The port remains a native recompilation. Draw from the game's models, textures and drawing APIs; replace hardware
+work at those boundaries rather than adding a packet renderer or an interpreter fallback.
+
+- The native renderer already disabled packet processing, but `sceDmaSend*` still programmed DMA registers, started
+  the hardware scheduler, drained transfers and manufactured one busy poll for `sceDmaSync*`. The fork now completes
+  VIF1/GIF SDK sends directly when `packetPathOff()` is set. It preserves channel completion status and queues the
+  enabled completion handlers, without reading packet memory, starting DMA, or introducing a synthetic busy poll.
+  All four SDK send variants and both sync variants use this path. Channel IDs, bases and SDK descriptors retain
+  their existing resolution. Invalid channels and other ports with packets enabled keep the original path.
+- Other channels retain their data transfers: VIF0, IPU, SIF and scratchpad work cannot be discarded with graphics
+  traffic. Direct VIF1/GIF register submissions still use the earlier immediate-completion path in `PS2Memory`.
+  These compatibility paths, the EE kernel services and movie decoding remain future native work.
+- Removed `ps2_vu_aot` from DC's tool/generation scripts and the `dc_vu1_aot` object library from its build. None of
+  those programs ran with the game-data renderer. Stale `generated/vu1` sources are ignored by CMake; a subsequent
+  `scripts/recomp.sh` removes them through the existing generated-tree sync. Missing effects need native drawing
+  implementations from the game's data, not a VU1 fallback.
+- The fork tests also configure with paraLLEl-GS disabled. New regression coverage checks unreadable graphics
+  packet pointers, no DMA starts or transfer-register programming, completion status and enabled callbacks,
+  immediate blocking/polling syncs, and a real scratchpad copy with its original sync behaviour.
+- Validation: the Windows RelWithDebInfo runner builds successfully with no VU1 object target. All three new
+  regression cases pass. The full fork suite reports 639 cases, 629 passing and 10 failing in the untouched
+  libvu0 tests (`ClipScreen`, `ClipAll`, zero division, `RotTransPers`). Their expectations still describe the
+  former stubs, before the game's libvu0 was checked on 2026-11-01 above; this change does not modify those stubs.
+  Logs: `build/codex-native-build.log`, `build/codex-native-tests.log` (local, not distributed).
+- Runtime validation: two 90-second runs with the same `build/menu_ingame.pad`, native IOP/audio, GS disabled and
+  host pad input disabled. The rebuilt runner loads the existing card into Norune, draws Toan and the HUD, and opens
+  the in-game menu (captures `build/boots/codex-dma-after/native_20.png` and `native_26.png`). Its DMA-start count is
+  239 throughout ticks 3000..4560, including the idle village and menu, and its IOP reports zero interpreted
+  instructions with only the existing nine boot register accesses. The old runner's final count is 3523 at tick
+  3480 and it remains at the title menu. Their replay timing differs, so these counts establish reduced hardware
+  traffic, not a same-scene performance measurement. Logs and captures are under
+  `build/boots/codex-dma-{baseline,after}`. Both runs end at the requested timeout; no test runner is left running.
+
+### libvu0 test contracts (2026-11-05)
+
+The ten failures reported above came from stale test contracts. Checked the instruction bytes of the local retail
+ELF (SHA-256 `de3015eefbe86dddbd126a122ef60eda0e29cd12b7d2eaf87ed3ad236e11989c`) with the recompiler's
+Rabbitizer R5900 decoder. REA identifies the ELF, but its Windows analysis providers do not support this MIPS target.
+The local instruction listing is `build/codex-libvu0-assembly.txt`; game-derived listings stay untracked.
+
+| Routine | Verified contract |
+|---|---|
+| `sceVu0RotTransPers` (`0x122080`), `N` (`0x122028`) | Mode 0: FTOI4 xyzw. Nonzero mode: FTOI4 xy and FTOI0 zw. xyz is perspective-divided; w is retained. N takes count in a3, mode in t0, and advances both arrays by 16 bytes. |
+| `sceVu0ClipScreen` (`0x122130`), `3` (`0x122178`) | Strict `0 < x,y < 4096`, `w > 0`; z ignored. Return sticky STATUS zero/sign bits `0x40`/`0x80`, combined across all three vertices. |
+| `sceVu0ClipAll` (`0x1221D8`) | Strict transformed xy bounds scaled by w, plus an unscaled open min.w/max.w interval. Return 0 when any vertex is inside. |
+| `sceVu0DivVector` (`0x121738`) | Divide 1 by f12, multiply all lanes by the result. Zero division saturates signed nonzero lanes; zero lanes stay zero. Perspective conversion saturates integer overflow. |
+
+Corrected the test modes, positive-w fixtures and clip flags; replaced the zero-vector expectations with signed
+saturation cases. Added screen-edge and homogeneous clip-plane/w-boundary cases. The native math implementations
+retain the previously verified behavior.
+
+Validation: the full fork suite passes **641/641**, including the ten corrected cases and two new boundary cases
+(`build/codex-libvu0-tests.log`).
+
+### Native-only IOP build and offline preparation (2026-11-05)
+
+- Qualified `PS2X_IOP_HARDWARE=0` through a 90-second boot/save/menu replay first: the game reaches Norune with
+  zero interpreted instructions and zero device events. The remaining nine boot register accesses are initialization
+  data. The shared runtime still advanced an unused SPU2 model, so disabling register effects alone was insufficient.
+- DC now forces `PS2X_IOP_NATIVE_ONLY=ON`. The IOP CPU interpreter, SIO2 model and SPU2 model source files are
+  excluded from its library; no objects or symbols from those models are present in `libps2_iop.a`. There is no
+  device instance to reset, clock or query for wake deadlines. Audio uses native libsd and the native mixer.
+  IOP registers touched at boot remain ordinary storage; native kernel/import, timer, pad, card and SIF services remain.
+- The build requires all nine generated IOP modules. A module without a matching native file hash/base/entry is
+  rejected before starting. Missing resume points and native functions making no progress produce explicit errors.
+  Clock-driven native faults are logged and latched; subsequent ticks cannot retry them or enter an interpreter.
+  The old interpreter-based comparison mode is also unavailable in DC's build.
+- Native IOP code, native audio, host-clock IOP pacing and the native frame loop are enforced when launching the
+  executable directly. `PS2X_IOP_NATIVE=0`, `PS2X_IOP_HARDWARE=1`, `PS2X_NATIVE_AUDIO=0`,
+  `PS2X_IOP_WALLCLOCK=0` and `DC_NATIVE=0` cannot select the old execution paths.
+- Replaced `scripts/iop_recomp.sh`'s interpreted boot with `dc_iop_prepare`, a command-line offline relocation
+  tool. `DC_PREPARE_ONLY=ON` builds it without generated game code or a runner. It relocates the user's nine IRX
+  files at the verified SCUS-97111 v1.02 load bases, then the generator compiles them with `--require-native`.
+  All nine relocated images and metadata match the old runtime dumps byte for byte. The first offline generation
+  produced identical C++; strict generation additionally replaces trap/fallback returns with explicit native errors.
+- Focused native-only tests cover registered entries, rejection of uncompiled modules, missing resumes, stalled
+  entries, and plain register storage without devices. All five pass with environment flags requesting the old
+  emulated modes. Three generator tests cover complete output, rejection of unsafe delay slots and native trap errors.
+  Logs: `build/codex-native-only-tests.log`, `build/codex-iop-offline.log`,
+  `build/codex-native-only-archive.txt`, `build/codex-native-only-symbols.txt`.
+- Final verification: **641/641** shared tests, **5/5** native-only IOP tests and **3/3** generator tests pass.
+  `build/codex-iop-offline-final.log` records the final strict regeneration of all nine modules, and
+  `build/codex-native-only-final-build.log` the successful runner build. The final archive audit again finds no
+  interpreter/SPU2/SIO2 objects or defined implementation symbols.
+- A 125-second direct-executable run with all the legacy-mode flags above set loads the existing save into Norune,
+  draws Toan and the HUD, and pauses normally. Every IOP report says hardware absent, zero interpreted instructions
+  and zero device events; the nine boot register accesses are storage only. Native audio records 124.44 seconds of
+  stereo 48 kHz PCM (peak 25480, RMS 2821.76). Evidence is in `build/boots/codex-native-only-final/`, including
+  `native_9.png`, `native_22.png`, `run.log`, `env.txt` and `audio-validation.json`.
+  A separate live-input run verifies the card/slot/save-selection dialogs. Fixed input timings did not reliably
+  complete the additional main-menu sequence, so final main-menu parity is not claimed. Live input paths on Windows
+  must use drive paths, e.g. `PS2X_PAD_INPUT=D:/.../live.pad`, and LF-delimited button names.
+
+Remaining scope: EE DMA channels and kernel compatibility, the IPU/movie layer, and missing native drawing effects.
+Excluding the IOP models does not establish that every game system has been replaced or every dungeon is playable.

@@ -1,8 +1,8 @@
-"""(From VP2S_Recomp tools/wrap_elf.py, same CodeWarrior MWo3 format.) Wrap an extracted code module into a minimal MIPS R5900 ELF for Ghidra and PS2Recomp.
+"""(From VP2S_Recomp tools/wrap_elf.py, same CodeWarrior MWo3 format.) Wrap an extracted code module into a minimal MIPS R5900 ELF for native static recompilation.
 
 The module file (as written by extract.py) is mapped at its load address with its
 0x80-byte header in memory, exactly as the game loads it. Sections come from the header:
-  .modhdr load .. load+0x80                (WA; PS2Recomp reads the resident guard here)
+  .modhdr load .. load+0x80                (WA; the port checks the resident identity here)
   .text   load+0x80 .. load+text_size      (AX; extended to the end of a function that
           runs past text_size, as in modules 2, 16, 19 and 22)
   .data   load+text_size .. +data_size     (WA)

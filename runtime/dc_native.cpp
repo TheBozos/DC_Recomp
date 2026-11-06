@@ -1,5 +1,5 @@
 // Native PC rendering, Dark Cloud's adapter: DC's 3D models drawn by the fork's native renderer
-// (ps2x::native::Renderer) from the game's own data, not by VU1 and the GS.
+// (bozo::render::Renderer) from the game's own data, not by VU1 and the GS.
 //
 // Nothing here reads a packet the game builds for the PS2 hardware (no VIF / GIF / GS data): every draw comes from
 // the game's own structures, as its EE code holds them.
@@ -19,10 +19,8 @@
 //
 // Always on: Dark Cloud's picture has no other path (no GS).
 
-#include "ps2_runtime.h"
-#include "runtime/gs/gs_off.h"
-#include "runtime/native/native_renderer.h"
-#include "runtime/native/native_vif1.h"
+#include "dc_native_api.h"
+#include "bozo/render/renderer.h"
 
 #include <array>
 #include <algorithm>
@@ -52,7 +50,7 @@ namespace dc::native
         constexpr uint32_t kSetGsReg3 = 0x00129360u;          // SetGsReg3(uint *, ulong *TEST, ulong *ZBUF, ulong *ALPHA)
         constexpr uint32_t kVtVisualMdtVu1 = 0x002A11A0u;     // __vt__13CVisualMDTVu1
         constexpr uint32_t kTextureManager = 0x01C75870u;     // the CTextureManager every MDT material's texture is in
-        PS2Runtime::RecompiledFunction g_drawVu1 = nullptr, g_createFromMdt = nullptr, g_createFromMdtRemake = nullptr,
+        RecompiledFunction g_drawVu1 = nullptr, g_createFromMdt = nullptr, g_createFromMdtRemake = nullptr,
                                        g_setGsReg3 = nullptr;
         uint64_t g_group = 0;
 
@@ -85,10 +83,10 @@ namespace dc::native
             return value;
         }
 
-        ps2x::native::Screen screen()
+        bozo::render::Screen screen()
         {
             // DC's drawing environment: 640 x 224 fields, XYOFFSET (1728, 1936) (0x6C00, 0x7900 in 12.4).
-            ps2x::native::Screen s;
+            bozo::render::Screen s;
             s.originX = 1728.0f;
             s.originY = 1936.0f;
             s.width = 640.0f;
@@ -218,12 +216,12 @@ namespace dc::native
             entry.mdt = mdt;
             entry.copy = std::move(copy);
         }
-        void createFromMdtHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void createFromMdtHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             noteMdt(rdram, getRegU32(ctx, 5), getRegU32(ctx, 6), true);
             g_createFromMdt(rdram, ctx, runtime);
         }
-        void createFromMdtRemakeHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void createFromMdtRemakeHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             noteMdt(rdram, getRegU32(ctx, 5), getRegU32(ctx, 6), false);
             g_createFromMdtRemake(rdram, ctx, runtime);
@@ -260,7 +258,7 @@ namespace dc::native
             bool valid = false;
             uint64_t test = 0, zbuf = 0, alpha = 0;
         } g_objectState;
-        void setGsReg3Hook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void setGsReg3Hook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             g_objectState.valid = true;
             g_objectState.test = rd64(rdram, getRegU32(ctx, 5));
@@ -269,14 +267,14 @@ namespace dc::native
             g_setGsReg3(rdram, ctx, runtime);
         }
 
-        void applyObjectState(const ObjectState &state, ps2x::native::Material &material)
+        void applyObjectState(const ObjectState &state, bozo::render::Material &material)
         {
-            material.blend = ps2x::native::Material::Blend::Alpha;
+            material.blend = bozo::render::Material::Blend::Alpha;
             material.depthWrite = true;
             material.alphaTest = false;
             if (!state.valid)
                 return;
-            material.blend = ps2x::native::blendOf(state.alpha);
+            material.blend = bozo::render::blendOf(state.alpha);
             material.depthWrite = ((state.zbuf >> 32) & 1u) == 0u;
             // DC_FORCE_ZWRITE=1 (diagnosis): Z written whatever the object's ZBUF says.
             static const bool s_forceZWrite = [] { const char *v = std::getenv("DC_FORCE_ZWRITE"); return v && v[0] == '1'; }();
@@ -366,9 +364,9 @@ namespace dc::native
         // instead of clipping it and keeps GS Z to 24 bits: here triangles are clipped to the near and far planes
         // (z = -w, z = w) of that clip space, the new vertices interpolated in the object's space (clip coordinates
         // are linear in it). x and y are left to the GPU.
-        void clipDepth(const Matrix &clip, std::vector<ps2x::native::Vertex> &triangles)
+        void clipDepth(const Matrix &clip, std::vector<bozo::render::Vertex> &triangles)
         {
-            using ps2x::native::Vertex;
+            using bozo::render::Vertex;
             struct Clipped
             {
                 Vertex v;
@@ -477,7 +475,7 @@ namespace dc::native
             return record != 0u ? record : kTextureManager + 0x10F8u; // handle -1: GetTexture's record 0
         }
 
-        std::unordered_map<uint32_t, std::pair<uint64_t, std::shared_ptr<const ps2x::native::TextureCache::Texture>>> g_decoded;
+        std::unordered_map<uint32_t, std::pair<uint64_t, std::shared_ptr<const bozo::render::Texture>>> g_decoded;
         uint64_t g_textureVersion = 0;
         bool g_dump2D = false; // the on-demand frame dump (drawStrip's [dc:dump])
         // Live toggles (diagnosis): D:/DC_Recomp/build/toggles.txt, read every 60 frames, one word per line: noshadow
@@ -578,7 +576,7 @@ namespace dc::native
         {
             g_storeLoaded = true;
             const char *path = std::getenv("DC_TEXTURES");
-            std::ifstream file(path && *path ? path : "build/textures/dc_textures.bin", std::ios::binary);
+            std::ifstream file(path && *path ? path : DC_DEFAULT_TEXTURES, std::ios::binary);
             if (!file)
             {
                 std::fprintf(stderr, "[dc:native] no converted textures (run tools/dc_texconv.py game build/textures/dc_textures.bin): "
@@ -652,14 +650,14 @@ namespace dc::native
                 }
         }
         // An 8-bit record's texture from the converted store.
-        std::shared_ptr<ps2x::native::TextureCache::Texture> storedTexture(const uint8_t *rdram, uint32_t record,
+        std::shared_ptr<bozo::render::Texture> storedTexture(const uint8_t *rdram, uint32_t record,
                                                                            uint32_t w, uint32_t h, uint32_t tw, uint32_t th)
         {
             bool livePalette = false;
             const StoredTexture *stored = findStored(rdram, record, w, h, livePalette);
             if (!stored)
                 return nullptr;
-            auto texture = std::make_shared<ps2x::native::TextureCache::Texture>();
+            auto texture = std::make_shared<bozo::render::Texture>();
             texture->width = 1u << tw;
             texture->height = 1u << th;
             texture->rgba.assign(static_cast<size_t>(texture->width) * texture->height, 0u);
@@ -753,11 +751,11 @@ namespace dc::native
         {
             uint32_t pixels = 0;
             uint64_t tex0 = 0;
-            std::shared_ptr<const ps2x::native::TextureCache::Texture> texture;
+            std::shared_ptr<const bozo::render::Texture> texture;
         };
         std::unordered_map<uint32_t, Pinned> g_pinned;
 
-        std::shared_ptr<const ps2x::native::TextureCache::Texture> recordTexture(const uint8_t *rdram, uint32_t record)
+        std::shared_ptr<const bozo::render::Texture> recordTexture(const uint8_t *rdram, uint32_t record)
         {
             if (const auto pinned = g_pinned.find(record); pinned != g_pinned.end())
             {
@@ -818,7 +816,7 @@ namespace dc::native
             if (slot.second && slot.first == hash)
                 return slot.second;
 
-            auto texture = std::make_shared<ps2x::native::TextureCache::Texture>();
+            auto texture = std::make_shared<bozo::render::Texture>();
             texture->width = 1u << tw;
             texture->height = 1u << th;
             texture->rgba.assign(static_cast<size_t>(texture->width) * texture->height, 0u);
@@ -958,7 +956,7 @@ namespace dc::native
         // DC_PROBE_SPIKES=1 (diagnosis): a triangle spanning over 1500 screen pixels logs the draw it came from (what
         // the hooks note in g_drawWhat), once per source.
         char g_drawWhat[160] = "";
-        void probeSpikes(const DrawSetup &setup, const std::vector<ps2x::native::Vertex> &vertices)
+        void probeSpikes(const DrawSetup &setup, const std::vector<bozo::render::Vertex> &vertices)
         {
             static const bool s_on = [] { const char *e = std::getenv("DC_PROBE_SPIKES"); return e && e[0] == '1'; }();
             if (!s_on)
@@ -970,7 +968,7 @@ namespace dc::native
                 bool ok = true;
                 for (int k = 0; k < 3; ++k)
                 {
-                    const ps2x::native::Vertex &v = vertices[t + static_cast<size_t>(k)];
+                    const bozo::render::Vertex &v = vertices[t + static_cast<size_t>(k)];
                     const float *m = setup.toScreen.m;
                     const float w = m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15];
                     if (!(w > 0.0f))
@@ -986,7 +984,7 @@ namespace dc::native
                     continue;
                 if (s_seen[g_drawWhat]++ < 2)
                 {
-                    const ps2x::native::Vertex *v = &vertices[t];
+                    const bozo::render::Vertex *v = &vertices[t];
                     std::fprintf(stderr, "[dc:spike] %s: span %.0f, object (%g %g %g) (%g %g %g) (%g %g %g)\n", g_drawWhat, span,
                                  v[0].x, v[0].y, v[0].z, v[1].x, v[1].y, v[1].z, v[2].x, v[2].y, v[2].z);
                 }
@@ -994,9 +992,9 @@ namespace dc::native
             }
         }
 
-        void submit(const DrawSetup &setup, ps2x::native::Material &material,
-                    const std::shared_ptr<const ps2x::native::TextureCache::Texture> &texture,
-                    std::vector<ps2x::native::Vertex> &vertices)
+        void submit(const DrawSetup &setup, bozo::render::Material &material,
+                    const std::shared_ptr<const bozo::render::Texture> &texture,
+                    std::vector<bozo::render::Vertex> &vertices)
         {
             probeSpikes(setup, vertices);
             if (setup.guard)
@@ -1007,7 +1005,7 @@ namespace dc::native
                     bool inside = true;
                     for (int k = 0; k < 3 && inside; ++k)
                     {
-                        const ps2x::native::Vertex &v = vertices[t + static_cast<size_t>(k)];
+                        const bozo::render::Vertex &v = vertices[t + static_cast<size_t>(k)];
                         const float *m = setup.toScreen.m;
                         const float w = m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15];
                         const float x = (m[0] * v.x + m[4] * v.y + m[8] * v.z + m[12]) / w;
@@ -1034,7 +1032,7 @@ namespace dc::native
                     bool front = true;
                     for (int k = 0; k < 3; ++k)
                     {
-                        const ps2x::native::Vertex &v = vertices[t + static_cast<size_t>(k)];
+                        const bozo::render::Vertex &v = vertices[t + static_cast<size_t>(k)];
                         const float *m = setup.toScreen.m;
                         const float w = m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15];
                         if (!(w > 0.0f))
@@ -1064,7 +1062,7 @@ namespace dc::native
             // renderer keeps (it wraps past them): the largest per 300 frames and how many vertices go past.
             static const bool s_probeZ = [] { const char *e = std::getenv("DC_PROBE_SPIKES"); return e && e[0] == '1'; }();
             if (s_probeZ)
-                for (const ps2x::native::Vertex &v : vertices)
+                for (const bozo::render::Vertex &v : vertices)
                 {
                     const float *m = setup.toScreen.m;
                     const float w = m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15];
@@ -1076,7 +1074,7 @@ namespace dc::native
                     if (z < 0.0f)
                         ++g_stats.zNegative;
                 }
-            ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+            bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
             material.textured = setup.textureMapped && (texture != nullptr || material.fromFrame != 0u);
             g_stats.triangles += vertices.size() / 3u;
             // The frame dump: what each draw sends after the guard band and culling (its colours' and fog's ranges, its
@@ -1085,7 +1083,7 @@ namespace dc::native
             {
                 uint32_t lo = 0xFFFFFFFFu, hi = 0u;
                 float fogLo = 1e9f, fogHi = -1e9f;
-                for (const ps2x::native::Vertex &v : vertices)
+                for (const bozo::render::Vertex &v : vertices)
                 {
                     for (uint32_t b = 0; b < 32u; b += 8u)
                     {
@@ -1112,7 +1110,7 @@ namespace dc::native
                     float sx[3], sy[3];
                     for (int j = 0; j < 3; ++j)
                     {
-                        const ps2x::native::Vertex &v = vertices[k + static_cast<size_t>(j)];
+                        const bozo::render::Vertex &v = vertices[k + static_cast<size_t>(j)];
                         const float w = t[3] * v.x + t[7] * v.y + t[11] * v.z + t[15];
                         sx[j] = (t[0] * v.x + t[4] * v.y + t[8] * v.z + t[12]) / w;
                         sy[j] = (t[1] * v.x + t[5] * v.y + t[9] * v.z + t[13]) / w;
@@ -1129,7 +1127,7 @@ namespace dc::native
                     std::fprintf(stderr, "[dc:dump]     screen x %.0f..%.0f y %.0f..%.0f, widest triangle %.0f:", sxLo, sxHi, syLo, syHi, widest);
                     for (int j = 0; j < 3; ++j)
                     {
-                        const ps2x::native::Vertex &v = vertices[widestAt + static_cast<size_t>(j)];
+                        const bozo::render::Vertex &v = vertices[widestAt + static_cast<size_t>(j)];
                         std::fprintf(stderr, " (%g %g %g w %g)", v.x, v.y, v.z, t[3] * v.x + t[7] * v.y + t[11] * v.z + t[15]);
                     }
                     std::fprintf(stderr, "\n");
@@ -1193,7 +1191,7 @@ namespace dc::native
         // before), then per vertex the indices of its position, normal, texture coordinates and colour), + 0x30 texture
         // coordinates (the positions when <= 0), + 0x38 the materials.
         uint32_t g_fogColour = 0; // FOGCOL as the models' DrawVu1 last set it (RenderInfo + 0x338): the 3D sprites' fog
-        bool sampleMade(uint32_t base, ps2x::native::Material &material);
+        bool sampleMade(uint32_t base, bozo::render::Material &material);
         extern std::unordered_map<uint32_t, uint8_t> g_targetOfBase;
         void drawModel(const uint8_t *rdram, const Model &m, const Matrix &localToWorld, uint32_t renderInfo, bool drawn)
         {
@@ -1232,19 +1230,19 @@ namespace dc::native
             const uint32_t list = mdt + m.u32(mdt + 0x28u);
             const uint32_t primitives = m.u32(list + 8u);
 
-            ps2x::native::Material material;
+            bozo::render::Material material;
             material.textured = false;
             material.depthTest = true;
             applyObjectState(g_objectState, material);
             if (g_toggles.opaqueModels)
-                material.blend = ps2x::native::Material::Blend::Opaque;
+                material.blend = bozo::render::Material::Blend::Opaque;
             float madeU = 1.0f, madeV = 1.0f; // a made picture's texture coordinates (see the record lookup below)
             material.fog = setup.fog;
             material.fogColour = setup.fogColour;
             g_fogColour = setup.fogColour;
-            std::shared_ptr<const ps2x::native::TextureCache::Texture> texture;
-            ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
-            std::vector<ps2x::native::Vertex> vertices;
+            std::shared_ptr<const bozo::render::Texture> texture;
+            bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
+            std::vector<bozo::render::Vertex> vertices;
 
             uint32_t at = list + 0x10u;
             for (uint32_t p = 0; p < primitives && p < 4096u; ++p)
@@ -1279,7 +1277,7 @@ namespace dc::native
                         (material.tex0 & 0x3FFFu) == 0x1A40u && g_targetOfBase.find(0x1A40u) == g_targetOfBase.end())
                     {
                         material.fromFrame = 1;
-                        material.source = ps2x::native::Material::kPreviousFrame;
+                        material.source = bozo::render::Material::kPreviousFrame;
                         material.frameWidth = 640;
                         material.frameHeight = 224;
                         madeU = static_cast<float>(1u << ((material.tex0 >> 26) & 0xFu)) / 640.0f;
@@ -1287,7 +1285,7 @@ namespace dc::native
                     }
                     else if (!s_noMadeModels && !texture && record != 0u && rd32(rdram, record + 0x38u) == 0u)
                     {
-                        ps2x::native::Material made;
+                        bozo::render::Material made;
                         if (sampleMade(static_cast<uint32_t>(material.tex0 & 0x3FFFu), made) && made.source != 0u)
                         {
                             material.fromFrame = made.fromFrame;
@@ -1340,7 +1338,7 @@ namespace dc::native
                 auto vertex = [&](uint32_t i) {
                     const uint32_t tuple = indices + i * stride * 4u;
                     const uint32_t pi = m.u32(tuple), ni = m.u32(tuple + 4u), ti = m.u32(tuple + 8u);
-                    ps2x::native::Vertex v;
+                    bozo::render::Vertex v;
                     v.x = m.f(positions + pi * 16u);
                     v.y = m.f(positions + pi * 16u + 4u);
                     v.z = m.f(positions + pi * 16u + 8u);
@@ -1385,7 +1383,7 @@ namespace dc::native
                 if (type == 4u)
                     for (uint32_t i = 2; i < count; ++i)
                     {
-                        ps2x::native::Vertex a = vertex(i - 2), b = vertex(i - 1), c = vertex(i);
+                        bozo::render::Vertex a = vertex(i - 2), b = vertex(i - 1), c = vertex(i);
                         if (i & 1u)
                             std::swap(a, b);
                         vertices.push_back(a);
@@ -1419,7 +1417,7 @@ namespace dc::native
         constexpr uint32_t kWaterCreateVUData = 0x001607E0u;
         std::mutex g_waterMutex;
         std::unordered_map<uint32_t, uint32_t> g_waterOfVisual;
-        void waterCreateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void waterCreateHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             const uint32_t water = getRegU32(ctx, 4), data = getRegU32(ctx, 5);
             std::memcpy(rdram + ((water + 0x88u) & 0x1FFFFFFu), &data, 4);
@@ -1452,13 +1450,13 @@ namespace dc::native
             rowStep[1] = columnStep[1] = 0.0f;
             const float scale = rdf(rdram, water + 0x9Cu);
             const uint32_t colour = rd32(rdram, water + 0x90u);
-            std::vector<ps2x::native::Vertex> grid(static_cast<size_t>(rows) * columns);
+            std::vector<bozo::render::Vertex> grid(static_cast<size_t>(rows) * columns);
             for (int32_t r = 0; r < rows; ++r)
             {
                 float point[3] = {base[0] + static_cast<float>(r) * rowStep[0], base[1], base[2] + static_cast<float>(r) * rowStep[2]};
                 for (int32_t c = 0; c < columns; ++c)
                 {
-                    ps2x::native::Vertex &v = grid[static_cast<size_t>(r) * columns + c];
+                    bozo::render::Vertex &v = grid[static_cast<size_t>(r) * columns + c];
                     v.x = point[0];
                     v.y = point[1];
                     v.z = point[2];
@@ -1468,26 +1466,26 @@ namespace dc::native
                     point[2] += columnStep[2];
                 }
             }
-            std::vector<ps2x::native::Vertex> vertices;
+            std::vector<bozo::render::Vertex> vertices;
             for (int32_t r = 0; r + 1 < rows; ++r)
                 for (int32_t c = 1; c < columns; ++c)
                 {
                     // CreateVUData's strip: row r, then row r + 1, at each column.
-                    const ps2x::native::Vertex &a = grid[static_cast<size_t>(r) * columns + c - 1];
-                    const ps2x::native::Vertex &b = grid[static_cast<size_t>(r + 1) * columns + c - 1];
-                    const ps2x::native::Vertex &d = grid[static_cast<size_t>(r) * columns + c];
-                    const ps2x::native::Vertex &e = grid[static_cast<size_t>(r + 1) * columns + c];
+                    const bozo::render::Vertex &a = grid[static_cast<size_t>(r) * columns + c - 1];
+                    const bozo::render::Vertex &b = grid[static_cast<size_t>(r + 1) * columns + c - 1];
+                    const bozo::render::Vertex &d = grid[static_cast<size_t>(r) * columns + c];
+                    const bozo::render::Vertex &e = grid[static_cast<size_t>(r + 1) * columns + c];
                     vertices.insert(vertices.end(), {a, b, d, b, e, d});
                 }
-            ps2x::native::Material material;
+            bozo::render::Material material;
             material.textured = false;
             material.depthTest = true;
             material.depthWrite = false;
-            material.blend = ps2x::native::Material::Blend::Alpha;
+            material.blend = bozo::render::Material::Blend::Alpha;
             submit(setup, material, nullptr, vertices);
         }
 
-        void drawVu1Hook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void drawVu1Hook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint32_t visual = getRegU32(ctx, 4), localToWorld = getRegU32(ctx, 6);
             const uint32_t renderInfo = getRegU32(ctx, 7), program = getRegU32(ctx, 8);
@@ -1558,7 +1556,7 @@ namespace dc::native
         // CreateVUData (0x13C5F0) lays them out (the two rows swapped when the row's flag at + 0x7110 is set), with its
         // material at + 0x60 (texture name at + 0x94). It draws with RenderInfo's lights, as its DrawVu1 call asks.
         constexpr uint32_t kClothDrawVu1 = 0x0013C470u;
-        void clothDrawHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void clothDrawHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             const uint32_t cloth = getRegU32(ctx, 4), localToWorld = getRegU32(ctx, 6), renderInfo = getRegU32(ctx, 7);
             const ObjectState state = g_objectState;
@@ -1577,13 +1575,13 @@ namespace dc::native
                 setup.lighting.material[c] = rdf(rdram, mat + static_cast<uint32_t>(c) * 4u);
             const uint32_t record = materialRecord(rdram, mat);
             auto texture = record != 0u ? recordTexture(rdram, record) : nullptr;
-            ps2x::native::Material material;
+            bozo::render::Material material;
             material.depthTest = true;
             material.tex0 = record != 0u ? rd64(rdram, record + 0x28u) : 0u;
             applyObjectState(state, material);
             auto vertex = [&](int32_t r, int32_t c) {
                 const uint32_t at = cloth + static_cast<uint32_t>(r) * 0x100u + static_cast<uint32_t>(c) * 0x10u;
-                ps2x::native::Vertex v;
+                bozo::render::Vertex v;
                 v.x = rdf(rdram, at + 0x1110u);
                 v.y = rdf(rdram, at + 0x1114u);
                 v.z = rdf(rdram, at + 0x1118u);
@@ -1592,7 +1590,7 @@ namespace dc::native
                 v.rgba = shade(setup.lighting, rdf(rdram, at + 0x5110u), rdf(rdram, at + 0x5114u), rdf(rdram, at + 0x5118u));
                 return v;
             };
-            std::vector<ps2x::native::Vertex> strip, vertices;
+            std::vector<bozo::render::Vertex> strip, vertices;
             for (int32_t r = 0; r + 1 < rows; ++r)
             {
                 const bool swapped = rd32(rdram, cloth + 0x7110u + static_cast<uint32_t>(r) * 4u) != 0u;
@@ -1604,7 +1602,7 @@ namespace dc::native
                 }
                 for (size_t i = 2; i < strip.size(); ++i)
                 {
-                    ps2x::native::Vertex a = strip[i - 2], b = strip[i - 1];
+                    bozo::render::Vertex a = strip[i - 2], b = strip[i - 1];
                     if (i & 1u)
                         std::swap(a, b);
                     vertices.push_back(a);
@@ -1667,7 +1665,7 @@ namespace dc::native
         struct ShadowDraw
         {
             Matrix toScreen;
-            std::vector<ps2x::native::Vertex> vertices;
+            std::vector<bozo::render::Vertex> vertices;
         };
         std::vector<ShadowDraw> g_shadowDraws;
 
@@ -1718,7 +1716,7 @@ namespace dc::native
             const uint32_t primitives = m.u32(list + 8u);
             auto vertex = [&](uint32_t indices, uint32_t i) {
                 const uint32_t pi = m.u32(indices + i * stride * 4u);
-                ps2x::native::Vertex v;
+                bozo::render::Vertex v;
                 v.x = m.f(positions + pi * 16u);
                 v.y = m.f(positions + pi * 16u + 4u);
                 v.z = m.f(positions + pi * 16u + 8u);
@@ -1735,7 +1733,7 @@ namespace dc::native
                 if (type == 4u && !listsOnly)
                     for (uint32_t i = 2; i < count; ++i)
                     {
-                        ps2x::native::Vertex a = vertex(indices, i - 2), b = vertex(indices, i - 1);
+                        bozo::render::Vertex a = vertex(indices, i - 2), b = vertex(indices, i - 1);
                         if (i & 1u)
                             std::swap(a, b);
                         draw.vertices.push_back(a);
@@ -1751,7 +1749,7 @@ namespace dc::native
             static int s_screenLogged = 0;
             if (std::getenv("DC_PROBE_SHADOW") && !draw.vertices.empty() && (s_screenLogged++ % 2700) < 3)
             {
-                const ps2x::native::Vertex &v = draw.vertices[0];
+                const bozo::render::Vertex &v = draw.vertices[0];
                 const float *t = draw.toScreen.m;
                 const float x = t[0] * v.x + t[4] * v.y + t[8] * v.z + t[12], y = t[1] * v.x + t[5] * v.y + t[9] * v.z + t[13];
                 const float w = t[3] * v.x + t[7] * v.y + t[11] * v.z + t[15];
@@ -1767,7 +1765,7 @@ namespace dc::native
 
         // CVisualShadow::DrawVu1, taken over: no VU data, packet or VU1 program; its shadow model (the MDT at + 0x20)
         // noted for the pass.
-        void shadowDrawHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void shadowDrawHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             const uint32_t visual = getRegU32(ctx, 4), localToWorld = getRegU32(ctx, 6), renderInfo = getRegU32(ctx, 7);
             g_objectState.valid = false;
@@ -1782,7 +1780,7 @@ namespace dc::native
         }
 
         void seq(char c);
-        void beginShadowHook(uint8_t *, R5900Context *ctx, PS2Runtime *)
+        void beginShadowHook(uint8_t *, R5900Context *ctx, Runtime *)
         {
             seq('B');
             g_shadowDraws.clear();
@@ -1807,7 +1805,7 @@ namespace dc::native
             std::vector<ShadowDraw> draws;
         };
         std::vector<PendingShadows> g_pendingShadows;
-        void endShadowHook(uint8_t *, R5900Context *ctx, PS2Runtime *)
+        void endShadowHook(uint8_t *, R5900Context *ctx, Runtime *)
         {
             const uint32_t strength = getRegU32(ctx, 4) & 0xFFu;
             ctx->pc = getRegU32(ctx, 31);
@@ -1819,7 +1817,7 @@ namespace dc::native
                 {
                     float sxLo = 1e30f, syLo = 1e30f, sxHi = -1e30f, syHi = -1e30f;
                     const float *t = draw.toScreen.m;
-                    for (const ps2x::native::Vertex &v : draw.vertices)
+                    for (const bozo::render::Vertex &v : draw.vertices)
                     {
                         const float w = t[3] * v.x + t[7] * v.y + t[11] * v.z + t[15];
                         const float x = (t[0] * v.x + t[4] * v.y + t[8] * v.z + t[12]) / w, y = (t[1] * v.x + t[5] * v.y + t[9] * v.z + t[13]) / w;
@@ -1838,7 +1836,7 @@ namespace dc::native
         }
         void layShadows(uint32_t strength, std::vector<ShadowDraw> &draws)
         {
-            ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+            bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
             static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
             const uint8_t work = targetFor(kShadowWork);
             renderer.setTargetSharesDepth(work, true); // the marks are depth-tested against the characters
@@ -1851,9 +1849,9 @@ namespace dc::native
                 std::fputc('\n', stderr);
             }
             auto screenQuad = [](uint32_t rgba) {
-                std::vector<ps2x::native::Vertex> vertices;
+                std::vector<bozo::render::Vertex> vertices;
                 auto vertex = [&](float x, float y, float u, float v) {
-                    ps2x::native::Vertex out;
+                    bozo::render::Vertex out;
                     out.x = 1728.0f + x;
                     out.y = 1936.0f + y;
                     out.u = u;
@@ -1861,17 +1859,17 @@ namespace dc::native
                     out.rgba = rgba;
                     return out;
                 };
-                const ps2x::native::Vertex a = vertex(0, 0, 0, 0), b = vertex(640, 0, 1, 0), c = vertex(0, 224, 0, 1), d = vertex(640, 224, 1, 1);
+                const bozo::render::Vertex a = vertex(0, 0, 0, 0), b = vertex(640, 0, 1, 0), c = vertex(0, 224, 0, 1), d = vertex(640, 224, 1, 1);
                 vertices.insert(vertices.end(), {a, b, c, b, d, c});
                 return vertices;
             };
-            ps2x::native::Material mark;
+            bozo::render::Material mark;
             mark.textured = false;
-            mark.blend = ps2x::native::Material::Blend::Opaque;
+            mark.blend = bozo::render::Material::Blend::Opaque;
             mark.depthTest = false;
             mark.depthWrite = false;
             mark.target = work;
-            const std::vector<ps2x::native::Vertex> clear = screenQuad(0u);
+            const std::vector<bozo::render::Vertex> clear = screenQuad(0u);
             renderer.draw(mark, kIdentity, clear.data(), static_cast<uint32_t>(clear.size()));
             // The marks are depth-tested against the scene (the work target shares the frame's depth, as the GS's work
             // texture shares its Z buffer): where a character stands in front of the ground, its depth hides the flattened
@@ -1879,21 +1877,21 @@ namespace dc::native
             mark.depthTest = true;
             for (ShadowDraw &draw : draws)
             {
-                for (ps2x::native::Vertex &v : draw.vertices)
+                for (bozo::render::Vertex &v : draw.vertices)
                     v.rgba = 0x80808080u; // marked: white, alpha 1
                 g_stats.shadowTriangles += draw.vertices.size() / 3u;
                 renderer.draw(mark, draw.toScreen.m, draw.vertices.data(), static_cast<uint32_t>(draw.vertices.size()));
             }
-            ps2x::native::Material lay;
+            bozo::render::Material lay;
             lay.textured = true;
             lay.fromFrame = 1;
             lay.source = work;
             lay.frameWidth = 640;
             lay.frameHeight = 224;
-            lay.blend = ps2x::native::Material::Blend::Alpha;
+            lay.blend = bozo::render::Material::Blend::Alpha;
             lay.depthTest = false;
             lay.depthWrite = false;
-            const std::vector<ps2x::native::Vertex> over = screenQuad(strength << 24); // black, alpha = the strength
+            const std::vector<bozo::render::Vertex> over = screenQuad(strength << 24); // black, alpha = the strength
             renderer.draw(lay, kIdentity, over.data(), static_cast<uint32_t>(over.size()));
         }
         void flushShadows()
@@ -1913,13 +1911,13 @@ namespace dc::native
         // column by column; z', z' + 20 for the second) through the world-to-screen matrix (0x1C75570). The GS's copy
         // has none of the native draws: drawn the same way here from the native frame (Material::fromFrame).
         uint64_t g_hazeSeed = 0x2545F4914F6CDD1Dull;
-        void depthOfFieldHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void depthOfFieldHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t focus = getRegU32(ctx, 4);
             const int32_t passes = static_cast<int32_t>(getRegU32(ctx, 5)), alpha = static_cast<int32_t>(getRegU32(ctx, 6));
             const int32_t haze = static_cast<int32_t>(getRegU32(ctx, 7));
-            ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+            bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
             const float zScale = renderer.gsZScale();
             if (g_group == 0u || !(zScale > 0.0f) || g_toggles.noDof)
                 return;
@@ -1939,19 +1937,19 @@ namespace dc::native
                 const float z = out[2] / out[3];
                 depth[i] = std::isfinite(z) && std::fabs(z) < 2.1e9f ? static_cast<int32_t>(z) : 0;
             }
-            ps2x::native::Material material;
+            bozo::render::Material material;
             material.textured = true;
             material.tex0 = 0; // TFX MODULATE, TCC 0: the strips' alpha
             material.frameWidth = 640;
             material.frameHeight = 224;
-            material.blend = ps2x::native::Material::Blend::Alpha;
+            material.blend = bozo::render::Material::Blend::Alpha;
             material.depthTest = true;
             material.depthWrite = false;
             material.clampU = material.clampV = true;
             static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-            std::vector<ps2x::native::Vertex> strip, triangles;
+            std::vector<bozo::render::Vertex> strip, triangles;
             auto vertex = [&](float x, float y, int32_t z, float u, float v, uint32_t a) {
-                ps2x::native::Vertex out;
+                bozo::render::Vertex out;
                 out.x = 1728.0f + x;
                 out.y = 1936.0f + y;
                 out.z = static_cast<float>(static_cast<uint32_t>(z)) / zScale; // XYZ2's Z, unsigned
@@ -2025,15 +2023,15 @@ namespace dc::native
         struct SpriteHook
         {
             uint32_t address;
-            PS2Runtime::RecompiledFunction original;
+            RecompiledFunction original;
         };
         SpriteHook g_spriteHooks[] = {{0x0014C3C0u, nullptr}, {0x0014CD80u, nullptr}, {0x0015BD00u, nullptr},
                                       {0x0015C000u, nullptr}, {0x0015C310u, nullptr}, {0x0015C630u, nullptr},
                                       {0x0015C980u, nullptr}, {0x0015E540u, nullptr}, {0x0015EAD0u, nullptr}};
-        void spriteProbe(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void spriteProbe(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint32_t pc = ctx->pc;
-            PS2Runtime::RecompiledFunction original = nullptr;
+            RecompiledFunction original = nullptr;
             for (const SpriteHook &hook : g_spriteHooks)
                 if (hook.address == pc)
                     original = hook.original;
@@ -2072,7 +2070,7 @@ namespace dc::native
         {
             uint32_t address;
             const char *name;
-            PS2Runtime::RecompiledFunction original;
+            RecompiledFunction original;
             std::atomic<uint64_t> calls;
         };
         CountHook g_countHooks[] = {{0x0013C470u, "CCloth::DrawVu1", nullptr, {}},
@@ -2083,7 +2081,7 @@ namespace dc::native
                                     {0x0012BA20u, "CSpriteTable::DrawTable", nullptr, {}},
                                     {0x00136290u, "CVisualShadow::DrawVu1", nullptr, {}},
                                     {0x00129400u, "CFrameVu1::DrawVu1", nullptr, {}}};
-        void countHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void countHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             for (CountHook &hook : g_countHooks)
                 if (hook.address == ctx->pc)
@@ -2100,7 +2098,7 @@ namespace dc::native
         {
             uint32_t address;
             const char *name;
-            PS2Runtime::RecompiledFunction original = nullptr;
+            RecompiledFunction original = nullptr;
             std::atomic<uint64_t> calls{0};
         };
         FeederHook g_feeders[] = {
@@ -2177,7 +2175,7 @@ namespace dc::native
             {0x001F61E0u, "BattleMenuDraw__Fv"},
             {0x00244C70u, "LangsetLoop__Fv"},
         };
-        void feederHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void feederHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             for (FeederHook &hook : g_feeders)
                 if (hook.address == ctx->pc)
@@ -2199,11 +2197,11 @@ namespace dc::native
             auto half = [](uint32_t c) { return ((c & 0xFFu) * 128u + 127u) / 255u; };
             return half(r) | half(g) << 8 | half(b) << 16 | (a & 0xFFu) << 24;
         }
-        void quad(std::vector<ps2x::native::Vertex> &out, float x0, float y0, float x1, float y1, float z, uint32_t rgba,
+        void quad(std::vector<bozo::render::Vertex> &out, float x0, float y0, float x1, float y1, float z, uint32_t rgba,
                   float u0 = 0.0f, float v0 = 0.0f, float u1 = 1.0f, float v1 = 1.0f)
         {
             auto vertex = [&](float x, float y, float u, float v) {
-                ps2x::native::Vertex out;
+                bozo::render::Vertex out;
                 out.x = x;
                 out.y = y;
                 out.z = z;
@@ -2212,32 +2210,32 @@ namespace dc::native
                 out.rgba = rgba;
                 return out;
             };
-            const ps2x::native::Vertex a = vertex(x0, y0, u0, v0), b = vertex(x1, y0, u1, v0), c = vertex(x0, y1, u0, v1),
+            const bozo::render::Vertex a = vertex(x0, y0, u0, v0), b = vertex(x1, y0, u1, v0), c = vertex(x0, y1, u0, v1),
                                        d = vertex(x1, y1, u1, v1);
             out.insert(out.end(), {a, b, c, b, d, c});
         }
-        void drawScreen(const ps2x::native::Material &material, const std::vector<ps2x::native::Vertex> &vertices,
-                        std::shared_ptr<const ps2x::native::TextureCache::Texture> texture = nullptr)
+        void drawScreen(const bozo::render::Material &material, const std::vector<bozo::render::Vertex> &vertices,
+                        std::shared_ptr<const bozo::render::Texture> texture = nullptr)
         {
             static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
             flushShadows();
             ++g_frameWork.draws;
             if (!vertices.empty())
-                ps2x::native::Renderer::instance().draw(material, kIdentity, vertices.data(), static_cast<uint32_t>(vertices.size()),
+                bozo::render::Renderer::instance().draw(material, kIdentity, vertices.data(), static_cast<uint32_t>(vertices.size()),
                                                         std::move(texture));
         }
 
         // MGClearScreen (0x130000, a0..a3 the colour): a sprite over the 640 x 224 frame in that colour, ALPHA 0x2A (Cs:
         // opaque), Z test ALWAYS and Z written (0: the far end).
-        void clearScreenHook(uint8_t *, R5900Context *ctx, PS2Runtime *)
+        void clearScreenHook(uint8_t *, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
-            ps2x::native::Material material;
+            bozo::render::Material material;
             material.textured = false;
-            material.blend = ps2x::native::Material::Blend::Opaque;
+            material.blend = bozo::render::Material::Blend::Opaque;
             material.depthTest = false;
             material.depthWrite = true;
-            std::vector<ps2x::native::Vertex> vertices;
+            std::vector<bozo::render::Vertex> vertices;
             quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, 0.0f,
                  flatColour(getRegU32(ctx, 4), getRegU32(ctx, 5), getRegU32(ctx, 6), getRegU32(ctx, 7)));
             ++g_stats.clears;
@@ -2246,23 +2244,23 @@ namespace dc::native
             drawScreen(material, vertices);
         }
         // MGClearZBuffer (0x12FD30, a0 the Z): the same sprite with ALPHA 0x6A (Cd: the colour kept), Z written.
-        void clearZHook(uint8_t *, R5900Context *ctx, PS2Runtime *)
+        void clearZHook(uint8_t *, R5900Context *ctx, Runtime *)
         {
             seq('Z');
             ctx->pc = getRegU32(ctx, 31);
-            ps2x::native::Material material;
+            bozo::render::Material material;
             material.textured = false;
-            material.blend = ps2x::native::Material::Blend::Alpha; // As 0: the target's colour
+            material.blend = bozo::render::Material::Blend::Alpha; // As 0: the target's colour
             material.depthTest = false;
             material.depthWrite = true;
-            std::vector<ps2x::native::Vertex> vertices;
+            std::vector<bozo::render::Vertex> vertices;
             quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f,
                  static_cast<float>(getRegU32(ctx, 4)), 0u);
             drawScreen(material, vertices);
         }
         // MGFillBox (0x12FA70: a0 the rectangle, x, y, w, h in 1/16 pixels; a1..a4 the colour): an alpha-blended sprite
         // (PRIM ABE with the game's ALPHA, (Cs - Cd) As + Cd), Z test ALWAYS, Z not written.
-        void fillBoxHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void fillBoxHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t rect = getRegU32(ctx, 4);
@@ -2270,12 +2268,12 @@ namespace dc::native
             const float y = static_cast<float>(static_cast<int32_t>(rd32(rdram, rect + 4u))) / 16.0f;
             const float w = static_cast<float>(static_cast<int32_t>(rd32(rdram, rect + 8u))) / 16.0f;
             const float h = static_cast<float>(static_cast<int32_t>(rd32(rdram, rect + 12u))) / 16.0f;
-            ps2x::native::Material material;
+            bozo::render::Material material;
             material.textured = false;
-            material.blend = ps2x::native::Material::Blend::Alpha;
+            material.blend = bozo::render::Material::Blend::Alpha;
             material.depthTest = false;
             material.depthWrite = false;
-            std::vector<ps2x::native::Vertex> vertices;
+            std::vector<bozo::render::Vertex> vertices;
             quad(vertices, kOriginX + x, kOriginY + y, kOriginX + x + w, kOriginY + y + h, 0.0f,
                  flatColour(getRegU32(ctx, 5), getRegU32(ctx, 6), getRegU32(ctx, 7), getRegU32(ctx, 8)));
             drawScreen(material, vertices);
@@ -2319,8 +2317,8 @@ namespace dc::native
             const uint8_t n = static_cast<uint8_t>(1u + g_targetOfBase.size() % 7u); // 1..7
             for (auto it = g_targetOfBase.begin(); it != g_targetOfBase.end();)
                 it = it->second == n ? g_targetOfBase.erase(it) : std::next(it);
-            ps2x::native::Renderer::instance().setTargetSize(n, 0, 0); // a new place: the window's size until told otherwise
-            ps2x::native::Renderer::instance().setTargetSharesDepth(n, false); // and a depth of its own
+            bozo::render::Renderer::instance().setTargetSize(n, 0, 0); // a new place: the window's size until told otherwise
+            bozo::render::Renderer::instance().setTargetSharesDepth(n, false); // and a depth of its own
             g_targetRows[n] = 224.0f;
             return g_targetOfBase[base] = n;
         }
@@ -2331,12 +2329,12 @@ namespace dc::native
         std::unordered_map<uint32_t, bool> g_hazeLast;                   // place -> blendTextuerTest wrote it last
         std::unordered_map<uint32_t, std::pair<int32_t, int32_t>> g_blendedExtent; // place -> the corner it blends
         // The renderer source for a place (0: not one of the game's own pictures); sets the material to sample it.
-        bool sampleMade(uint32_t base, ps2x::native::Material &material)
+        bool sampleMade(uint32_t base, bozo::render::Material &material)
         {
             if (base == g_frameBase && (base != g_backBase || !g_backAsked))
                 material.source = 0;
             else if (base == g_backBase)
-                material.source = ps2x::native::Material::kPreviousFrame;
+                material.source = bozo::render::Material::kPreviousFrame;
             else if (const auto found = g_targetOfBase.find(base); found != g_targetOfBase.end())
                 material.source = found->second;
             else
@@ -2383,7 +2381,7 @@ namespace dc::native
                              record, record ? reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)) : "",
                              record ? static_cast<unsigned long long>(rd64(rdram, record + 0x28u)) : 0ull, record ? rd32(rdram, record + 0x38u) : 0u,
                              c[0].x, c[0].y, c[3].x, c[3].y, c[0].u, c[0].v, c[3].u, c[3].v, c[0].rgba, static_cast<unsigned long long>(g_alpha2D), flat ? 1 : 0);
-            ps2x::native::Material made;
+            bozo::render::Material made;
             // A record with pixels of its own shows them, wherever the game sends them in GS memory: the attract demo's
             // "start2" plate goes to the title's work place 0x1A40 and showed the stale work picture. A record with none
             // ("frame_image") is a picture the game makes there; inside the corner blendTextuer blends ("blender"), the
@@ -2399,27 +2397,27 @@ namespace dc::native
                 madeBase |= kBlendedPlace;
             if (record != 0u && rd32(rdram, record + 0x38u) == 0u && sampleMade(madeBase, made))
             {
-                ps2x::native::Material material = made;
+                bozo::render::Material material = made;
                 ++g_stats.madeDraws[std::min<uint32_t>(made.source, 8u)];
-                seq(made.source == ps2x::native::Material::kPreviousFrame ? 'P' : made.source == 0u ? 'F' : 'T');
+                seq(made.source == bozo::render::Material::kPreviousFrame ? 'P' : made.source == 0u ? 'F' : 'T');
                 static const bool s_noMade = std::getenv("DC_NO_MADE") != nullptr; // diagnosis
                 if (s_noMade || g_toggles.noMade)
                     return;
                 static int s_logged = 0, s_loggedTargets = 0;
                 if (std::getenv("DC_PROBE_2D") &&
-                    (made.source == ps2x::native::Material::kPreviousFrame ? s_logged++ < 12 : (++s_loggedTargets <= 12 || s_loggedTargets % 1200 == 0)))
+                    (made.source == bozo::render::Material::kPreviousFrame ? s_logged++ < 12 : (++s_loggedTargets <= 12 || s_loggedTargets % 1200 == 0)))
                     std::fprintf(stderr, "[dc:2d] sprite of record %08x \"%.32s\" tex0 %016llx pixels %08x kind %u samples source %u: (%.1f %.1f)-(%.1f %.1f) uv (%.0f %.0f)-(%.0f %.0f) rgba %08x alpha %llx\n",
                                  record, reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)),
                                  static_cast<unsigned long long>(rd64(rdram, record + 0x28u)), rd32(rdram, record + 0x38u),
                                  rd32(rdram, record + 4u) >> 16, made.source, c[0].x, c[0].y, c[3].x, c[3].y,
                                  c[0].u, c[0].v, c[3].u, c[3].v, c[0].rgba, static_cast<unsigned long long>(g_alpha2D));
                 material.frameWidth = 640;
-                material.blend = ps2x::native::blendOf(g_alpha2D);
+                material.blend = bozo::render::blendOf(g_alpha2D);
                 material.depthTest = false;
                 material.depthWrite = false;
-                std::vector<ps2x::native::Vertex> vertices;
+                std::vector<bozo::render::Vertex> vertices;
                 auto vertex = [&](const Corner &k) {
-                    ps2x::native::Vertex v;
+                    bozo::render::Vertex v;
                     v.x = k.x;
                     v.y = k.y;
                     v.u = k.u / 640.0f; // the target's pixels are the texture's texels
@@ -2431,7 +2429,7 @@ namespace dc::native
                 drawScreen(material, vertices);
                 return;
             }
-            std::shared_ptr<const ps2x::native::TextureCache::Texture> texture = record != 0u ? recordTexture(rdram, record) : nullptr;
+            std::shared_ptr<const bozo::render::Texture> texture = record != 0u ? recordTexture(rdram, record) : nullptr;
             // DC_PROBE_2D=1 (diagnosis): each record the 2D draws use, once: name, kind, TEX0's format and size, the GS-order flag.
             static const bool s_probe2D = [] { const char *e = std::getenv("DC_PROBE_2D"); return e && e[0] == '1'; }();
             static std::unordered_map<uint32_t, bool> s_seen2D;
@@ -2471,10 +2469,10 @@ namespace dc::native
             }
             if (record != 0u && !texture)
                 return; // not decodable yet (counted with the GS-order textures not in the store)
-            ps2x::native::Material material;
+            bozo::render::Material material;
             material.textured = texture != nullptr;
             material.tex0 = record != 0u ? rd64(rdram, record + 0x28u) : 0u;
-            material.blend = ps2x::native::blendOf(g_alpha2D);
+            material.blend = bozo::render::blendOf(g_alpha2D);
             material.depthTest = false;
             material.depthWrite = false;
             material.clampU = material.clampV = true;
@@ -2486,9 +2484,9 @@ namespace dc::native
             // lines beside the menus' labels and tabs). The texture coordinates are pulled 1/32 texel inside the piece.
             const float uMid = (c[0].u + c[3].u) * 0.5f, vMid = (c[0].v + c[3].v) * 0.5f;
             const float inset = material.nearest ? 1.0f / 32.0f : 0.0f;
-            std::vector<ps2x::native::Vertex> vertices;
+            std::vector<bozo::render::Vertex> vertices;
             auto vertex = [&](const Corner &k) {
-                ps2x::native::Vertex v;
+                bozo::render::Vertex v;
                 v.x = k.x;
                 v.y = k.y;
                 v.u = (k.u + (k.u < uMid ? inset : k.u > uMid ? -inset : 0.0f)) / tw;
@@ -2518,7 +2516,7 @@ namespace dc::native
             drawStrip(rdram, record, c);
         }
         // set2DSprite (0x15BD00: a1 texture, a2 destination, a3 / t0 the source's corner, its size the destination's).
-        void sprite2DHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void sprite2DHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t texture = getRegU32(ctx, 5);
@@ -2530,7 +2528,7 @@ namespace dc::native
         }
         // set2DSprite (0x15C000: a1 texture, a2 destination, a3 source), ...Uc (0x15C310: t0 the alpha), ...UcUcUcUc
         // (0x15C630: t0..t3 the colour).
-        void sprite2DRectsHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void sprite2DRectsHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             const uint32_t entry = ctx->pc;
             ctx->pc = getRegU32(ctx, 31);
@@ -2549,7 +2547,7 @@ namespace dc::native
         }
         // set2DSprite with four colours (0x15C980: a1 texture, a2 destination, a3 source, t0..t3 the corners' spRGBA
         // (top-left, top-right, bottom-left, bottom-right), the 9th argument the strip's order: 0 starts top-right).
-        void sprite2DCornersHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void sprite2DCornersHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t texture = getRegU32(ctx, 5);
@@ -2574,7 +2572,7 @@ namespace dc::native
             }
         }
         // set2DSpriteC4 (0x15E120: a1 the rectangle, a2..a5 the corners' spRGBA): an untextured gradient strip.
-        void sprite2DC4Hook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void sprite2DC4Hook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const Rect d = rectAt(rdram, getRegU32(ctx, 5));
@@ -2586,7 +2584,7 @@ namespace dc::native
         }
         // setColSprite (0x15DED0: a1..a4 four points, x, y in 1/16 GS pixels and z, t0..t3 the colour): an untextured
         // strip (PRIM 0x44).
-        void colSpriteHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void colSpriteHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t rgba = (getRegU32(ctx, 8) & 0xFFu) | (getRegU32(ctx, 9) & 0xFFu) << 8 | (getRegU32(ctx, 10) & 0xFFu) << 16 |
@@ -2603,14 +2601,14 @@ namespace dc::native
         // set2DSprite with a rotation (0x15E540: f12 the angle, a1 texture, a2 destination, a3 source, t0 / t1 the pivot in
         // the destination) and set2DSpriteRot with a colour (0x15EAD0: the same, t2 / t3 and the 9th / 10th arguments the
         // colour): the corners turned about the pivot with the game's own formulas.
-        void sprite2DRotHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void sprite2DRotHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             const uint32_t entry = ctx->pc;
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t texture = getRegU32(ctx, 5);
             if (texture == 0u)
                 return;
-            const float angle = ctx->f[12];
+            const float angle = std::bit_cast<float>(ctx->fu[12]);
             const Rect d = rectAt(rdram, getRegU32(ctx, 6)), src = rectAt(rdram, getRegU32(ctx, 7));
             const int32_t px = static_cast<int32_t>(getRegU32(ctx, 8)), py = static_cast<int32_t>(getRegU32(ctx, 9));
             const float c = std::cos(angle), sn = std::sin(angle);
@@ -2664,7 +2662,7 @@ namespace dc::native
         }
         // Myset2DSprite (0x14CD80: a1 texture, a2 destination, a3 source, t0..t3 the colour) and set2DSprite_Core
         // (0x14C3C0: the same arguments; the sprite set2DSprite_Start opened a batch for, the message windows' glyphs).
-        void mySpriteHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void mySpriteHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t texture = getRegU32(ctx, 5);
@@ -2678,7 +2676,7 @@ namespace dc::native
         }
         // set2DSprite_Start / _End (0x14C220 / 0x14C4F0): the batch they open and close is not built; its sprites are
         // drawn one by one (set2DSprite_Core).
-        void spriteBatchHook(uint8_t *, R5900Context *ctx, PS2Runtime *)
+        void spriteBatchHook(uint8_t *, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
         }
@@ -2699,7 +2697,7 @@ namespace dc::native
         // CSpriteTable::DrawTable (0x12BA20, a0 the table): the game's sprite lists (+ 4 the count, + 0xC the lists'
         // first entries, + 0x4C their ends). An entry: shorts x, y, w, h (DC's view), u, v, uw, vh, r, g, b, a, TEX0 at
         // + 0x28, the next entry at + 0x30. Sprites with mgAlpha's blend, Z test ALWAYS, no Z write.
-        void spriteTableHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void spriteTableHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t table = getRegU32(ctx, 4);
@@ -2753,10 +2751,10 @@ namespace dc::native
         {
             if (g_toggles.noSprites3D)
                 return;
-            std::shared_ptr<const ps2x::native::TextureCache::Texture> texture = record != 0u ? recordTexture(rdram, record) : nullptr;
+            std::shared_ptr<const bozo::render::Texture> texture = record != 0u ? recordTexture(rdram, record) : nullptr;
             // A record without pixels of its own is a picture the game makes (the dungeon torches' flame, which
             // blendTextuer blends in "work"): sampled from its target, in that picture's texels.
-            ps2x::native::Material made;
+            bozo::render::Material made;
             bool fromMade = false;
             if (record != 0u && !texture && rd32(rdram, record + 0x38u) == 0u)
             {
@@ -2770,10 +2768,10 @@ namespace dc::native
             }
             if (record != 0u && !texture && !fromMade)
                 return;
-            ps2x::native::Material material = fromMade ? made : ps2x::native::Material{};
+            bozo::render::Material material = fromMade ? made : bozo::render::Material{};
             material.textured = texture != nullptr || fromMade;
             material.tex0 = record != 0u ? rd64(rdram, record + 0x28u) : 0u;
-            material.blend = ps2x::native::blendOf(g_alpha2D);
+            material.blend = bozo::render::blendOf(g_alpha2D);
             material.depthTest = true;
             material.depthWrite = false;
             material.clampU = material.clampV = true;
@@ -2781,7 +2779,7 @@ namespace dc::native
             material.fogColour = g_fogColour;
             const float tw = texture ? static_cast<float>(texture->width) : fromMade ? 640.0f : 1.0f,
                         th = texture ? static_cast<float>(texture->height) : fromMade ? static_cast<float>(made.frameHeight) : 1.0f;
-            ps2x::native::Vertex k[4];
+            bozo::render::Vertex k[4];
             for (int i = 0; i < 4; ++i)
             {
                 k[i].x = p[i].x;
@@ -2792,7 +2790,7 @@ namespace dc::native
                 k[i].fog = p[i].fog;
                 k[i].rgba = flat ? flatColour(rgba[i], rgba[i] >> 8, rgba[i] >> 16, rgba[i] >> 24) : rgba[i];
             }
-            const std::vector<ps2x::native::Vertex> vertices = {k[0], k[1], k[2], k[1], k[3], k[2]};
+            const std::vector<bozo::render::Vertex> vertices = {k[0], k[1], k[2], k[1], k[3], k[2]};
             // The frame dump: each effect sprite, its texture (record, TEX0, size, its alpha range), colour and ALPHA.
             if (g_dump2D)
             {
@@ -2808,7 +2806,7 @@ namespace dc::native
             drawScreen(material, vertices, texture);
         }
         // set3DColSprite (0x15D1B0: a1..a4 the points, t0..t3 their spRGBA): untextured, Gouraud.
-        void colSprite3DHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void colSprite3DHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             Point3 p[4];
@@ -2824,7 +2822,7 @@ namespace dc::native
         // set3DSprite (0x15D4B0: a1 texture, a2 source, a3 / t0 / t1 / t2 the points TL, TR, BL, BR, t3 the spRGBA; 0x15D790:
         // a3 / t0 the sprite's corners, t1 the spRGBA) and set3DSpriteFog (0x15D9A0: the four points with F, t3 the alpha;
         // 0x15DCA0: the sprite's corners with F, t1 the spRGBA).
-        void sprite3DHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void sprite3DHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             const uint32_t entry = ctx->pc;
             ctx->pc = getRegU32(ctx, 31);
@@ -2858,7 +2856,7 @@ namespace dc::native
             draw3D(rdram, texture, p, u, v, rgba, fog, false);
         }
         // DrawLine (0x171210: a0 / a1 the ends, x, y in 1/16 pixels and Z; a2..a5 the colour): a line, drawn as a thin quad.
-        void drawLineHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void drawLineHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const Point3 a = pointAt(rdram, getRegU32(ctx, 4), false), b = pointAt(rdram, getRegU32(ctx, 5), false);
@@ -2892,8 +2890,8 @@ namespace dc::native
         std::unordered_set<uint32_t> g_patchedRecords;
         // ReloadTexture (0x133070: a0 the texture manager, a2 the group): sends the group's records (their first half-word,
         // the group) to GS memory when the group is not the current one or not loaded yet.
-        PS2Runtime::RecompiledFunction g_reloadTexture = nullptr;
-        void reloadTextureHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        RecompiledFunction g_reloadTexture = nullptr;
+        void reloadTextureHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint32_t manager = getRegU32(ctx, 4);
             const int32_t group = static_cast<int32_t>(getRegU32(ctx, 6));
@@ -2917,8 +2915,8 @@ namespace dc::native
         // TexAnime (0x167170: a0 the CTextureAnime, a1 the group): DC_PROBE_COPIES=1 also logs each slot's keyframe (this +
         // 0x120 + slot x 4: kind, frames to hold (< 0 for ever), source rectangle, next) and its frame count (+ 0x180)
         // whenever the keyframe changes, and every 600 calls.
-        PS2Runtime::RecompiledFunction g_texAnime = nullptr;
-        void texAnimeHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        RecompiledFunction g_texAnime = nullptr;
+        void texAnimeHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             static const bool s_probe = std::getenv("DC_PROBE_COPIES") != nullptr;
             if (s_probe)
@@ -2949,12 +2947,12 @@ namespace dc::native
         // CCharacter's TexAnimeOn (0x138080) / TexAnimeOff (0x1380B0) (a0 the character, a1 the slot) / ClearTexAnime
         // (0x138020): DC_PROBE_COPIES=1
         // logs each call with its caller, and the first time an anime is enabled, every slot's first keyframe.
-        PS2Runtime::RecompiledFunction g_animeCalls[6] = {};
+        RecompiledFunction g_animeCalls[6] = {};
         constexpr uint32_t kAnimeCallAddress[6] = {0x00167B40u, 0x00167B80u, 0x00167AE0u, 0x00138080u, 0x001380B0u, 0x00138020u};
         constexpr const char *kAnimeCallName[6] = {"Enable", "Disable", "DisableAll", "CCharacter::TexAnimeOn", "CCharacter::TexAnimeOff",
                                                    "CCharacter::ClearTexAnime"};
         template <int N>
-        void animeCallHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void animeCallHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             static const bool s_probe = std::getenv("DC_PROBE_COPIES") != nullptr;
             if (s_probe)
@@ -2984,8 +2982,8 @@ namespace dc::native
         // CActionSeq::Play (0x1554A0: a0 the sequence; + 0x33 x 4 its character): DC_PROBE_COPIES=1 logs the sequence's
         // texture-anime queue (+ 0x2F x 4, ACT_SEQ entries: type 0xF, + 4 frames, + 0x10 slot, + 0x14 on, + 0x18 off at
         // the end, next at + 0x0C?) whenever its head changes, with its run flag (+ 0x17 x 4) and wait (+ 0x18 x 4).
-        PS2Runtime::RecompiledFunction g_actionSeqPlay = nullptr;
-        void actionSeqPlayHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        RecompiledFunction g_actionSeqPlay = nullptr;
+        void actionSeqPlayHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             static const bool s_probe = std::getenv("DC_PROBE_COPIES") != nullptr;
             if (s_probe)
@@ -3015,7 +3013,7 @@ namespace dc::native
             }
             g_actionSeqPlay(rdram, ctx, runtime);
         }
-        void moveImageHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void moveImageHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             constexpr uint64_t kPlace = 0x3FFFull | 0x3Full << 20; // TBP0, PSM
@@ -3035,16 +3033,16 @@ namespace dc::native
             ++g_stats.textureCopies;
             // Out of one of the game's own pictures (its frame: the towns copy it each frame) into a place: drawn into
             // that place's target, 1:1.
-            ps2x::native::Material made;
+            bozo::render::Material made;
             const uint32_t dstBase = static_cast<uint32_t>(dstTex0 & 0x3FFFu);
             if (sampleMade(static_cast<uint32_t>(srcTex0 & 0x3FFFu), made) && dstBase != g_frameBase && dstBase != g_backBase)
             {
                 made.target = targetFor(dstBase);
-                made.blend = ps2x::native::Material::Blend::Opaque;
+                made.blend = bozo::render::Material::Blend::Opaque;
                 made.depthTest = false;
                 made.depthWrite = false;
                 made.clampU = made.clampV = true;
-                std::vector<ps2x::native::Vertex> vertices;
+                std::vector<bozo::render::Vertex> vertices;
                 quad(vertices, kOriginX + static_cast<float>(dx), kOriginY + static_cast<float>(dy), kOriginX + static_cast<float>(dx + r.w),
                      kOriginY + static_cast<float>(dy + r.h), 0.0f, 0x80808080u, static_cast<float>(r.x) / 640.0f,
                      static_cast<float>(r.y) / made.frameHeight, static_cast<float>(r.x + r.w) / 640.0f,
@@ -3095,7 +3093,7 @@ namespace dc::native
             const auto from = recordTexture(rdram, src), to = recordTexture(rdram, dst);
             if (!from || !to)
                 return;
-            auto patched = std::make_shared<ps2x::native::TextureCache::Texture>(*to);
+            auto patched = std::make_shared<bozo::render::Texture>(*to);
             ++g_frameWork.patches;
             g_frameWork.decodedTexels += static_cast<uint64_t>(patched->width) * patched->height;
             // GS memory holds 8-bit pictures as palette indices: the copy moves indices, and the destination shows them
@@ -3155,7 +3153,7 @@ namespace dc::native
                         std::fclose(out);
                     }
                 }
-                const std::pair<const char *, const ps2x::native::TextureCache::Texture *> pictures[] = {
+                const std::pair<const char *, const bozo::render::Texture *> pictures[] = {
                     {"from", from.get()}, {"to", to.get()}, {"patched", patched.get()}};
                 for (const auto &[what, picture] : pictures)
                 {
@@ -3183,12 +3181,12 @@ namespace dc::native
         // points from its table 0x253FA0, or DrawMaru's ellipses 0x150BB0, then the tail), grey 0xBF with alpha 0x80;
         // DrawMesWin then lays that texture on the screen. Here the shape goes to offscreen target 1, which the
         // balloon texture's sprites sample, then the parchment over it where the shape is.
-        void balloonFan(std::vector<ps2x::native::Vertex> &out, const std::vector<std::pair<float, float>> &points)
+        void balloonFan(std::vector<bozo::render::Vertex> &out, const std::vector<std::pair<float, float>> &points)
         {
             for (size_t i = 1; i + 1 < points.size(); ++i)
                 for (const auto &[x, y] : {points[0], points[i], points[i + 1]})
                 {
-                    ps2x::native::Vertex v;
+                    bozo::render::Vertex v;
                     v.x = kOriginX + x;
                     v.y = kOriginY + y;
                     v.rgba = flatColour(0xBF, 0xBF, 0xBF, 0x80);
@@ -3196,7 +3194,7 @@ namespace dc::native
                 }
         }
         // DrawMaru (x, y, w, h, the vertical offset, the wobble mode): an ellipse as a fan from its centre.
-        void balloonEllipse(const uint8_t *rdram, std::vector<ps2x::native::Vertex> &out, int32_t x, int32_t y, int32_t w, int32_t h,
+        void balloonEllipse(const uint8_t *rdram, std::vector<bozo::render::Vertex> &out, int32_t x, int32_t y, int32_t w, int32_t h,
                             int32_t offset, bool wobble)
         {
             const float turn = rdf(rdram, 0x002A1988u), wobbleX = rdf(rdram, 0x002A1874u), wobbleY = rdf(rdram, 0x002A1960u);
@@ -3222,7 +3220,7 @@ namespace dc::native
                                 static_cast<float>(static_cast<int32_t>((sn + 1.0f) * static_cast<float>(h) / 2.0f) + y - offset));
             balloonFan(out, points);
         }
-        void balloonHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void balloonHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t cls = getRegU32(ctx, 4);
@@ -3235,13 +3233,13 @@ namespace dc::native
             auto lerp = [&](uint32_t a, uint32_t b) { return static_cast<int32_t>(static_cast<float>(i32(a)) + (static_cast<float>(i32(b)) - static_cast<float>(i32(a))) * t); };
             // The target cleared, its depth to the near end: the shape below writes the far end, which the parchment's
             // depth test then reads as the shape (in place of the GS's destination alpha test).
-            ps2x::native::Material clear;
+            bozo::render::Material clear;
             clear.textured = false;
-            clear.blend = ps2x::native::Material::Blend::Opaque;
+            clear.blend = bozo::render::Material::Blend::Opaque;
             clear.depthTest = false;
             clear.depthWrite = true;
             clear.target = balloon;
-            std::vector<ps2x::native::Vertex> vertices;
+            std::vector<bozo::render::Vertex> vertices;
             quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, 1.0e30f, 0u);
             drawScreen(clear, vertices);
             vertices.clear();
@@ -3321,9 +3319,9 @@ namespace dc::native
                     balloonFan(vertices, tail);
                 }
             }
-            ps2x::native::Material shape;
+            bozo::render::Material shape;
             shape.textured = false;
-            shape.blend = ps2x::native::Material::Blend::Alpha;
+            shape.blend = bozo::render::Material::Blend::Alpha;
             shape.depthTest = false;
             shape.depthWrite = true; // z 0: the far end, where the parchment may go
             shape.target = balloon;
@@ -3333,7 +3331,7 @@ namespace dc::native
             if (s_probe && s_calls++ % 60u == 0u)
             {
                 float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
-                for (const ps2x::native::Vertex &v : vertices)
+                for (const bozo::render::Vertex &v : vertices)
                 {
                     lo[0] = std::min(lo[0], v.x), hi[0] = std::max(hi[0], v.x);
                     lo[1] = std::min(lo[1], v.y), hi[1] = std::max(hi[1], v.y);
@@ -3350,16 +3348,16 @@ namespace dc::native
             if (const uint32_t fill = textureRecord(rdram, 0x00299A88u))
                 if (const auto texture = recordTexture(rdram, fill))
                 {
-                    ps2x::native::Material parchment;
+                    bozo::render::Material parchment;
                     parchment.textured = true;
                     parchment.tex0 = rd64(rdram, fill + 0x28u);
-                    parchment.blend = ps2x::native::Material::Blend::Alpha;
+                    parchment.blend = bozo::render::Material::Blend::Alpha;
                     parchment.depthTest = true;
                     parchment.depthWrite = false;
                     parchment.target = balloon;
                     const uint32_t fade = static_cast<uint32_t>(std::clamp(i32(0x16D4), 0, 0x80));
                     const float u1 = 128.0f / static_cast<float>(texture->width), v1 = 128.0f / static_cast<float>(texture->height);
-                    std::vector<ps2x::native::Vertex> tiles;
+                    std::vector<bozo::render::Vertex> tiles;
                     for (int32_t row = 0; row < 4; ++row)
                         for (int32_t column = 0; column < 5; ++column)
                             quad(tiles, kOriginX + static_cast<float>(column * 128), kOriginY + static_cast<float>(row * 64),
@@ -3380,7 +3378,7 @@ namespace dc::native
         // MoveImageTest (0x140660: a1 / a2 / a3 the source's base, width and format, t0 the rectangle, t1 / t2 / t3 the
         // destination's, the 9th / 10th arguments the destination point): the same copy as MGMoveImage between two
         // records' places, given by their GS base (the message windows build their text from the font this way).
-        void moveImageTestHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void moveImageTestHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             auto recordAt = [&](uint32_t base, uint32_t psm) {
@@ -3406,8 +3404,8 @@ namespace dc::native
                          static_cast<int32_t>(stackArg(rdram, ctx, 1)));
         }
         // CFireOmni::DrawFire (0x161AC0): its sprites (set3DSpriteFog) drawn with the ALPHA it writes, 0x48: Cs As + Cd.
-        PS2Runtime::RecompiledFunction g_drawFire = nullptr;
-        void drawFireHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        RecompiledFunction g_drawFire = nullptr;
+        void drawFireHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint64_t saved = g_alpha2D;
             g_alpha2D = (g_alpha2D & ~0xFFull) | 0x48u;
@@ -3417,15 +3415,15 @@ namespace dc::native
 
         // MGGetFBuffTex / MGGetFBuffBackTex (0x12F130 / 0x12F1A0, a0 the sceGsTex0 they fill): where the game's frame
         // and the frame before are, as the game itself works them out.
-        PS2Runtime::RecompiledFunction g_getFrameTex = nullptr, g_getBackTex = nullptr;
-        void getFrameTexHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        RecompiledFunction g_getFrameTex = nullptr, g_getBackTex = nullptr;
+        void getFrameTexHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint32_t out = getRegU32(ctx, 4);
             g_getFrameTex(rdram, ctx, runtime);
             g_frameBase = static_cast<uint32_t>(rd64(rdram, out) & 0x3FFFu);
             g_backAsked = false;
         }
-        void getBackTexHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void getBackTexHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint32_t out = getRegU32(ctx, 4);
             g_getBackTex(rdram, ctx, runtime);
@@ -3436,13 +3434,13 @@ namespace dc::native
         // 1/16 pixels): the game stretching its frame (or the frame before, or a work texture) into a work texture. Here
         // a draw of that source into the destination's offscreen target, stretched. Texture to texture copies (none
         // seen so far) are counted and not made.
-        void stretchMoveHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void stretchMoveHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t srcBase = static_cast<uint32_t>(rd64(rdram, getRegU32(ctx, 4)) & 0x3FFFu);
             const uint32_t dstBase = static_cast<uint32_t>(rd64(rdram, getRegU32(ctx, 6)) & 0x3FFFu);
             const Rect from = rectAt(rdram, getRegU32(ctx, 5)), to = rectAt(rdram, getRegU32(ctx, 7));
-            ps2x::native::Material material;
+            bozo::render::Material material;
             if (!sampleMade(srcBase, material) || dstBase == g_frameBase || dstBase == g_backBase)
             {
                 ++g_stats.stretchesMissed;
@@ -3452,12 +3450,12 @@ namespace dc::native
             // The work picture at the PS2's size (the game's 640 x 224 frame copy): the title draws it back into the
             // frame each frame before copying the frame into it again, a feedback loop whose blur is that of a 640 x
             // 224 picture filtered each frame (at the window's resolution it blurred several times less).
-            ps2x::native::Renderer::instance().setTargetSize(material.target, 640, 224);
-            material.blend = ps2x::native::Material::Blend::Opaque;
+            bozo::render::Renderer::instance().setTargetSize(material.target, 640, 224);
+            material.blend = bozo::render::Material::Blend::Opaque;
             material.depthTest = false;
             material.depthWrite = false;
             material.clampU = material.clampV = true;
-            std::vector<ps2x::native::Vertex> vertices;
+            std::vector<bozo::render::Vertex> vertices;
             quad(vertices, kOriginX + static_cast<float>(to.x) / 16.0f, kOriginY + static_cast<float>(to.y) / 16.0f,
                  kOriginX + static_cast<float>(to.x + to.w) / 16.0f, kOriginY + static_cast<float>(to.y + to.h) / 16.0f, 0.0f, 0x80808080u,
                  static_cast<float>(from.x) / 16.0f / 640.0f, static_cast<float>(from.y) / 16.0f / 224.0f,
@@ -3482,26 +3480,26 @@ namespace dc::native
         // bands); then the mask texture drawn there with ALPHA (0 - 0) x FIX + Cd, which keeps the colours and writes the
         // mask's alpha. The "blender" sprite after it lays the patch back over the torch through that alpha.
         uint32_t g_hazeRandom = 0x12345678u;
-        void blendTextureTestHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void blendTextureTestHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t place = getRegU32(ctx, 5) & 0x3FFFu;
             const Rect frame = rectAt(rdram, getRegU32(ctx, 8));
             const uint32_t mask = getRegU32(ctx, 9);
             const Rect maskTo = rectAt(rdram, getRegU32(ctx, 10)), maskFrom = rectAt(rdram, getRegU32(ctx, 11));
-            const float amplitude = ctx->f[12] / 10000.0f, phase = ctx->f[13];
-            ps2x::native::Material copy;
+            const float amplitude = std::bit_cast<float>(ctx->fu[12]) / 10000.0f, phase = std::bit_cast<float>(ctx->fu[13]);
+            bozo::render::Material copy;
             if (!sampleMade(g_frameBase, copy))
                 return;
             const uint8_t target = targetFor(place | kHazePlace);
             g_blendedLast[place] = false;
             g_hazeLast[place] = true;
             copy.target = target;
-            copy.blend = ps2x::native::Material::Blend::Opaque;
+            copy.blend = bozo::render::Material::Blend::Opaque;
             copy.depthTest = false;
             copy.depthWrite = false;
             copy.clampU = copy.clampV = true;
-            std::vector<ps2x::native::Vertex> vertices;
+            std::vector<bozo::render::Vertex> vertices;
             float factor = 0.0f;
             int32_t k = 0;
             for (int32_t row = 0; row < frame.h; row += 2)
@@ -3540,15 +3538,15 @@ namespace dc::native
             if (mask != 0u)
                 if (const auto texture = recordTexture(rdram, mask))
                 {
-                    ps2x::native::Material alpha;
+                    bozo::render::Material alpha;
                     alpha.target = target;
                     alpha.textured = true;
                     alpha.tex0 = rd64(rdram, mask + 0x28u);
-                    alpha.blend = ps2x::native::Material::Blend::AlphaOnly;
+                    alpha.blend = bozo::render::Material::Blend::AlphaOnly;
                     alpha.depthTest = false;
                     alpha.depthWrite = false;
                     alpha.clampU = alpha.clampV = true;
-                    std::vector<ps2x::native::Vertex> masked;
+                    std::vector<bozo::render::Vertex> masked;
                     const float tw = static_cast<float>(texture->width), th = static_cast<float>(texture->height);
                     quad(masked, kOriginX + static_cast<float>(maskTo.x), kOriginY + static_cast<float>(maskTo.y),
                          kOriginX + static_cast<float>(maskTo.x + maskTo.w), kOriginY + static_cast<float>(maskTo.y + maskTo.h), 0.0f, 0x80808080u,
@@ -3563,7 +3561,7 @@ namespace dc::native
         // frame at the work texture, fills A's destination grey (an untextured sprite, 0x80), draws A there with the
         // current ALPHA, then B with ALPHA 0x09 (Cd x As + Cs), and points its frame back. The work texture is the
         // offscreen target that stands for that place; a sprite of it shows it (the attract demo's PUSH START plate).
-        void blendTextureHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void blendTextureHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t place = getRegU32(ctx, 5) & 0x3FFFu;
@@ -3580,14 +3578,14 @@ namespace dc::native
             g_blendedLast[place] = true;
             g_hazeLast[place] = false;
             // The work texture's rows are the GS's (y = 1936 + y, not halved as the frame's 448-line view).
-            auto sprite = [&](const Rect &to, const Rect &from, uint32_t record, ps2x::native::Material::Blend blend, bool textured) {
-                ps2x::native::Material material;
+            auto sprite = [&](const Rect &to, const Rect &from, uint32_t record, bozo::render::Material::Blend blend, bool textured) {
+                bozo::render::Material material;
                 material.target = target;
                 material.blend = blend;
                 material.depthTest = false;
                 material.depthWrite = false;
                 material.clampU = material.clampV = true;
-                std::shared_ptr<const ps2x::native::TextureCache::Texture> texture;
+                std::shared_ptr<const bozo::render::Texture> texture;
                 if (textured)
                 {
                     if (record == 0u || !(texture = recordTexture(rdram, record)))
@@ -3596,16 +3594,16 @@ namespace dc::native
                 }
                 material.textured = textured;
                 const float tw = texture ? static_cast<float>(texture->width) : 1.0f, th = texture ? static_cast<float>(texture->height) : 1.0f;
-                std::vector<ps2x::native::Vertex> vertices;
+                std::vector<bozo::render::Vertex> vertices;
                 quad(vertices, kOriginX + static_cast<float>(to.x), kOriginY + static_cast<float>(to.y), kOriginX + static_cast<float>(to.x + to.w),
                      kOriginY + static_cast<float>(to.y + to.h), 0.0f, textured ? 0x80808080u : flatColour(0x80u, 0x80u, 0x80u, 0x80u),
                      static_cast<float>(from.x) / tw, static_cast<float>(from.y) / th, static_cast<float>(from.x + from.w) / tw,
                      static_cast<float>(from.y + from.h) / th);
                 drawScreen(material, vertices, texture);
             };
-            sprite(toA, fromA, 0u, ps2x::native::Material::Blend::Opaque, false);
-            sprite(toA, fromA, textureA, ps2x::native::blendOf(g_alpha2D), true);
-            sprite(toB, fromB, textureB, ps2x::native::Material::Blend::DestinationBySource, true);
+            sprite(toA, fromA, 0u, bozo::render::Material::Blend::Opaque, false);
+            sprite(toA, fromA, textureA, bozo::render::blendOf(g_alpha2D), true);
+            sprite(toB, fromB, textureB, bozo::render::Material::Blend::DestinationBySource, true);
             // The frame dump: both textures (name, TEX0, alpha range) and where they go.
             if (g_dump2D)
                 for (const uint32_t record : {textureA, textureB})
@@ -3642,31 +3640,31 @@ namespace dc::native
         // MGMoveFrameBuffImage (0x12F970: a0 the destination's TEX0): the two fields of the frame shown last, interleaved
         // line by line into a 640 x 448 picture (the menus' backdrop: "frame_image", drawn darkened behind them). The
         // native frame is whole already: the frame presented last, copied into that place's target, as 448 rows.
-        void moveFrameBuffHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void moveFrameBuffHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t dstBase = static_cast<uint32_t>(rd64(rdram, getRegU32(ctx, 4)) & 0x3FFFu);
             if (dstBase == g_frameBase || dstBase == g_backBase)
                 return;
-            ps2x::native::Material material;
+            bozo::render::Material material;
             material.target = targetFor(dstBase);
             g_targetRows[material.target] = 448.0f;
             material.textured = true;
             material.fromFrame = 1;
-            material.source = ps2x::native::Material::kPreviousFrame;
+            material.source = bozo::render::Material::kPreviousFrame;
             material.frameWidth = 640;
             material.frameHeight = 224;
-            material.blend = ps2x::native::Material::Blend::Opaque;
+            material.blend = bozo::render::Material::Blend::Opaque;
             material.depthTest = false;
             material.depthWrite = false;
             material.clampU = material.clampV = true;
-            std::vector<ps2x::native::Vertex> vertices;
+            std::vector<bozo::render::Vertex> vertices;
             quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, 0.0f, 0x80808080u);
             drawScreen(material, vertices);
         }
 
         // SetClut (0x14C5A0: a1 the texture whose CBP takes the palette, a2 the palette).
-        void setClutHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        void setClutHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t texture = getRegU32(ctx, 5);
@@ -3675,7 +3673,7 @@ namespace dc::native
         }
 
         // The ALPHA the game sets for its 2D (setAlphaFlag 0x15BC20: a1 its sceGsAlpha; MGSetGsALPHA 0x12EF90: a0).
-        PS2Runtime::RecompiledFunction g_setAlphaFlag = nullptr, g_setGsAlpha = nullptr, g_setEnv = nullptr;
+        RecompiledFunction g_setAlphaFlag = nullptr, g_setGsAlpha = nullptr, g_setEnv = nullptr;
         // DC_PROBE_2D=1: each distinct (routine, caller, ALPHA) that sets the 2D blend, once.
         void noteAlpha(const char *who, R5900Context *ctx)
         {
@@ -3697,10 +3695,10 @@ namespace dc::native
         struct ShadowCall
         {
             uint32_t address;
-            PS2Runtime::RecompiledFunction original;
+            RecompiledFunction original;
         };
         ShadowCall g_shadowCalls[] = {{0x001305F0u, nullptr}, {0x001303B0u, nullptr}, {0x001304D0u, nullptr}, {0x00130760u, nullptr}};
-        void blobShadowHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void blobShadowHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint64_t saved = g_alpha2D;
             for (ShadowCall &call : g_shadowCalls)
@@ -3712,20 +3710,20 @@ namespace dc::native
             g_alpha2D = saved;
         }
         // SetEnv (0x140DA0): the frame's default state, ALPHA among it (mgAlpha, gp - 0x7408).
-        void setEnvHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void setEnvHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             g_gp = getRegU32(ctx, 28);
             g_alpha2D = rd64(rdram, g_gp - 0x7408u);
             noteAlpha("SetEnv", ctx);
             g_setEnv(rdram, ctx, runtime);
         }
-        void setAlphaFlagHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void setAlphaFlagHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             g_alpha2D = rd64(rdram, getRegU32(ctx, 5));
             noteAlpha("setAlphaFlag", ctx);
             g_setAlphaFlag(rdram, ctx, runtime);
         }
-        void setGsAlphaHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void setGsAlphaHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             // A null argument restores the game's default, mgAlpha (gp - 0x7408), as MGSetGsALPHA does.
             const uint32_t alpha = getRegU32(ctx, 4);
@@ -3739,14 +3737,14 @@ namespace dc::native
         // native frame built since the last one is published from there too.
         // Only while the main loop is stalled (no frame of its own for 100 ms): the callback stays installed outside
         // loading too, and a publish from it then cut the main loop's frame in two (a frame shown half built).
-        PS2Runtime::RecompiledFunction g_vsyncLoad = nullptr;
+        RecompiledFunction g_vsyncLoad = nullptr;
         std::atomic<int64_t> g_lastMainPublish{0}; // steady clock, ms
         bool g_publishingFromLoad = false;
         int64_t nowMs()
         {
             return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         }
-        void vsyncLoadHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void vsyncLoadHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             // DC_PROBE_LOADCARD=1 (diagnosis): the callback's state every 30 calls (end_flag, nl_start_cnt, map_title_no,
             // col_cnt) and how long the main loop has not published.
@@ -3766,15 +3764,16 @@ namespace dc::native
                              rd32(rdram, card + 0x48u), rd32(rdram, card + 0x4Cu));
             }
             g_vsyncLoad(rdram, ctx, runtime);
-            if (nowMs() - g_lastMainPublish.load(std::memory_order_relaxed) > 100)
+            if (bozo::port::deterministic(runtime) || nowMs() - g_lastMainPublish.load(std::memory_order_relaxed) > 100)
             {
                 g_publishingFromLoad = true;
                 ::dc::native::publish();
+                bozo::port::frameEnd(runtime, ctx);
                 g_publishingFromLoad = false;
             }
         }
 
-        PS2Runtime::RecompiledFunction g_loadTm2 = nullptr, g_loadTexture = nullptr;
+        RecompiledFunction g_loadTm2 = nullptr, g_loadTexture = nullptr;
         void pinRecord(const uint8_t *rdram, uint32_t record)
         {
             g_pinned.erase(record);
@@ -3786,8 +3785,8 @@ namespace dc::native
         // argument set when 8-bit texels are in GS order): sends a fixed texture (the menus' "stayframe", "window"...) to
         // GS memory once, from a buffer the record never points at (+ 0x38 and + 0x48 stay as they were). Decoded right
         // after it, with those pointers put in the record for the decode and the record then restored as it was.
-        PS2Runtime::RecompiledFunction g_enterFix = nullptr;
-        void enterFixHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        RecompiledFunction g_enterFix = nullptr;
+        void enterFixHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint32_t name = getRegU32(ctx, 5), pixels = getRegU32(ctx, 6), palette = getRegU32(ctx, 10);
             const uint32_t gsOrder = stackArg(rdram, ctx, 5);
@@ -3819,8 +3818,8 @@ namespace dc::native
         // EnterFixTextureZ (0x132930: a1 a picture file): a 640 x 224 8-bit picture (the menus' "stayframe" sheet) sent once
         // as PSMT8H to 0x1180, its palette to 0x3FE0, from the file's buffer; the record holds neither pointer. Decoded
         // right after it, as EnterFixTexture's are.
-        PS2Runtime::RecompiledFunction g_enterFixZ = nullptr;
-        void enterFixZHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        RecompiledFunction g_enterFixZ = nullptr;
+        void enterFixZHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint32_t file = getRegU32(ctx, 5);
             if (std::getenv("DC_PROBE_2D"))
@@ -3861,13 +3860,13 @@ namespace dc::native
                              reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)), record, texture ? "decoded" : "NOT decoded");
         }
         // LoadTexture(TM2_head *, CTexture *, tbp, cbp) and LoadTexture(char *, u8 *, CTexture *, tbp, cbp).
-        void loadTm2Hook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void loadTm2Hook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint32_t record = getRegU32(ctx, 5);
             g_loadTm2(rdram, ctx, runtime);
             pinRecord(rdram, record);
         }
-        void loadTextureHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        void loadTextureHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
             const uint32_t record = getRegU32(ctx, 6);
             g_loadTexture(rdram, ctx, runtime);
@@ -3882,11 +3881,11 @@ namespace dc::native
         return g_enabled;
     }
 
-    void install(PS2Runtime &runtime)
+    void install(Runtime &runtime, bozo::port::Registry &registry)
     {
         // DC_NO_DOF=1 (diagnosis): DepthOfField (0x1652C0, the cutscenes' blur behind the focus plane) does nothing.
         if (const char *noDof = std::getenv("DC_NO_DOF"); noDof && noDof[0] == '1')
-            runtime.registerFunction(0x001652C0u, [](uint8_t *, R5900Context *ctx, PS2Runtime *) {
+            registry.registerFunction(0x001652C0u, [](uint8_t *, R5900Context *ctx, Runtime *) {
                 ctx->pc = getRegU32(ctx, 31);
             });
         // DC_SKIP_FN=<hex>[,<hex>...] (diagnosis): those routines (void draws) do nothing.
@@ -3898,124 +3897,115 @@ namespace dc::native
                 if (end == at)
                     break;
                 if (address != 0u)
-                    runtime.registerFunction(address, [](uint8_t *, R5900Context *ctx, PS2Runtime *) {
+                    registry.registerFunction(address, [](uint8_t *, R5900Context *ctx, Runtime *) {
                         ctx->pc = getRegU32(ctx, 31);
                     });
                 at = *end == ',' ? end + 1 : end;
             }
         if (const char *probe = std::getenv("DC_PROBE_TEX"); probe && probe[0] == '1')
             for (SpriteHook &hook : g_spriteHooks)
-                if ((hook.original = runtime.lookupFunction(hook.address)))
-                    runtime.registerFunction(hook.address, &spriteProbe);
+                if ((hook.original = runtime.functions.generated(hook.address)))
+                    registry.registerFunction(hook.address, &spriteProbe);
         if (const char *probe = std::getenv("DC_PROBE_FEEDERS"); probe && probe[0] == '1')
             for (FeederHook &hook : g_feeders)
-                if ((hook.original = runtime.lookupFunction(hook.address)))
-                    runtime.registerFunction(hook.address, &feederHook);
+                if ((hook.original = runtime.functions.generated(hook.address)))
+                    registry.registerFunction(hook.address, &feederHook);
         if (const char *probe = std::getenv("DC_PROBE_VU1"); probe && probe[0] == '1')
             for (CountHook &hook : g_countHooks)
-                if ((hook.original = runtime.lookupFunction(hook.address)))
-                    runtime.registerFunction(hook.address, &countHook);
-        g_drawVu1 = runtime.lookupFunction(kVisualDrawVu1);
-        g_createFromMdt = runtime.lookupFunction(kCreateFromMdt);
-        g_createFromMdtRemake = runtime.lookupFunction(kCreateFromMdtRemake);
-        g_setGsReg3 = runtime.lookupFunction(kSetGsReg3);
+                if ((hook.original = runtime.functions.generated(hook.address)))
+                    registry.registerFunction(hook.address, &countHook);
+        g_drawVu1 = runtime.functions.generated(kVisualDrawVu1);
+        g_createFromMdt = runtime.functions.generated(kCreateFromMdt);
+        g_createFromMdtRemake = runtime.functions.generated(kCreateFromMdtRemake);
+        g_setGsReg3 = runtime.functions.generated(kSetGsReg3);
         if (!g_drawVu1 || !g_createFromMdt || !g_createFromMdtRemake || !g_setGsReg3)
         {
             std::fprintf(stderr, "[dc:native] a hooked function is missing\n");
             return;
         }
-        runtime.registerFunction(kVisualDrawVu1, &drawVu1Hook);
-        runtime.registerFunction(kCreateFromMdt, &createFromMdtHook);
-        runtime.registerFunction(kCreateFromMdtRemake, &createFromMdtRemakeHook);
-        runtime.registerFunction(kSetGsReg3, &setGsReg3Hook);
-        runtime.registerFunction(kClothDrawVu1, &clothDrawHook);
-        runtime.registerFunction(kShadowDrawVu1, &shadowDrawHook);
-        runtime.registerFunction(kWaterCreateVUData, &waterCreateHook);
+        registry.registerFunction(kVisualDrawVu1, &drawVu1Hook);
+        registry.registerFunction(kCreateFromMdt, &createFromMdtHook);
+        registry.registerFunction(kCreateFromMdtRemake, &createFromMdtRemakeHook);
+        registry.registerFunction(kSetGsReg3, &setGsReg3Hook);
+        registry.registerFunction(kClothDrawVu1, &clothDrawHook);
+        registry.registerFunction(kShadowDrawVu1, &shadowDrawHook);
+        registry.registerFunction(kWaterCreateVUData, &waterCreateHook);
         if (!(std::getenv("DC_NO_DOF") && std::getenv("DC_NO_DOF")[0] == '1'))
-            runtime.registerFunction(0x001652C0u, &depthOfFieldHook);
-        runtime.registerFunction(0x001308A0u, &beginShadowHook);
-        runtime.registerFunction(0x00130B30u, &endShadowHook);
-        ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+            registry.registerFunction(0x001652C0u, &depthOfFieldHook);
+        registry.registerFunction(0x001308A0u, &beginShadowHook);
+        registry.registerFunction(0x00130B30u, &endShadowHook);
+        bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
         renderer.setEnabled(true);
         renderer.beginFrame(screen());
-        ps2x::native::setVu1Gate(&gate);
-        // No GS, whatever PS2X_GS_RENDERER says: the frame is the native renderer's (present() draws it in the game's
-        // call order). The GS comparison path is gone for DC.
-        if (const char *gsRenderer = std::getenv("PS2X_GS_RENDERER"); gsRenderer && std::strcmp(gsRenderer, "none") != 0)
-            std::fprintf(stderr, "[dc] PS2X_GS_RENDERER=%s ignored: Dark Cloud has no GS path\n", gsRenderer);
-        ps2x::setGsOff(true);
-        ps2x::native::setUploadsWanted(false);
         renderer.setStreamDraws(false);
-        // No packet path either: the game's VIF1 and GIF transfers are not read (runtime/gs/gs_off.h); every VU1
-        // program and every 2D draw is the adapter's, from the game's data.
-        ps2x::setPacketPathOff(true);
+        renderer.setPresentsAlone(true);
         {
-            runtime.registerFunction(0x00130000u, &clearScreenHook);
-            runtime.registerFunction(0x0012FD30u, &clearZHook);
-            runtime.registerFunction(0x0012FA70u, &fillBoxHook);
-            runtime.registerFunction(0x0015BD00u, &sprite2DHook);
+            registry.registerFunction(0x00130000u, &clearScreenHook);
+            registry.registerFunction(0x0012FD30u, &clearZHook);
+            registry.registerFunction(0x0012FA70u, &fillBoxHook);
+            registry.registerFunction(0x0015BD00u, &sprite2DHook);
             for (uint32_t address : {0x0015C000u, 0x0015C310u, 0x0015C630u})
-                runtime.registerFunction(address, &sprite2DRectsHook);
-            runtime.registerFunction(0x0015C980u, &sprite2DCornersHook);
-            runtime.registerFunction(0x0015E120u, &sprite2DC4Hook);
-            runtime.registerFunction(0x0015DED0u, &colSpriteHook);
+                registry.registerFunction(address, &sprite2DRectsHook);
+            registry.registerFunction(0x0015C980u, &sprite2DCornersHook);
+            registry.registerFunction(0x0015E120u, &sprite2DC4Hook);
+            registry.registerFunction(0x0015DED0u, &colSpriteHook);
             for (uint32_t address : {0x0015E540u, 0x0015EAD0u, 0x001831D0u})
-                runtime.registerFunction(address, &sprite2DRotHook);
+                registry.registerFunction(address, &sprite2DRotHook);
             for (uint32_t address : {0x0014CD80u, 0x0014C3C0u})
-                runtime.registerFunction(address, &mySpriteHook);
+                registry.registerFunction(address, &mySpriteHook);
             for (uint32_t address : {0x0014C220u, 0x0014C4F0u})
-                runtime.registerFunction(address, &spriteBatchHook);
-            runtime.registerFunction(0x0014C5A0u, &setClutHook);
-            runtime.registerFunction(0x0012BA20u, &spriteTableHook);
-            runtime.registerFunction(0x0015D1B0u, &colSprite3DHook);
+                registry.registerFunction(address, &spriteBatchHook);
+            registry.registerFunction(0x0014C5A0u, &setClutHook);
+            registry.registerFunction(0x0012BA20u, &spriteTableHook);
+            registry.registerFunction(0x0015D1B0u, &colSprite3DHook);
             for (uint32_t address : {0x0015D4B0u, 0x0015D790u, 0x0015D9A0u, 0x0015DCA0u})
-                runtime.registerFunction(address, &sprite3DHook);
-            runtime.registerFunction(0x00171210u, &drawLineHook);
-            runtime.registerFunction(0x0012F210u, &moveImageHook);
-            if ((g_actionSeqPlay = runtime.lookupFunction(0x001554A0u)))
-                runtime.registerFunction(0x001554A0u, &actionSeqPlayHook);
-            if ((g_texAnime = runtime.lookupFunction(0x00167170u)))
-                runtime.registerFunction(0x00167170u, &texAnimeHook);
-            const PS2Runtime::RecompiledFunction animeHooks[6] = {&animeCallHook<0>, &animeCallHook<1>, &animeCallHook<2>, &animeCallHook<3>,
+                registry.registerFunction(address, &sprite3DHook);
+            registry.registerFunction(0x00171210u, &drawLineHook);
+            registry.registerFunction(0x0012F210u, &moveImageHook);
+            if ((g_actionSeqPlay = runtime.functions.generated(0x001554A0u)))
+                registry.registerFunction(0x001554A0u, &actionSeqPlayHook);
+            if ((g_texAnime = runtime.functions.generated(0x00167170u)))
+                registry.registerFunction(0x00167170u, &texAnimeHook);
+            const RecompiledFunction animeHooks[6] = {&animeCallHook<0>, &animeCallHook<1>, &animeCallHook<2>, &animeCallHook<3>,
                                                                   &animeCallHook<4>, &animeCallHook<5>};
             for (int k = 0; k < 6; ++k)
-                if ((g_animeCalls[k] = runtime.lookupFunction(kAnimeCallAddress[k])))
-                    runtime.registerFunction(kAnimeCallAddress[k], animeHooks[k]);
-            if ((g_reloadTexture = runtime.lookupFunction(0x00133070u)))
-                runtime.registerFunction(0x00133070u, &reloadTextureHook);
-            runtime.registerFunction(0x00151AD0u, &balloonHook);
-            runtime.registerFunction(0x00140660u, &moveImageTestHook);
-            if ((g_getFrameTex = runtime.lookupFunction(0x0012F130u)) && (g_getBackTex = runtime.lookupFunction(0x0012F1A0u)))
+                if ((g_animeCalls[k] = runtime.functions.generated(kAnimeCallAddress[k])))
+                    registry.registerFunction(kAnimeCallAddress[k], animeHooks[k]);
+            if ((g_reloadTexture = runtime.functions.generated(0x00133070u)))
+                registry.registerFunction(0x00133070u, &reloadTextureHook);
+            registry.registerFunction(0x00151AD0u, &balloonHook);
+            registry.registerFunction(0x00140660u, &moveImageTestHook);
+            if ((g_getFrameTex = runtime.functions.generated(0x0012F130u)) && (g_getBackTex = runtime.functions.generated(0x0012F1A0u)))
             {
-                runtime.registerFunction(0x0012F130u, &getFrameTexHook);
-                runtime.registerFunction(0x0012F1A0u, &getBackTexHook);
+                registry.registerFunction(0x0012F130u, &getFrameTexHook);
+                registry.registerFunction(0x0012F1A0u, &getBackTexHook);
             }
-            runtime.registerFunction(0x0012F430u, &stretchMoveHook);
-            runtime.registerFunction(0x00162580u, &blendTextureHook);
-            runtime.registerFunction(0x00162D80u, &blendTextureTestHook);
-            runtime.registerFunction(0x0012F970u, &moveFrameBuffHook);
-            if ((g_enterFixZ = runtime.lookupFunction(0x00132930u)))
-                runtime.registerFunction(0x00132930u, &enterFixZHook);
-            if ((g_enterFix = runtime.lookupFunction(0x001320E0u)))
-                runtime.registerFunction(0x001320E0u, &enterFixHook);
-            if ((g_loadTm2 = runtime.lookupFunction(0x00154950u)))
-                runtime.registerFunction(0x00154950u, &loadTm2Hook);
-            if ((g_loadTexture = runtime.lookupFunction(0x00154770u)))
-                runtime.registerFunction(0x00154770u, &loadTextureHook);
-            if ((g_vsyncLoad = runtime.lookupFunction(0x00154320u)))
-                runtime.registerFunction(0x00154320u, &vsyncLoadHook);
-            if ((g_drawFire = runtime.lookupFunction(0x00161AC0u)))
-                runtime.registerFunction(0x00161AC0u, &drawFireHook);
-            if ((g_setAlphaFlag = runtime.lookupFunction(0x0015BC20u)) && (g_setGsAlpha = runtime.lookupFunction(0x0012EF90u)))
+            registry.registerFunction(0x0012F430u, &stretchMoveHook);
+            registry.registerFunction(0x00162580u, &blendTextureHook);
+            registry.registerFunction(0x00162D80u, &blendTextureTestHook);
+            registry.registerFunction(0x0012F970u, &moveFrameBuffHook);
+            if ((g_enterFixZ = runtime.functions.generated(0x00132930u)))
+                registry.registerFunction(0x00132930u, &enterFixZHook);
+            if ((g_enterFix = runtime.functions.generated(0x001320E0u)))
+                registry.registerFunction(0x001320E0u, &enterFixHook);
+            if ((g_loadTm2 = runtime.functions.generated(0x00154950u)))
+                registry.registerFunction(0x00154950u, &loadTm2Hook);
+            if ((g_loadTexture = runtime.functions.generated(0x00154770u)))
+                registry.registerFunction(0x00154770u, &loadTextureHook);
+            if ((g_vsyncLoad = runtime.functions.generated(0x00154320u)))
+                registry.registerFunction(0x00154320u, &vsyncLoadHook);
+            if ((g_drawFire = runtime.functions.generated(0x00161AC0u)))
+                registry.registerFunction(0x00161AC0u, &drawFireHook);
+            if ((g_setAlphaFlag = runtime.functions.generated(0x0015BC20u)) && (g_setGsAlpha = runtime.functions.generated(0x0012EF90u)))
             {
-                runtime.registerFunction(0x0015BC20u, &setAlphaFlagHook);
-                runtime.registerFunction(0x0012EF90u, &setGsAlphaHook);
+                registry.registerFunction(0x0015BC20u, &setAlphaFlagHook);
+                registry.registerFunction(0x0012EF90u, &setGsAlphaHook);
             }
-            if ((g_setEnv = runtime.lookupFunction(0x00140DA0u)))
-                runtime.registerFunction(0x00140DA0u, &setEnvHook);
+            if ((g_setEnv = runtime.functions.generated(0x00140DA0u)))
+                registry.registerFunction(0x00140DA0u, &setEnvHook);
             for (ShadowCall &call : g_shadowCalls)
-                if ((call.original = runtime.lookupFunction(call.address)))
-                    runtime.registerFunction(call.address, &blobShadowHook);
+                if ((call.original = runtime.functions.generated(call.address)))
+                    registry.registerFunction(call.address, &blobShadowHook);
         }
         g_enabled = true;
         std::fprintf(stderr, "[dc:native] 3D models drawn natively from the game's MDT models, RenderInfo and textures; VU1 runs nothing\n");
@@ -4026,7 +4016,7 @@ namespace dc::native
     {
         if (!g_enabled)
             return;
-        ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+        bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
         ++g_publishedFrames;
         static uint32_t s_frames = 0;
         if (++s_frames % 300u == 0u)

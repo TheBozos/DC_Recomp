@@ -97,4 +97,5 @@ def main():
     print('%s: %d functions (%d from uncovered code) -> %s' % (which, len(funcs), gaps, out))
 
 
-main()
+if __name__ == '__main__':
+    main()

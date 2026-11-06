@@ -11,7 +11,7 @@ jobs:
           submodules: true
       - name: Build the pinned native engine and synthetic fixtures
         run: |
-          cmake -S BozoEngine -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DBOZO_BUILD_TOOLS=OFF
+          cmake -S tests/native_lifetime -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/ci --parallel 2
           ctest --test-dir build/ci --output-on-failure
       - name: Check offline tools and shell commands

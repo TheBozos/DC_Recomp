@@ -169,8 +169,9 @@ namespace dc::native
         // ...Remake: "MDT\0", its size at + 8) and, for most static pieces (the town's map parts), the MDT's memory is
         // used for other data afterwards: the VU data is all that is left in the game, and it is not read here. So the
         // MDT is copied when the game builds from it (its own model data, still valid then), keyed by the VU data it
-        // builds; a draw reads the live MDT when it is still there (animated models keep theirs at + 0x20 and rebuild
-        // from it), the copy otherwise.
+        // builds. Static visuals always use that owned copy: a matching header in released source memory does not
+        // establish ownership of its body. Animated MDT visuals explicitly retain their source at + 0x20, and
+        // Remake refreshes the captured geometry at its original update boundary.
         // Its textures are bound there too: CreateVUdataFromMDT takes each primitive's material texture by name
         // (GetTextureHandle -> SearchTextureName, the newest record of that name; none: handle -1, which GetTexture
         // takes as record 0) and writes that record's TEX0 into the VU data; Remake keeps it. The records are noted
@@ -363,9 +364,6 @@ namespace dc::native
             if (it == g_mdtCopies.end())
                 return model;
             model.mdt = it->second.mdt;
-            if (rd32(rdram, model.mdt) == kMdtMagic && rd32(rdram, model.mdt + 8u) == it->second.copy->size() &&
-                std::memcmp(rdram + (model.mdt & 0x1FFFFFFu), it->second.copy->data(), 64) == 0)
-                return model; // still there: live (vertex animation writes it)
             model.copy = it->second.copy;
             ++g_stats.copiedModel;
             return model;

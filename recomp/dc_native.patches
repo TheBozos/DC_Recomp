@@ -93,3 +93,13 @@
 0x00161e24 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
 0x001621a0 0x8f848bd4 0x08058893 # skip trailing state restore to epilogue 0x16224c
 0x001621a4 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
+# Native copy wrappers: discard only their surrounding TEXFLUSH envelopes.
+# Keep animation phase/wrap and every texture lookup, rectangle and copy input.
+0x0019f9bc 0x8f848bd4 0x08067e88 # setTexAnim: leading envelope to phase update 0x19fa20
+0x0019f9c0 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
+0x0019faf8 0x8f848bd4 0x08067ed7 # setTexAnim: trailing envelope to epilogue 0x19fb5c
+0x0019fafc 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
+0x001b1f28 0x8f848bd4 0x0806c7e3 # setItemToReserved: leading envelope to lookup 0x1b1f8c
+0x001b1f2c 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
+0x001b2030 0x8f848bd4 0x0806c825 # setItemToReserved: trailing envelope to epilogue 0x1b2094
+0x001b2034 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot

@@ -4,7 +4,7 @@ Implemented on 2026-11-06. The active build uses only the `BozoEngine` submodule
 
 The graphics cleanup includes the DC adapters, regression fixtures, guarded offline adaptations and published
 BozoEngine pin `4a8f70a` together. References to local/unpublished work in the milestone sections below describe
-the state at those earlier checks. The latest validation is 33/33 suites and both 5,800-frame routes; remaining
+the state at those earlier checks. The latest validation is 35/35 suites and both 5,800-frame routes; remaining
 coverage and packet-work limits are listed in the final section.
 
 ## Ownership boundary
@@ -699,3 +699,49 @@ F2F received the audit, fixture correction and qualification results. Both lanes
 those owners. Other mixed console builders, main packet reset, setup/display producers, legacy extents,
 console-format native-copy identifiers, unsupported readbacks and broader gameplay remain open. No retail data
 or generated game code is committed.
+
+## Texture-copy owner flush retirement
+
+Eight guarded offline words retire four unused TEXFLUSH envelopes in `setTexAnim` (`0x19f9b0`) and
+`setItemToReserved` (`0x1b1ef0`). The animation's phase increment/wrap, float conversion, conditional copy and
+both texture lookups remain compiled. The item owner retains its texture-identifier bit extraction, 32-by-32
+source rectangle and every scalar/stack copy argument. Both helpers still call the existing native copy
+adapters. No engine change is required; BozoEngine stays at `4a8f70a`. Console-format identifiers still cross
+those native adapters; no GS memory or runtime packet read is introduced.
+
+Evidence in `build/native-cleanup15/`:
+
+- **35/35 suites pass** (`tests.log`). The two new whole-function differential fixtures cover **144 animation**
+  and **96 item-copy cases** with real compiled packet builders and float conversion, controlled texture lookup
+  and native-copy submission. After adding source/destination texture-alias cases, the four matching state-wrapper
+  suites were rebuilt and passed again (`alias-tests.log`); production code did not change after the full run.
+- Cases cover absent/present textures, aliased/distinct records and name pointers, phase values below/at/above
+  the wrap threshold, negative/zero/positive increments, signed/large rectangle coordinates and varying identifier
+  fields/high bits. Original item behavior has no missing-texture guard; its zero-page input is compared as-is,
+  without adding a fallback. Ordered lookup/copy data match, including arguments on the stack. Across both variants
+  there are 72 animation-copy and 192 item-copy calls. These are fixture totals, not live gameplay counts.
+- The original animation emits six leading packet helper calls, with six trailing calls only when both textures
+  exist; the item owner emits twelve. Adapted versions emit none, with inaccessible packet pointers. Saved full
+  registers/stack/return, floating-point status and logical phase/copy side effects match. All other non-stack RAM
+  stays unchanged after excluding original packet writes; adapted packet storage remains untouched. A strict host
+  rejects unexpected device/library/VU0-program access. The copy implementations' math and clock timing are not
+  qualified by these controlled boundaries.
+- Both **5,800-frame headless/windowed routes complete**, now opening the item inventory before returning to the
+  menu and gameplay. Both report zero register/unknown accesses, zero VU0 microprogram calls and zero GIF SDK
+  submissions. Native VIF1 completion counts are 5,686 / 6,064; sync counts are 6,884 / 7,262. Neither new owner
+  appears in the sampled feeder reports, so their execution is **fixture-qualified only**; opening inventory is
+  not evidence that `setItemToReserved` ran.
+- Inspected twelve captures: presentation (100), black transition (300), attract (2,000), load confirmation (2,800),
+  Norune (3,400), pause (3,550), running with foot dust (4,800), movement (5,100), menu (5,400), inventory with item
+  icons/Toan preview (5,550), returned menu (5,700) and dismissal (5,799). No pixel-parity claim is made.
+- Headless 48 kHz stereo PCM contains 4,686,527 frames, RMS 3,599.338, last-ten-second RMS 3,496.547 and peak 28,775.
+  Windowed PCM contains 5,089,517 frames, RMS 3,563.919, tail RMS 3,018.528 and peak 32,766. Audio remains active;
+  subjective listening, exact timing and full-campaign/console parity remain unqualified.
+
+The C2C/F2F server went down after the preceding fire batch's qualification post. The user confirmed the server
+crashed and will notify when it returns; the fire merge confirmation and this batch's updates are queued locally
+in ignored build evidence. No peer engine work is taken over. Remaining mixed builders, main packet reset,
+setup/display work, legacy extents, native-copy identifiers and unsupported readbacks remain separate audits.
+`FishLineDraw` mixes real projected XYZ/ADC geometry into its AD stream and needs a native drawing boundary,
+with pole/model math retained; it cannot be retired as an unused state envelope. No retail assets or generated
+game code are committed.

@@ -3581,10 +3581,24 @@ namespace dc::native
             patchTexture(rdram, src, rectAt(rdram, getRegU32(ctx, 8)), dst, static_cast<int32_t>(stackArg(rdram, ctx, 0)),
                          static_cast<int32_t>(stackArg(rdram, ctx, 1)));
         }
-        // CFireOmni::DrawFire (0x161AC0): its sprites (set3DSpriteFog) drawn with the ALPHA it writes, 0x48: Cs As + Cd.
+        // CFireOmni::DrawFire (0x161AC0): explicit additive sprite blend, 0x48: Cs As + Cd.
         RecompiledFunction g_drawFire = nullptr;
         void drawFireHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
         {
+            static const bool probe = [] { const char *v = std::getenv("DC_PROBE_FIRE"); return v && v[0] == '1'; }();
+            if (probe)
+            {
+                static uint64_t calls = 0;
+                ++calls;
+                // Bounded coverage samples, not an exact gameplay call total.
+                if (calls <= 16u || (calls % 300u == 0u && calls <= 14400u))
+                {
+                    const uint32_t fire = getRegU32(ctx, 4);
+                    std::fprintf(stderr, "[dc:fire] frame %llu mode %u counter %d textures %08x/%08x\n",
+                                 static_cast<unsigned long long>(g_publishedFrames), getRegU32(ctx, 9),
+                                 static_cast<int32_t>(rd32(rdram, fire + 0x1Cu)), rd32(rdram, fire + 0x34u), rd32(rdram, fire + 0x38u));
+                }
+            }
             const uint64_t saved = g_alpha2D;
             g_alpha2D = (g_alpha2D & ~0xFFull) | 0x48u;
             g_drawFire(rdram, ctx, runtime);

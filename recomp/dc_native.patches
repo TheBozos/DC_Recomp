@@ -85,3 +85,11 @@
 0x001671a4 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
 0x0016778c 0x8f848bd4 0x08059dfc # skip trailing envelope to epilogue 0x1677f0
 0x00167790 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
+# DrawFire: native fog sprites already receive explicit blend/depth/fog state.
+# Retain both mode bits, texture setup, camera/projection math and PRNG updates.
+0x00161bd4 0x8f848bd4 0x0805874f # skip first state envelope to first sprite setup 0x161d3c
+0x00161bd8 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
+0x00161e20 0x8f848bd4 0x080587e2 # skip second state envelope to counter/PRNG logic 0x161f88
+0x00161e24 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot
+0x001621a0 0x8f848bd4 0x08058893 # skip trailing state restore to epilogue 0x16224c
+0x001621a4 0x70002e28 0x70002e28 # guard harmless caller-volatile zero in delay slot

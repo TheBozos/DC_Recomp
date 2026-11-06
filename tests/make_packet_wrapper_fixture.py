@@ -19,6 +19,9 @@ base, end, helpers = {
     'effect': (0x163480, 0x1638ec, [0x1312d0, 0x12e990, 0x1110b0, 0x12e740, 0x15d4b0]),
     'frame_close': (0x12d1dc, 0x12d268, [0x120de0, 0x120c28, 0x112f98, 0x104698, 0x113f40]),
     'frame_submit': (0x12d63c, 0x12d6a8, [0x10c3a8, 0x1145a0, 0x10c6f8]),
+    'frame_draw': (0x12ed80, 0x12edec, [0x120c28, 0x120f78]),
+    'frame_member': (0x12a110, 0x12a18c, [0x120c28, 0x120f78]),
+    'mdt_draw': (0x1360e0, 0x136200, [0x127900, 0x1033b0, 0x135000]),
 }[kind]
 phoff = struct.unpack_from('<I', data, 28)[0]
 for i in range(struct.unpack_from('<H', data, 44)[0]):
@@ -29,7 +32,7 @@ for i in range(struct.unpack_from('<H', data, 44)[0]):
 else:
     raise SystemExit('wrapper is not file backed')
 span_start = base
-if kind.startswith('frame_'):
+if kind in {'frame_close', 'frame_submit'}:
     # Isolated mid-function spans: synthetic save/return around the exact retail
     # instructions. No device value, frame boundary or completion is fabricated.
     base -= 4
@@ -55,7 +58,8 @@ target.with_suffix('.externals').write_text(''.join(f'override 0x{pc:x}\n' for p
     helpers + [0x120c80, 0x120e38, 0x120ec0, 0x121028, 0x120ed8, 0x120e90]))
 selected = [line for line in patches.read_text().splitlines()
             if line.split('#')[0].strip() and span_start <= int(line.split()[0], 16) < end]
-if len(selected) != (2 if kind == 'frame_close' else 4):
+expected = {'frame_close': 2, 'frame_draw': 0, 'frame_member': 0, 'mdt_draw': 2}.get(kind, 4)
+if len(selected) != expected:
     raise SystemExit('wrapper fixture requires its complete guarded production adaptation subset')
 target.with_suffix('.patches').write_text('\n'.join(selected) + '\n')
 # The frame-submit reference is the published, already-native boundary: its two

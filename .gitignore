@@ -17,7 +17,7 @@ SLUS_*
 *.irx
 *.IMG
 
-# PS2Recomp is a git submodule; local build trees live here
+# Local build trees
 build/
 out/
 cmake-build-*/
@@ -56,3 +56,9 @@ sym.txt
 *.HED
 *.HD2
 DMMY
+
+# Retained local recovery checkout; no longer a dependency or submodule
+/PS2Recomp/
+__pycache__/
+*.py[cod]
+.codex/

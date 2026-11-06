@@ -1,0 +1,20 @@
+name: Native toolchain
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  native-services:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Build the pinned native engine and synthetic fixtures
+        run: |
+          cmake -S BozoEngine -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DBOZO_BUILD_TOOLS=OFF
+          cmake --build build/ci --parallel 2
+          ctest --test-dir build/ci --output-on-failure
+      - name: Check offline tools and shell commands
+        run: |
+          python3 -m py_compile tools/dc_bozo_prepare.py tools/dc_bozo_audio.py tools/dc_bozo_externals.py tools/dc_texconv.py tools/gs_layout.py tools/wrap_elf.py tools/symtab_map.py
+          for script in scripts/*.sh; do bash -n "$script"; done

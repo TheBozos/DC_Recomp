@@ -1,15 +1,13 @@
 # Sourced by the other scripts. Resolves the repo root and tool paths.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export PATH="$HOME/.local/share/mise/shims:$PATH"
+export PATH="/c/msys64/ucrt64/bin:$HOME/.local/share/mise/shims:$PATH"
 
 GAME_DIR="$ROOT/game"
 ELF="$GAME_DIR/SCUS_971.11"
-CONFIG="$ROOT/recomp/dc_scus97111.toml"
-GENERATED="$ROOT/generated"
-TOOLS_BUILD="$ROOT/build/tools"
-GAME_BUILD="$ROOT/build/game"
-JOBS="${JOBS:-$(nproc)}"
+TOOLS_BUILD="${TOOLS_BUILD:-$ROOT/build/bozo-tools}"
+GAME_BUILD="${GAME_BUILD:-$ROOT/build/bozo}"
+JOBS="${JOBS:-6}"
 
 # Native executables carry .exe on Windows (MSYS2).
 EXE=""
@@ -20,3 +18,7 @@ if [ -z "${TMP:-}" ] || [ -z "${TEMP:-}" ]; then
     mkdir -p "$ROOT/build/tmp"
     export TMP="$ROOT/build/tmp" TEMP="$ROOT/build/tmp"
 fi
+
+configure_game() {
+    cmake -S "$ROOT" -B "$GAME_BUILD" -G Ninja -DCMAKE_BUILD_TYPE="${BUILD_TYPE:-Release}" "$@"
+}

@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
 from dc_instrument_indirect import instrument
-from dc_packet_audit import replaced_body
+from dc_packet_audit import replaced_body, dispatch_slot_chain, image_coverage, guarded_skip_ranges
 
 ANALYZER, TRACER = sys.argv[1:3]
 del sys.argv[1:3]
@@ -48,6 +48,25 @@ def fixture(path):
 
 
 class IndirectAudit(unittest.TestCase):
+    def test_dun_slot_and_module_coverage(self):
+        # CCharacter-style object+0xa0 table -> slot+0xac, not an immutable target proof.
+        site = {'reg': 25, 'definition': 0x1004, 'definition_op': 'lw',
+                'slot_base_reg': 25, 'slot_offset': 0xac}
+        chain = dispatch_slot_chain(site, lambda pc: 0x8c9900a0)
+        self.assertEqual((chain['object_reg'], chain['object_offset'], chain['slot_offset']), (4,0xa0,0xac))
+        self.assertIsNone(dispatch_slot_chain(site, lambda pc: 0x0c001000))
+        self.assertIsNone(dispatch_slot_chain(dict(site, owner=0x1004), lambda pc: 0x8c9900a0))
+        facts = {image: {0x1008: {'kind': 'call_register', 'owner': 0x1000}} for image in ('dc','title','dun')}
+        edges = [{'source_image':'dun','pc':0x1008,'selected_target_image':'dc','target':0x1234,'count':3}]
+        coverage = image_coverage(facts, set(), {('dun',0x1008)}, edges)
+        self.assertEqual(coverage['dun'], {'inventory':1,'observed':1,'unobserved':0,'unique_edges':1,'transfer_count':3})
+        self.assertEqual(coverage['title']['unobserved'], 1)
+        self.assertEqual(coverage['dc']['observed'], 0)
+        ranges = guarded_skip_ranges(['# guard', '0x1000 0x8f848bd4 0x08000410',
+                                      '0x1004 0x00000000 0x00000000'])
+        self.assertEqual(ranges, [(0x1004,0x1040)])
+        self.assertEqual(guarded_skip_ranges(['0x1000 0x1000000e 0x1000000f']), [(0x1004,0x1040)])
+
     def test_forwarding_override_keeps_compiled_body_in_audit(self):
         overrides = {0x1554a0, 0x12ed80}
         self.assertFalse(replaced_body('dc', 0x1554a0, overrides))

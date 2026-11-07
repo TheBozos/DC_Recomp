@@ -1206,3 +1206,103 @@ Qualification (`build/native-cleanup23/`):
 Remaining work is explicit: the 617 unobserved indirect sites and their mutable target writers, legacy ABI
 parameter loads, model/cloth identity-and-size migration, display/setup metadata and unsupported readbacks.
 The engine pin remains `4a8f70a5021cbb3429800a02259ae7b816581ee0`.
+
+## Null packet arguments and DUN dispatch follow-up
+
+The 373 remaining admitted `LW gp-0x742c` compatibility loads now supply a literal zero in the same
+argument register: **163 resident, 134 TITLE and 76 DUN** guarded substitutions. This makes the callers
+follow the null-handle ABI already supplied by the native `GetVif1Packet`, without reading the retired
+global. The instruction stays in its original position, including delay slots. Real model/cloth data
+addresses, allocation sizes, query capacity/cursor and the shared arena are unchanged.
+
+Original/adapted owner fixtures include the new substitutions and still require their complete earlier
+guarded adaptations. Their native runs retain poisoned handle words and packet buffers while comparing
+ordered consumed inputs, other non-stack RAM, saved registers and relevant floating-point state.
+The packet-only instrumented build passes **67/67 suites**. With the balloon regression and fixes below,
+the final normal build passes **68/68 suites**, and the game-free build passes **17/17**. The final normal
+executables use `DC_AUDIT_INDIRECT=OFF` and have no trace-collector symbols.
+
+The audit now rejects any admitted GP-relative read or write of the three retired handle/base globals.
+It also inventories the raw remaining loads rather than hiding them: **287 remain**, with 115 in replaced
+resident bodies and 172 outside the current CFG walk (95 resident, 74 TITLE, three DUN). CFG-unreached
+does **not** prove safety against an indirect entry into a function's interior. Trace review now rejects
+targets inside production guarded skip spans, using the actually selected target image. A target merely
+inside a compiled function, without an established entry or switch case, remains unresolved and fails
+review. Local negative traces exercise both cases. Arbitrary pointer aliases and mutable target writers
+remain outside this direct-global audit.
+
+DUN has **43 non-return register transfers: 11 compiler switches and 32 adjacent table-load chains**.
+The latter now carry the exact object-register/field/slot origin hint:
+
+| Object field containing table pointer | Table slot | DUN sites |
+| --- | --- | ---: |
+| `+0xa0` | `+0xc4` | 13 |
+| `+0xa0` | `+0xac` | 2 |
+| `+0xa0` | `+0xa0` | 7 |
+| `+0xa0` | `+0x08` | 3 |
+| `+0xa0` | `+0x18` / `+0x30` | 2 / 2 |
+| `+0x2b8` | `+0x08` | 3 |
+
+These are instruction-chain facts, not immutable vtable/target-set proofs. Coverage is now reported
+separately for resident, TITLE and DUN, including distinct observed sites/edges and transfer counts.
+Synthetic tests prevent source-module coverage from being confused at reused overlay addresses.
+
+A completed **43,946-frame manual first visit** now supplies real DUN coverage for the packet cleanup.
+Its trace predates the rendering/save fixes below and remains separately identified with its preserved
+instrumented binary. It records **27,353,266 transfers, 278 distinct source sites and 709 distinct edges**:
+
+| Source image | Sites observed / inventory | Distinct edges | Transfers |
+| --- | ---: | ---: | ---: |
+| Resident | 226 / 601 | 637 | 27,232,756 |
+| TITLE | 19 / 131 | 34 | 9,593 |
+| DUN | **33 / 43** | **38** | **110,917** |
+
+Every observed target is a compiler switch case, compiled entry or installed native override. No observed
+edge enters a retired packet SDK entry/interior, guarded skipped span or unclassified address. The run ends
+normally with zero register/unknown accesses, VU0 calls or GIF submissions; native VIF1 completions/syncs are
+44,546 / 46,530. Captures of the first-visit tutorial and floor-one gameplay were inspected. This establishes
+observed execution in DUN, not full dungeon/story coverage or closure of mutable callback target sets.
+
+**497 sites remain unobserved in this trace**, including these ten DUN sites:
+
+| DUN owner | Unobserved sites |
+| --- | --- |
+| `MainDraw` | `0x1dae898` (table call), `0x1daf5bc` (switch) |
+| `MoveChara` | `0x1db200c`, `0x1db53b8` (switches), `0x1db6848` (table call) |
+| `motionDrive` | `0x1db77d8`, `0x1db79a8` (table calls) |
+| `EquipReAttach` | `0x1db9604`, `0x1db9628` (table calls) |
+| `Run_TrapCircle` | `0x1dbfb44` (switch) |
+
+### Dialogue mask and save completion found during DUN qualification
+
+The supplied PCSX2 dialogue reference has an irregular paper outline; the native capture had a rectangle.
+The existing native polygon/tail was present, but OpenGL disabled depth writes along with a disabled depth
+test. The generic engine fix enables an unconditional test when writes are requested, then restores the
+requested comparison for tested batches. Main/auxiliary mask and inverted-reuse GPU readback fail before
+the fix and pass afterwards. The upstream integration also preserves strict GREATER, stencil and newer
+texture-function/mipmap tests.
+
+The port's mask clear now uses the exact finite native near depth (`screen().depthMax`); its old `1e30`
+wrapped in the depth shader. It clears coverage separately because an opaque draw deliberately publishes
+full coverage. The new game-free GPU fixture invokes the actual native balloon owner with synthetic
+diamond/tail records, an inaccessible packet argument and four target-reuse profiles. It checks transparent
+corners/old mask locations, filled body/tail, unchanged guest RAM/CPU and a finite clear. Its capture was
+inspected. This verifies the masking correction; the supplied PCSX2 scene has not been rerun for exact
+outline/antialiasing or scene parity.
+
+The first visit also exposed a save error after files had already been written: the pinned engine lacked
+native `sceMcFlush`, so the original SDK client path rejected the flush and the game's save state machine
+reported failure. Native Flush already exists upstream in `63caf16`; it is backported for the qualified DC
+base. It publishes command `0xA` with result 0 for an open file or -4 for a missing/closed descriptor, retaining
+the cursor and descriptor. Tests cover repeated flush, completion consumption, writes after flush, persisted
+bytes before close and reload in a fresh runtime. No unsupported-operation success value is fabricated.
+
+The final normal **8,800-frame save route** records both Flush completions with result 0 and displays
+**“Saving completed.”** A fresh **4,200-frame process** reloads the resulting save and shows the retained
+13:18 playtime / one dungeon visit, then gameplay. Both routes have zero register/unknown accesses, VU0 calls
+or GIF submissions. User progress and all evidence remain in copied local cards under `build/native-cleanup24/`.
+
+DC's qualified engine pin is **`e78883f12f6362cb5570bed55aaa2aa7169d9589`**, containing these focused fixes on
+the preceding verified base. Engine PR [#73](https://github.com/TheBozos/BozoEngine/pull/73) integrates the
+generic rendering fix and additional Flush regressions with current main; **47/47 suites including GPU
+readback pass** on that integration. Retail/generated assets, raw traces, cards and captures stay local.

@@ -119,6 +119,59 @@ def indirect_category(site, name):
     return 'register_target_call'
 
 
+def dispatch_slot_chain(site, word):
+    """Exact adjacent LW/LW chain, a slot origin hint, not a closed vtable."""
+    if site.get('definition_op') != 'lw' or site.get('slot_base_reg') != site['reg']:
+        return None
+    before = site['definition'] - 4
+    if before < site.get('owner', 0):
+        return None
+    parent = word(before)
+    if parent >> 26 != 35 or (parent >> 16 & 31) != site['reg']:
+        return None
+    offset = parent & 0xffff
+    if offset & 0x8000:
+        offset -= 0x10000
+    return {'pointer_load': before, 'object_reg': parent >> 21 & 31,
+            'object_offset': offset, 'slot_offset': site['slot_offset'],
+            'limit': 'adjacent loads only; object/table writers and target set remain open'}
+
+
+def image_coverage(facts, overrides, observed_sites, edges):
+    result = {}
+    for image, group in facts.items():
+        sites = {pc for pc, f in group.items() if f['kind'] != 'return'
+                 and not replaced_body(image, f['owner'], overrides)}
+        observed = {pc for source, pc in observed_sites if source == image} & sites
+        unique = {(e['pc'], e['selected_target_image'], e['target']) for e in edges if e['source_image'] == image}
+        result[image] = {'inventory': len(sites), 'observed': len(observed),
+                         'unobserved': len(sites - observed), 'unique_edges': len(unique),
+                         'transfer_count': sum(e['count'] for e in edges if e['source_image'] == image)}
+    return result
+
+
+def guarded_skip_ranges(lines):
+    """Interior of an explicitly skipped production span, including its delay slot."""
+    result = []
+    for line in lines:
+        fields = line.split('#')[0].split()
+        if not fields:
+            continue
+        pc, original, replacement = [int(x, 16) for x in fields]
+        if replacement >> 26 == 2:
+            target = (pc + 4) & 0xf0000000 | (replacement & 0x3ffffff) << 2
+        elif replacement >> 26 == 4 and (replacement >> 21 & 31) == (replacement >> 16 & 31):
+            offset = replacement & 0xffff
+            if offset & 0x8000:
+                offset -= 0x10000
+            target = pc + 4 + offset * 4
+        else:
+            continue
+        if target > pc + 4:
+            result.append((pc + 4, target))
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=pathlib.Path, required=True)
@@ -143,8 +196,10 @@ def main():
               'installed_overrides': list(map(hex, sorted(overrides))), 'indirect_sites': [],
               'compiled_passthrough_overrides': list(map(hex, sorted(overrides & COMPILED_PASSTHROUGH))),
               'retired_initializer_callers': [], 'packet_global_accesses': [],
+              'null_handle_constants': [],
+              'residual_handle_loads': [],
               'limit': 'compiler switch cases expand CFG; fallback targets, mutable slots and inline cursor dataflow remain open; traces prove observed edges only'}
-    facts, entries, externals = {}, {}, {}
+    facts, entries, externals, skipped = {}, {}, {}, {}
     if args.images:
         # A registry entry cannot intercept a generated direct C++ call unless
         # codegen declared it external. Check resident and overlay dispatch.
@@ -162,7 +217,20 @@ def main():
             for site in facts[image].values():
                 site['category'] = indirect_category(site, names.get(site['owner'], ''))
             entries[image] = compiled
+            skipped[image] = guarded_skip_ranges((root / f'recomp/{image}_native.patches').read_text().splitlines())
             word = image_words(args.images / f'{image}.elf', root / f'recomp/{image}_native.patches')
+            for site in facts[image].values():
+                chain = dispatch_slot_chain(site, word)
+                if chain:
+                    site['table_slot_chain'] = chain
+            for line in (root / f'recomp/{image}_native.patches').read_text().splitlines():
+                fields = line.split('#')[0].split()
+                if not fields:
+                    continue
+                pc, original, replacement = map(lambda x: int(x, 16), fields)
+                if original & 0xffe0ffff == 0x8f808bd4 and replacement == (0x24000000 | original & 0x1f0000):
+                    report['null_handle_constants'].append({'image': image, 'pc': pc, 'reg': original >> 16 & 31,
+                                                            'getter': image == 'dc' and pc == 0x12e280})
             for function in compiled:
                 start, end = function['start'], function['end']
                 name = names.get(start, f'compiler_function_{start:x}')
@@ -171,6 +239,11 @@ def main():
                 visited = set()
                 found, indirect = calls(word, start, end, facts[image], visited)
                 native_owned = replaced_body(image, start, overrides)
+                for pc in range(start, end, 4):
+                    if word(pc) & 0xffe0ffff == 0x8f808bd4:
+                        report['residual_handle_loads'].append({'image': image, 'owner': hex(start), 'pc': hex(pc),
+                            'status': 'replaced_body' if native_owned else 'cfg_unreached' if pc not in visited else 'admitted',
+                            'limit': 'CFG-unreached is not proof against an indirect entry into the interior'})
                 if not native_owned:
                     for pc in sorted(visited):
                         w = word(pc)
@@ -178,8 +251,7 @@ def main():
                             access = 'read' if w >> 26 == 35 else 'write'
                             report['packet_global_accesses'].append({'image': image, 'owner': hex(start),
                                                                     'site': hex(pc), 'offset': hex(w & 0xffff), 'access': access})
-                            if access == 'write':
-                                raise ValueError('admitted code still initializes/selects a retired packet handle')
+                            raise ValueError('admitted code still reads/writes a retired packet handle/base global')
                 for pc, target in found:
                     if target == 0x12c720:
                         report['retired_initializer_callers'].append({'image': image, 'owner': hex(start), 'site': hex(pc)})
@@ -220,6 +292,8 @@ def main():
                 if target in guarded or any(a <= target < b for n, a, b in main_symbols if n.startswith(('sceVif1Pk','sceGifPk'))):
                     raise ValueError('indirect trace reached a retired packet entry/interior')
                 target_image = ('dc', 'title', 'dun', 'unselected')[edge['target_image']]
+                if any(a <= target < b for a, b in skipped.get(target_image, [])):
+                    raise ValueError('indirect trace entered the interior of a guarded retired span')
                 disposition = 'unclassified_address'
                 if target in overrides:
                     disposition = 'native_override'
@@ -230,15 +304,16 @@ def main():
                 elif target_image in entries:
                     owner = next((f for f in entries[target_image] if f['start'] <= target < f['end']), None)
                     if owner:
-                        disposition = 'compiled_entry' if target == owner['start'] else 'compiled_interior_or_continuation'
+                        disposition = 'compiled_entry' if target == owner['start'] else 'unresolved_compiled_interior'
                 if disposition == 'unclassified_address' and target in externals:
                     disposition = 'unresolved_declared_external'
                 observed_sites.add((image, edge['pc']))
                 report['observed_edges'].append(dict(edge, source_image=image, selected_target_image=target_image,
                                                      kind=fact['kind'], disposition=disposition, trace=str(path)))
         report['observed_site_count'] = len(observed_sites)
+        report['coverage_by_image'] = image_coverage(facts, overrides, observed_sites, report['observed_edges'])
         report['unclassified_observed_edges'] = [e for e in report['observed_edges'] if e['disposition'] in
-                                                ('unclassified_address', 'unresolved_declared_external')]
+                                                ('unclassified_address', 'unresolved_declared_external', 'unresolved_compiled_interior')]
         report['unobserved_sites'] = [{'image': image, 'pc': pc, 'kind': fact['kind']} for image, group in facts.items()
                                       for pc, fact in group.items() if fact['kind'] != 'return'
                                       and not replaced_body(image, fact['owner'], overrides)

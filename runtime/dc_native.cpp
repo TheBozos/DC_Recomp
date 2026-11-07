@@ -3421,8 +3421,15 @@ namespace dc::native
             clear.depthWrite = true;
             clear.target = balloon;
             std::vector<bozo::render::Vertex> vertices;
-            quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, 1.0e30f, 0u);
+            quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, screen().depthMax, 0u);
             drawScreen(clear, vertices);
+            // Opaque draws deliberately publish full coverage. Clear coverage
+            // separately so the sampled image stays transparent outside the
+            // shape, including when this target is reused in the same frame.
+            auto clearCoverage = clear;
+            clearCoverage.blend = bozo::render::Material::Blend::AlphaOnly;
+            clearCoverage.depthWrite = false;
+            drawScreen(clearCoverage, vertices);
             vertices.clear();
             // MakeFukidashi_sub: the shape.
             int32_t top = std::min(i32(0x48), i32(0x40));

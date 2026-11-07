@@ -127,7 +127,8 @@ int main()
             ++cases; Machine reference, native;
             reference.setup(cursor, open, 0, 0, false); native.setup(cursor, open, 0, 0, true);
             reference.run(DC_FRAME_REFERENCE[0].function);
-            check(reference.packetCalls == 2 && reference.syncCalls == 1,
+            // SDK calls are now externals too: End's nested Terminate is visible.
+            check(reference.packetCalls == 3 && reference.syncCalls == 1,
                   "published reference closes a packet and calls the always-idle native sync service");
             auto *ram = native.dispatcher.runtime().memory.ram();
             const std::vector<uint8_t> before(ram, ram + bozo::kFlatScratchpadOffset);

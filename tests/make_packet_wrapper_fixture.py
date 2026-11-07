@@ -42,6 +42,10 @@ base, end, helpers = {
     'shadow_fast2': (0x1304d0, 0x1305f0, [0x121830, 0x12eec0, 0x12edf0, 0x120d70, 0x12ed80]),
     'shadow': (0x1305f0, 0x130760, [0x121830, 0x121840, 0x12eec0, 0x12edf0, 0x120d70, 0x12ed80]),
     'debug_font': (0x13df40, 0x13e4dc, [0x1312d0, 0x13dea0, 0x13df00, 0x12f130, 0x15c310]),
+    'packet_init': (0x12c720, 0x12c800, [0x120c08, 0x120c18]),
+    'begin_frame': (0x12cd90, 0x12d070, [0x1110b0, 0x120c18, 0x121830, 0x1218a8, 0x12fd30, 0x130000]),
+    'resident_chain': (0x1416ac, 0x1416d8, [0x140da0, 0x120d70]),
+    'loading_init': (0x153fc0, 0x154314, [0x105058, 0x112c08, 0x120c08, 0x12c700, 0x13f3d0, 0x154770, 0x154950]),
 }[kind]
 phoff = struct.unpack_from('<I', data, 28)[0]
 for i in range(struct.unpack_from('<H', data, 44)[0]):
@@ -52,7 +56,7 @@ for i in range(struct.unpack_from('<H', data, 44)[0]):
 else:
     raise SystemExit('wrapper is not file backed')
 span_start = base
-if kind in {'frame_close', 'frame_submit', 'edit_state', 'menu_state'}:
+if kind in {'frame_close', 'frame_submit', 'edit_state', 'menu_state', 'resident_chain'}:
     # Isolated mid-function spans: synthetic save/return around the exact retail
     # instructions. No device value, frame boundary or completion is fabricated.
     base -= 4
@@ -84,7 +88,7 @@ selected = [line for line in patches.read_text().splitlines()
             if line.split('#')[0].strip() and span_start <= int(line.split()[0], 16) < end]
 expected = {'frame_close': 2, 'frame_draw': 0, 'frame_member': 0, 'mdt_draw': 2,
             'message': 2, 'edit_state': 2, 'menu_state': 2, 'loading': 9, 'fire': 6, 'language': 2, 'fishing': 9,
-            'debug_font': 14}.get(kind, 4)
+            'debug_font': 14, 'packet_init': 2, 'begin_frame': 3, 'resident_chain': 2, 'loading_init': 2}.get(kind, 4)
 if len(selected) != expected:
     raise SystemExit('wrapper fixture requires its complete guarded production adaptation subset')
 target.with_suffix('.patches').write_text('\n'.join(selected) + '\n')
@@ -92,6 +96,9 @@ target.with_suffix('.patches').write_text('\n'.join(selected) + '\n')
 # versions. Only the new packet/environment retirement differs. Other references
 # use original bytes.
 baseline_sites = {0x12d65c, 0x12d670} if kind == 'frame_submit' else set()
+if kind == 'begin_frame':
+    # Published CPU-diagnostic retirement is held constant in both versions.
+    baseline_sites = {0x12cdac}
 if kind == 'loading':
     # Compare against the published native field-query boundary in BOTH versions.
     baseline_sites = {0x15434c, 0x154350}

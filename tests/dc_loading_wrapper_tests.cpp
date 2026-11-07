@@ -197,7 +197,8 @@ int main()
                     std::memcpy(expectedRam.data() + 0x420000, expected + 0x420000, 4);
                     const auto adapted = native->run(loading_native_function_table[0].function);
                     const bool submitted = !p.ended && p.countdown == 0;
-                    check(ref->packetCalls == (submitted ? 3 : 0) && native->packetCalls == 0, "only reference resets/ends/terminates its unused packet");
+                    check(ref->packetCalls == (submitted ? 4 : 0) && native->packetCalls == 0,
+                          "only reference resets/ends/terminates, including End's now-visible nested terminate");
                     check(ref->consoleCalls == (p.ended ? 0 : 3) && native->consoleCalls == 0, "adapted callback skips console half-offset/cache/swap setup");
                     const int expectedSyncs = p.ended ? 0 : p.countdown == 0 ? 2 : 1;
                     check(ref->events == native->events && ref->syncCalls == expectedSyncs && ref->syncCalls == native->syncCalls,

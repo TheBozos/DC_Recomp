@@ -150,3 +150,17 @@
 0x0013e420 0xaea00018 0xaea00018 # publish immutable native texture; retain count reset
 0x0013e424 0x8f848bd4 0x0804f911 # skip packet flush/close to final sprite setup 0x13e444
 0x0013e428 0x2405003f 0x00000000 # discard obsolete packet argument
+
+# Resident packet owners: native submissions no longer consume their builders.
+# MGInitVif1Packet: retain buffer alignment/global metadata; retire Init/Reset calls
+0x0012c7a8 0x8f858c08 0x0804b1fc # continue at 0x12c7f0
+0x0012c7ac 0x3c0201c8 0x00000000 # discard obsolete argument / guard empty delay slot
+# MGBeginFrame: retire unused global packet reset; retain pointer selection
+0x0012ce90 0x0c048306 0x00000000 # remove reset call
+0x0012ce94 0x00000000 0x00000000 # discard obsolete argument / guard empty delay slot
+# main: retain native SetEnv; retire static chain call
+0x001416bc 0x3c020024 0x080505b5 # continue at 0x1416d4
+0x001416c0 0x24456100 0x00000000 # discard obsolete argument / guard empty delay slot
+# init_now_loading: retain scene setup/callback; retire packet Init
+0x001542b0 0x3c0201d0 0x080550b2 # continue at 0x1542c8
+0x001542b4 0x2444b370 0x00000000 # discard obsolete argument / guard empty delay slot

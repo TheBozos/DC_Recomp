@@ -89,10 +89,10 @@ int main()
                 const auto expectedCalls = calls;
                 check(original.pc == 0x123450 && !original.leaving, "original span returns normally");
 #ifdef DC_EDIT_STATE
-                check(packetCalls == 1 && calls.size() == 1 && calls[0].pc == 0x177fa0, "reference calls packet and retained EdSetFlag once");
+                check(packetCalls == 2 && calls.size() == 1 && calls[0].pc == 0x177fa0, "reference calls chain/nested terminate and retained EdSetFlag once");
 #else
-                check(packetCalls == 4 && calls.size() == 2 && calls[0].pc == 0x22bdf0 && calls[1].pc == 0x22d0e0,
-                      "reference looks up packet twice and calls/terminates between camera and reload");
+                check(packetCalls == 5 && calls.size() == 2 && calls[0].pc == 0x22bdf0 && calls[1].pc == 0x22d0e0,
+                      "reference looks up packet twice and calls/terminates, including nested SDK terminate");
 #endif
                 const std::vector<uint8_t> finalScene(ram + 0x1d19bb0, ram + 0x1d19bd0);
                 const std::vector<uint8_t> finalLogical(ram + 0x420000, ram + 0x420010);

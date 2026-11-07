@@ -1306,3 +1306,75 @@ DC's qualified engine pin is **`e78883f12f6362cb5570bed55aaa2aa7169d9589`**, con
 the preceding verified base. Engine PR [#73](https://github.com/TheBozos/BozoEngine/pull/73) integrates the
 generic rendering fix and additional Flush regressions with current main; **47/47 suites including GPU
 readback pass** on that integration. Retail/generated assets, raw traces, cards and captures stay local.
+
+## Remaining DUN dispatch and residual-load audit
+
+The ten DUN sites absent from the manual first-visit trace now have **74 controlled dispatch cases**.
+The fixture generator checks the original DUN fingerprint, production patch guards and compiler switch/slot
+facts, then recompiles the exact dispatch spans at their original addresses. Switch landing bodies and
+callees are synthetic. `EquipReAttach` is compiled in full, with controlled lookup and attachment boundaries.
+The harness follows the production dispatcher's register-jump unwind through selected generated resume
+entries; it does not run the scheduler or gameplay.
+
+| Owner / sites | Checked dispatch contract |
+| --- | --- |
+| `MainDraw` `0x1dae898` | Null packet argument to texture reload, followed by object `+0xa0` / slot `+0xac`, retaining object and link address |
+| `MainDraw` `0x1daf5bc` | Six indices and default; actual table and range check |
+| `MoveChara` `0x1db200c`, `0x1db53b8` | Selectors 195–206 (12 entries, two distinct targets) and 0–5; aliases and defaults |
+| `MoveChara` `0x1db6848` | Camera table at object `+0x2b8`, slot `+0x08`, scalar argument 1 |
+| `motionDrive` `0x1db77d8`, `0x1db79a8` | Object `+0xa0`, slot `+0x08`; both real `s0 == 1` gates, with 0/1/2 inputs |
+| `EquipReAttach` `0x1db9604`, `0x1db9628` | Both lookup branches; zero float arguments for slots `+0x18` and `+0x30`; table reloaded after a mutating first callback; final parent attachment |
+| `Run_TrapCircle` `0x1dbfb44` | Ten indices and default; actual table and range check |
+
+Every switch also runs with its first table entry redirected to another known case and to a controlled
+resident callback. Call spans select two different objects/callbacks. Selected-image checks use different
+function tables at the same address and reject an unknown identity. Saved full registers and relevant RAM
+are checked; only synthetic RA-save register `s7` is excluded for extracted spans, and the complete owner's
+stack writes are excluded from its RAM comparison. These checks preserve dynamic dispatch; they do not
+close target sets or establish the callers' earlier state-selection paths or the callees' full behavior.
+
+The audit also reads four named resident tables and checks the exact constructor sequences that install
+them. Their matching slots supply **candidates**, separately from observed targets:
+
+| Table / constructor store | Relevant initialized slots |
+| --- | --- |
+| `CCharacter` `0x2a12b0` / `0x143550` | `+0x08` Step `0x138530`; `+0x18` SetPosition `0x138fb0`; `+0x30` SetRotation `0x139150`; `+0xac` Draw `0x139310` |
+| `CNPCharacter` `0x2a13c0` / `0x156b2c` | Step `0x155fb0`; same position/rotation slots; Draw `0x156540` |
+| `CCamera` `0x2a10b0` / `0x124710` | `+0x08` Step `0x123f30` |
+| `CCameraFollow` `0x2a1090` / `0x124c2c` | `+0x08` Step `0x1247d0` |
+
+Constructor evidence does not prove the object type at any particular DUN site, exclude other derived
+tables, or bound later table/object writers. These methods remain compiled game behavior; this batch
+adds no runtime override or packet substitution.
+
+The compiler facts now export all **eight known interior entry points** (resident eight, TITLE/DUN zero).
+Starting the CFG from those entries as well as function starts reaches all **775 inventory sites**, including
+the two exception-runtime jumps previously missed by the 773-site walk. The audit rejects entries inside
+guarded spans, entries bypassing replaced bodies, and admitted direct tail jumps/branches that would
+bypass native owners. This last check matters because the pinned emitter routes `override` calls through
+the runtime, while a direct tail transfer can invoke the original compiled body. No such bypass is found;
+all installed owners also have an external dispatch declaration in resident and overlay codegen.
+
+All **287 residual direct packet-handle loads** now have an explicit disposition:
+
+| Image | Replaced native body | Guarded skipped span |
+| --- | ---: | ---: |
+| Resident | 115 | 95 |
+| TITLE | 0 | 74 |
+| DUN | 0 | 3 |
+
+The three DUN loads are `0x1dae324` behind guard `0x1dae31c` (resume `0x1dae334`), and
+`0x1dc1728` / `0x1dc1738` behind guard `0x1dc1720` (resume `0x1dc1744`).
+
+The report records the guard/resume addresses for each skipped load and rejects an unaccounted load.
+All known entries are checked; none reopens these spans. The 374 null-handle constants remain, with zero
+admitted GP-relative handle/base reads or writes and zero active packet-SDK callers. Arbitrary dynamic
+interior targets, pointer aliases and mutable target writers remain open. The global reset stays retired;
+model/cloth allocation extents still require their own identity/lifetime migration.
+
+The normal build passes **69/69 suites**, and the game-free build passes **17/17**. Local negative audits
+check constructor, external-dispatch, interior-entry and direct-tail rejection. Re-auditing the preserved
+manual trace leaves coverage unchanged: **DUN 33/43**, resident 226/601, TITLE 19/131, with 497 sites still
+unobserved. Controlled cases are not added to those counts. The engine pin remains
+`e78883f12f6362cb5570bed55aaa2aa7169d9589`; runtime and production patches are unchanged. Evidence stays
+local under `build/native-cleanup25/`; no new visual, audio or gameplay qualification is claimed.

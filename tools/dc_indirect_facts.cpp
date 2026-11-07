@@ -35,7 +35,10 @@ int main(int argc, char **argv)
     for (const auto &f : analysis.functions())
     {
         if (comma) out << ','; comma = true;
-        out << "{\"start\":" << f.start << ",\"end\":" << f.end << ",\"sites\":[";
+        out << "{\"start\":" << f.start << ",\"end\":" << f.end << ",\"entries\":[";
+        bool entryComma = false;
+        for (uint32_t entry : f.extraEntries) { if (entryComma) out << ','; entryComma = true; out << entry; }
+        out << "],\"sites\":[";
         bool siteComma = false;
         for (uint32_t pc = f.start; pc + 4 <= f.end; pc += 4)
         {

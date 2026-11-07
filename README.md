@@ -229,7 +229,10 @@ original/adapted cases check their retained vectors, shadow modes, model calls a
 shadow rendering defect remains open.
 `CDebugFont::Draw` now composes its 8-by-16 glyphs into an owned native picture, retaining the original text loop
 and final sprite. Another 192 comparisons check every composed texel against the original copy rectangles.
-The global packet reset remains while the resident startup and TITLE/DUN overlays still have packet-producing paths.
+The global packet reset and admitted direct handle/base loads are retired. The audit accounts for 287 residual
+handle loads in replaced bodies or guarded skipped spans, including compiler-known interior entries. Another
+74 controlled cases exercise the ten DUN dispatch sites absent from the manual trace; live DUN coverage remains
+33/43 sites. Mutable target writers, pointer aliases and model/cloth allocation migration remain open.
 
 ## Disc facts
 

@@ -10,6 +10,9 @@ import pathlib
 import struct
 import subprocess
 import collections
+import sys
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from symtab_map import elf_symbols
 
 # These ordinary native hooks call their generated body. Registry ownership
 # alone therefore cannot retire that body's calls, loads or indirect sites.
@@ -55,8 +58,10 @@ def image_words(path, patches):
     return lambda pc: replacements[pc] if pc in replacements else word(pc)
 
 
-def calls(word, start, end, control=None, visited=None):
-    todo, seen, found, indirect = [start], set(), [], []
+def calls(word, start, end, control=None, visited=None, entry_points=()):
+    if any(e & 3 or not start <= e < end for e in entry_points):
+        raise ValueError('compiler interior entry is outside its function')
+    todo, seen, found, indirect = [start, *entry_points], set(), [], []
     while todo:
         pc = todo.pop()
         if pc in seen or not start <= pc < end:
@@ -96,7 +101,10 @@ def calls(word, start, end, control=None, visited=None):
             if imm & 0x8000:
                 imm -= 65536
             if op not in (5, 21) or rs != rt:
-                todo.append(pc + 4 + imm * 4)
+                target = pc + 4 + imm * 4
+                if not start <= target < end or (op == 1 and rt in (16, 17, 18, 19)):
+                    found.append((pc, target))
+                todo.append(target)
             if op not in (4, 20) or rs != rt:
                 todo.append(pc + 8)
             seen.add(pc + 4)
@@ -135,6 +143,31 @@ def dispatch_slot_chain(site, word):
     return {'pointer_load': before, 'object_reg': parent >> 21 & 31,
             'object_offset': offset, 'slot_offset': site['slot_offset'],
             'limit': 'adjacent loads only; object/table writers and target set remain open'}
+
+
+def declared_dun_tables(root, images):
+    """Four constructor-established table candidates, not a whole-program type proof."""
+    symbols = list(elf_symbols((root / 'game/SCUS_971.11').read_bytes()))
+    objects = {name: (pc, size) for name, pc, size, kind, _ in symbols if kind == 1}
+    names = {pc: name for name, pc, _, kind, _ in symbols if kind == 2}
+    word = image_words(images / 'dc.elf', root / 'recomp/dc_native.patches')
+    tables = []
+    for name, field, writer, store, slots in (
+            ('__vt__10CCharacter', 0xa0, 0x143548, 0xae0200a0, (8,0x18,0x30,0xac)),
+            ('__vt__12CNPCharacter', 0xa0, 0x156b24, 0xae0200a0, (8,0x18,0x30,0xac)),
+            ('__vt__7CCamera', 0x2b8, 0x124708, 0xac8202b8, (8,)),
+            ('__vt__13CCameraFollow', 0x2b8, 0x124c24, 0xae0202b8, (8,))):
+        table, size = objects[name]
+        expected = (0x3c020000 | ((table + 0x8000) >> 16), 0x24420000 | (table & 0xffff), store)
+        if tuple(word(writer + i * 4) for i in range(3)) != expected:
+            raise ValueError('DUN candidate table constructor changed')
+        if max(slots) + 4 > size:
+            raise ValueError('DUN candidate slot exceeds its declared table')
+        tables.append({'symbol': name, 'table': table, 'object_offset': field, 'constructor_store': writer + 8,
+                       'slots': [{'offset': slot, 'target': word(table + slot),
+                                  'symbol': names.get(word(table + slot), 'unclassified')} for slot in slots],
+                       'limit': 'constructor candidates only; other derived types, object provenance and later writers remain open'})
+    return tables
 
 
 def image_coverage(facts, overrides, observed_sites, edges):
@@ -198,9 +231,12 @@ def main():
               'retired_initializer_callers': [], 'packet_global_accesses': [],
               'null_handle_constants': [],
               'residual_handle_loads': [],
+              'compiler_interior_entries': [],
+              'direct_native_tail_bypasses': [],
               'limit': 'compiler switch cases expand CFG; fallback targets, mutable slots and inline cursor dataflow remain open; traces prove observed edges only'}
-    facts, entries, externals, skipped = {}, {}, {}, {}
+    facts, entries, externals, skipped, image_externals = {}, {}, {}, {}, {}
     if args.images:
+        report['dun_declared_table_candidates'] = declared_dun_tables(root, args.images)
         # A registry entry cannot intercept a generated direct C++ call unless
         # codegen declared it external. Check resident and overlay dispatch.
         for filename in ('dc_externals.txt', 'dc_overlay_externals.txt'):
@@ -208,8 +244,17 @@ def main():
                         if len(fields := line.split()) >= 2 and fields[0] == 'override'}
             if not guarded <= declared:
                 raise ValueError(f'{filename} would bypass a production rejection boundary')
-            externals.update((int(fields[1], 16), fields[0]) for line in (args.images / filename).read_text().splitlines()
-                             if len(fields := line.split()) >= 2 and fields[0] in ('override', 'stub'))
+            dispatched = {int(fields[1], 16) for line in (args.images / filename).read_text().splitlines()
+                          if len(fields := line.split()) >= 2 and fields[0] in ('override', 'stub')}
+            # FreeHost binds registry owners before SDK names for either external
+            # declaration. A compiled direct call with no boundary would bypass it.
+            if not overrides <= dispatched:
+                raise ValueError(f'{filename} would bypass an installed native owner')
+            kinds = {int(fields[1], 16): fields[0] for line in (args.images / filename).read_text().splitlines()
+                     if len(fields := line.split()) >= 2 and fields[0] in ('override', 'stub')}
+            image_externals['dc' if filename == 'dc_externals.txt' else 'title'] = kinds
+            externals.update(kinds)
+        image_externals['dun'] = image_externals['title']
         for image in ('dc', 'title', 'dun'):
             names = {pc: name for name, pc, _ in (main_symbols if image == 'dc' else symbols(root / f'recomp/maps/dc_{image}.csv'))}
             compiled = json.loads((args.images / f'{image}.indirect.json').read_text())['functions']
@@ -223,6 +268,10 @@ def main():
                 chain = dispatch_slot_chain(site, word)
                 if chain:
                     site['table_slot_chain'] = chain
+                    if image == 'dun':
+                        chain['declared_table_candidates'] = [dict(table_symbol=t['symbol'], table=t['table'], **slot)
+                            for t in report['dun_declared_table_candidates'] if t['object_offset'] == chain['object_offset']
+                            for slot in t['slots'] if slot['offset'] == chain['slot_offset']]
             for line in (root / f'recomp/{image}_native.patches').read_text().splitlines():
                 fields = line.split('#')[0].split()
                 if not fields:
@@ -237,13 +286,24 @@ def main():
                 if start in sdk:
                     continue
                 visited = set()
-                found, indirect = calls(word, start, end, facts[image], visited)
+                extra = function['entries']
+                for entry in extra:
+                    if any(a <= entry < b for a, b in skipped[image]):
+                        raise ValueError('compiler interior entry bypasses a guarded skipped span')
+                    report['compiler_interior_entries'].append({'image': image, 'owner': hex(start), 'entry': hex(entry)})
+                found, indirect = calls(word, start, end, facts[image], visited, extra)
                 native_owned = replaced_body(image, start, overrides)
+                if native_owned and any(entry not in overrides for entry in extra):
+                    raise ValueError('compiler interior entry bypasses a replaced native body')
                 for pc in range(start, end, 4):
                     if word(pc) & 0xffe0ffff == 0x8f808bd4:
+                        guards = [{'guard': hex(a - 4), 'resume': hex(b)} for a, b in skipped[image] if a <= pc < b]
+                        status = 'replaced_body' if native_owned else 'admitted' if pc in visited else 'guarded_span' if guards else 'unaccounted'
                         report['residual_handle_loads'].append({'image': image, 'owner': hex(start), 'pc': hex(pc),
-                            'status': 'replaced_body' if native_owned else 'cfg_unreached' if pc not in visited else 'admitted',
-                            'limit': 'CFG-unreached is not proof against an indirect entry into the interior'})
+                            'status': status, 'guards': guards,
+                            'limit': 'all compiler-known entries checked; arbitrary dynamic interior targets and aliases remain open'})
+                        if status == 'unaccounted':
+                            raise ValueError('residual handle load lacks a native owner or explicit skip guard')
                 if not native_owned:
                     for pc in sorted(visited):
                         w = word(pc)
@@ -253,6 +313,15 @@ def main():
                                                                     'site': hex(pc), 'offset': hex(w & 0xffff), 'access': access})
                             raise ValueError('admitted code still reads/writes a retired packet handle/base global')
                 for pc, target in found:
+                    w = word(pc)
+                    linked = w >> 26 == 3 or (w >> 26 == 1 and (w >> 16 & 31) in (16, 17, 18, 19))
+                    # An `override` intercepts calls, but the pinned emitter's
+                    # direct tail jumps/branches can invoke the generated body.
+                    if (not native_owned and not linked and replaced_body('dc', target, overrides)
+                            and image_externals[image].get(target) != 'stub'):
+                        report['direct_native_tail_bypasses'].append({'image': image, 'owner': hex(start),
+                                                                     'site': hex(pc), 'target': hex(target)})
+                        raise ValueError('admitted direct tail transfer bypasses a native owner')
                     if target == 0x12c720:
                         report['retired_initializer_callers'].append({'image': image, 'owner': hex(start), 'site': hex(pc)})
                         if not native_owned:
@@ -271,6 +340,7 @@ def main():
                                                      'details': [facts[image][pc] for pc in indirect]})
         report['indirect_summary'] = dict(collections.Counter(
             s['category'] for owner in report['indirect_sites'] for s in owner['details']))
+        report['residual_handle_summary'] = dict(collections.Counter(s['status'] for s in report['residual_handle_loads']))
         report['inventory_summary'] = dict(collections.Counter(f['category'] for image, group in facts.items()
             for f in group.values() if f['kind'] != 'return' and not replaced_body(image, f['owner'], overrides)))
         reached = {(owner['image'], s['pc']) for owner in report['indirect_sites'] for s in owner['details']}
@@ -304,7 +374,9 @@ def main():
                 elif target_image in entries:
                     owner = next((f for f in entries[target_image] if f['start'] <= target < f['end']), None)
                     if owner:
-                        disposition = 'compiled_entry' if target == owner['start'] else 'unresolved_compiled_interior'
+                        disposition = ('compiled_entry' if target == owner['start'] else
+                                       'compiled_extra_entry' if target in owner['entries'] else
+                                       'unresolved_compiled_interior')
                 if disposition == 'unclassified_address' and target in externals:
                     disposition = 'unresolved_declared_external'
                 observed_sites.add((image, edge['pc']))

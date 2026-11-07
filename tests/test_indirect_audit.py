@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
 from dc_instrument_indirect import instrument
-from dc_packet_audit import replaced_body, dispatch_slot_chain, image_coverage, guarded_skip_ranges
+from dc_packet_audit import calls, replaced_body, dispatch_slot_chain, image_coverage, guarded_skip_ranges
 
 ANALYZER, TRACER = sys.argv[1:3]
 del sys.argv[1:3]
@@ -25,7 +25,8 @@ def fixture(path):
              0x00431021, 0x8c420000, 0x00400008, 0, 0x03e00008, 0,
              0x03e00008, 0, 0x00a0f809, 0, 0x03e00008, 0]
     code = struct.pack('<' + 'I' * len(words), *words)
-    data = struct.pack('<2I', 0x1028, 0x1030)
+    # Third word is an external code pointer into the symbol, outside the switch.
+    data = struct.pack('<3I', 0x1028, 0x1030, 0x1038)
     strings = b'\0synthetic\0'
     syms = bytes(16) + struct.pack('<IIIBBH', 1, 0x1000, len(code), 0x12, 0, 1)
     names = b'\0.text\0.data\0.strtab\0.symtab\0.shstrtab\0'
@@ -37,7 +38,7 @@ def fixture(path):
     out = bytearray(sections_at)
     out[:len(header + ph)] = header + ph
     out[0x100:0x100 + len(code)] = code
-    out[0x200:0x208] = data
+    out[0x200:0x200 + len(data)] = data
     out[0x210:0x210 + len(strings)] = strings
     out[0x220:0x220 + len(syms)] = syms
     out[0x240:0x240 + len(names)] = names
@@ -48,6 +49,24 @@ def fixture(path):
 
 
 class IndirectAudit(unittest.TestCase):
+    def test_compiler_interior_entry_reopens_guarded_code(self):
+        # An unconditional guard normally makes this packet load unreachable.
+        words = {0x1000:0x10000003, 0x1004:0, 0x1008:0x8f848bd4,
+                 0x100c:0, 0x1010:0x03e00008, 0x1014:0}
+        seen = set()
+        calls(words.__getitem__, 0x1000, 0x1018, visited=seen)
+        self.assertNotIn(0x1008, seen)
+        seen.clear()
+        calls(words.__getitem__, 0x1000, 0x1018, visited=seen, entry_points=[0x1008])
+        self.assertIn(0x1008, seen)
+        for invalid in (0xffc, 0x1009, 0x1018):
+            with self.assertRaises(ValueError):
+                calls(words.__getitem__, 0x1000, 0x1018, entry_points=[invalid])
+        # A cross-owner branch is a direct tail transfer too, even without J.
+        words[0x1000] = 0x100003ff  # b 0x2000
+        found, _ = calls(words.__getitem__, 0x1000, 0x1018)
+        self.assertEqual(found, [(0x1000, 0x2000)])
+
     def test_dun_slot_and_module_coverage(self):
         # CCharacter-style object+0xa0 table -> slot+0xac, not an immutable target proof.
         site = {'reg': 25, 'definition': 0x1004, 'definition_op': 'lw',
@@ -80,6 +99,7 @@ class IndirectAudit(unittest.TestCase):
             fixture(source); patches.write_text('')
             subprocess.run([ANALYZER, str(source), str(patches), str(target)], check=True)
             functions = {f['start']: f for f in json.loads(target.read_text())['functions']}
+            self.assertIn(0x1038, functions[0x1000]['entries'])
             sites = functions[0x1000]['sites']
             switch = next(s for s in sites if s['pc'] == 0x1020)
             self.assertEqual(switch['kind'], 'compiler_switch')

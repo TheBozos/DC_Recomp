@@ -238,6 +238,9 @@ Complete compiled assignments pass 24 synthetic cases preserving their own type'
 stores and callee effects remain explicit; these checks do not establish immutable dispatch tables.
 Bulk/callee follow-up includes the DUN file/BSS loading writes and 45 embedded effect vptrs; four raw
 copies carry 36 of those vptrs. Unknown pack-derived extents and bounded callee exploration remain open.
+The three `LoadChara2` copies now have guarded size/cursor contracts and a read-only pack inventory.
+Current artifact sizes cannot directly reach dispatch data under valid arena/cursor preconditions;
+post-copy allocation checks, stale sizes and possible corruption of later allocator state remain open.
 
 ## Disc facts
 

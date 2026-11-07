@@ -466,6 +466,8 @@ def audit_images(root, images, functions, overrides, replaced_body, image_words,
                                  'data_pointer_references':data_pointer_references(images/f'{image}.elf',regions),
                                  'overlay_data_limit':'DUN-named data ranges require selected DUN; TITLE coincidences are not DUN runtime writes'}
     result['bulk_calls']=bulk_calls
+    from dc_loadchara_audit import loadchara_contract
+    result['loadchara_copy_contract']=loadchara_contract(programs,regions)
     result['callee_writes']=contextual_writes(programs,seed_calls,regions,objects,gp,roots)
     result['admitted_bulk_packet_overlaps']=[b for b in bulk_calls if not b['native_replaced'] and
                                           any(r['region'].startswith('packet:') for r in b['overlaps'])]

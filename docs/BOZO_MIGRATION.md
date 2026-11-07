@@ -1030,3 +1030,82 @@ The updated local CFG audit applies all three image patch lists and finds no rem
 reachable calls to the packet SDK in either overlay (`build/native-cleanup21/reachable-packet-callers.txt`).
 It does not prove indirect-call or all-runtime-path coverage. Resident startup/frame/loading producers
 remain, including `MGInitVif1Packet`, `MGBeginFrame` and `init_now_loading`; the global packet reset stays.
+
+## Resident packet owners and global reset retirement
+
+This follow-up removes the remaining admitted resident VIF1 packet initialization/reset/static-chain work.
+Eight guarded words in `dc_native.patches` adapt four owners:
+
+| Owner | Adaptation | Retained behavior |
+| --- | --- | --- |
+| `MGInitVif1Packet` `0x12c720` | Skip two `Init` and two `Reset` calls, `0x12c7a8` to `0x12c7f0` | Original input alignment and global buffer metadata |
+| `MGBeginFrame` `0x12cd90` | Remove the `Reset` call at `0x12ce90` | Frame-dependent handle selection, colors, matrix/vector initialization, clear/depth calls |
+| `main` `0x1410b0` | Skip static chain call, `0x1416bc` to `0x1416d4` | Native `SetEnv` and following main-loop bookkeeping |
+| `init_now_loading` `0x153fc0` | Skip packet `Init`, `0x1542b0` to `0x1542c8` | Asset-load/failure paths, setup metadata, loading state and callback registration |
+
+`sceVif1PkReset` only reloads the current cursor from the stored base and clears the open-tag pointer.
+Neither operation has a remaining admitted consumer after these changes and the preceding producer
+retirements. The per-frame global reset and startup resets are therefore removed. The SDK implementations
+remain compiled for explicit original-code fixtures; the production port rejects all 27 GIF/VIF1 packet
+builder entries before reading guest pointers or changing guest CPU/RAM. Unexpected direct or indirect
+entries now report the missing native producer instead of executing a packet builder.
+
+The audit also separates three previously obscured cases:
+
+- `StoreImage` `0x12c800`, the console screenshot path, read a main packet object's stored base before
+  opening files, submitting DMA and eventually reaching unsupported readback. It now rejects at its owner,
+  before those effects. This does **not** implement screenshots. It no longer supplies a reason to retain
+  packet initialization/reset. Native renderer captures used for qualification are a separate host facility.
+- `DrawMaru` `0x150bb0` and `MakeFukidashi_sub` `0x150f50` still contain retail packet geometry. Their seven
+  direct incoming edges are confined to the old balloon subtree: the latter helper and `MakeFukidashi`
+  `0x151ad0`. The installed native `balloonHook` already owns the complete shape/tail and does not call
+  these helpers. Their legacy entries now reject explicitly, preserving that admission boundary without
+  pretending to implement their standalone calling conventions.
+- Packet-handle selection, `GetVif1Packet`, buffer address/alignment globals, legacy allocations and
+  compatibility arguments remain. Native drawing/copy hooks ignore the packet argument. Native SDK DMA
+  completion/sync services in the pinned engine do not read VIF1/GIF source bytes or retain packet lengths/
+  chains. These handles are bookkeeping, not a need to rewind a writable packet. Display/setup metadata,
+  native-copy identifiers and allocation extents remain separate cleanup work.
+
+`tools/dc_packet_audit.py` validates all production patch guards, walks direct calls/tail calls/branches in
+the three prepared images and compares packet callers with the **actual installed registry** exported by
+`dc-packet-audit-tests`. It also checks that resident/overlay codegen declares every rejection entry external,
+so a direct generated C++ call cannot bypass it. It reports **zero active direct-CFG packet callers**, 51 owners covered by native
+replacement or explicit rejection, and the seven balloon edges above. It also reports 341 owners with
+unresolved indirect sites. This is not a whole-program indirect-call or inline-cursor dataflow proof.
+The production rejection boundaries close the packet SDK fallback; additional game routes still require
+qualification and can expose unsupported paths.
+
+Qualification:
+
+- **62/62 local suites pass**, including 288 original/adapted comparisons: complete packet-init,
+  begin-frame and loading-init functions, and one exact mid-function span in `main`. Retained float/vector/
+  matrix math and callback registration execute compiled originals. Native clear/setup/asset/file calls
+  are controlled boundaries comparing consumed arguments and logical effects. Coverage includes both
+  frame handles, clear modes, alignment/sign edges, loading selectors, early exit and load failure.
+- Adapted owners make zero packet-builder calls with poisoned packet objects/output and an inaccessible
+  global handle where selection is not itself retained. All other non-stack RAM, ordered native inputs,
+  saved full registers/FPU state and return behavior match. The main span reserves `s7` and legitimately
+  sets `s4`; those two registers are excluded from its saved-register assertion. Retired packet storage
+  and caller-volatile SDK results are intentional comparison differences; the main loop overwrites `v0`
+  at its following diagnostic sample.
+- Thirty production rejection entries (27 SDK builders, screenshot owner and two legacy balloon helpers)
+  reject inaccessible pointers with no CPU/RAM mutation. Their installation also wins over the feeder
+  probe, which must not resurrect compiled originals. This guard test runs without retail assets in CI.
+- Making SDK entries explicit externals exposes nested `Terminate` calls in five existing references.
+  Their exact expected call counts are updated; native calls remain zero and the RAM/semantic assertions
+  are unchanged. Local evidence is under `build/native-cleanup22/qualified-tests.log`,
+  `qualified-fixtures.log` and `packet-audit.json`; no retail/generated data are committed.
+- **16/16 game-free suites pass** (`qualified-disc-free.log`). A local fault injection restoring only
+  the removed begin-frame reset call is detected by the audit walker (`reset-fault-injection.txt`).
+- Final **5,800-frame headless/windowed inventory routes complete** with the production rejection guards
+  enabled, zero register/unknown accesses, zero VU0 calls and zero GIF submissions. Native VIF1 completion
+  counts are 5,686 / 6,072 and sync counts 6,884 / 7,270 (`qualified-headless.log`, `qualified-gameplay.log`).
+  These remain bounded route checks, not dungeon/combat or full-game coverage. Eight captures are retained
+  without visual inspection or a parity claim. The main-loop reset is exercised by these routes; fixture
+  coverage is still the specific evidence for loading failure/selectors and other branches.
+- Headless 48 kHz stereo PCM contains 4,686,527 frames, RMS 3,599.338, tail RMS 3,496.547, peak 28,775.
+  Windowed PCM contains 5,100,894 frames, RMS 3,572.501, tail RMS 3,005.292, peak 32,766. Audio is active;
+  subjective listening and exact timing remain unqualified (`qualified-evidence.py`).
+
+BozoEngine remains pinned at `4a8f70a5021cbb3429800a02259ae7b816581ee0`.

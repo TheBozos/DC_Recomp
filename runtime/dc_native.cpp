@@ -4515,6 +4515,32 @@ namespace dc::native
                 if ((call.original = runtime.functions.generated(call.address)))
                     registry.registerFunction(call.address, &blobShadowHook);
         }
+        // balloonHook owns the complete shape/tail. These private retail
+        // children are only called by that replaced parent (or one another);
+        // reject an unexpected entry instead of reviving their packet geometry.
+        for (uint32_t address : {0x00150BB0u, 0x00150F50u})
+            registry.registerFunction(address, [](uint8_t *, R5900Context *, Runtime *) {
+                throw std::runtime_error("native graphics: legacy balloon helper requires the native MakeFukidashi owner");
+            });
+        // Every admitted draw/asset producer now owns its native effects. Keep
+        // the retired SDK executable only for explicit original-code fixtures;
+        // a missed/indirect production path must fail before touching a packet.
+        for (uint32_t address : {0x00120750u, 0x00120760u, 0x00120770u, 0x001207C8u,
+             0x00120840u, 0x001208D8u, 0x00120950u, 0x00120968u, 0x00120980u, 0x00120A20u,
+             0x00120A48u, 0x00120C08u, 0x00120C18u, 0x00120C28u, 0x00120C80u, 0x00120CD8u,
+             0x00120D70u, 0x00120DE0u, 0x00120E38u, 0x00120E90u, 0x00120EC0u, 0x00120ED8u,
+             0x00120F78u, 0x00120F90u, 0x00121010u, 0x00121028u, 0x00121058u})
+            registry.registerFunction(address, [](uint8_t *, R5900Context *ctx, Runtime *) {
+                char message[128];
+                std::snprintf(message, sizeof(message), "native graphics: retired packet builder reached at 0x%08x", ctx->pc);
+                throw std::runtime_error(message);
+            });
+        // The console screenshot path used a packet base before opening files
+        // and ultimately requesting an unsupported GS readback. Reject at its
+        // owner, before those effects or any access to a retired packet object.
+        registry.registerFunction(0x0012C800u, [](uint8_t *, R5900Context *, Runtime *) {
+            throw std::runtime_error("native graphics: console StoreImage requires a native screenshot owner");
+        });
         g_enabled = true;
         std::fprintf(stderr, "[dc:native] 3D models drawn natively from the game's MDT models, RenderInfo and textures; VU1 runs nothing\n");
     }

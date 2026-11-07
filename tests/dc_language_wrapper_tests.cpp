@@ -104,7 +104,7 @@ int main()
                     auto original = context();
                     language_ref_function_table[0].function(ram, &original, &rt);
                     check(original.pc == 0x123450 && !original.leaving, "original returns normally");
-                    check(packetCalls == 2, "original calls and terminates its static chain");
+                    check(packetCalls == 3, "original calls and terminates its static chain, including nested SDK terminate");
                     const auto expectedCalls = calls;
                     auto expected = initial;
                     std::memcpy(expected.data() + fade, ram + fade, 12);

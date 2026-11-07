@@ -64,11 +64,47 @@ report-linked stalls in the stable window, rather than all possible pauses.
 
 ## Qualification status
 
-The final rebuild passes **78/78 normal suites** and **21/21 disc-free suites**,
+The final rebuild passes **79/79 normal suites** and **21/21 disc-free suites**,
 including generated-texture GPU, balloon GPU and model-lifetime regressions.
-Both paired timing runs complete normally. A fresh user-controlled quiet run and
-GitHub CI remain follow-up checks. Exact sky texture/colour and full-game visual
-parity remain open.
+Both paired timing runs complete normally, and both GitHub CI jobs pass. The
+subsequent user-controlled quiet run completed 48,292 frames with zero register
+accesses, unknown accesses, VU0 calls or GIF submissions. The user still reports
+continuously uneven motion. The existing counter timestamps precede rendering
+and buffer swap, so a 60 FPS reading does not settle presentation smoothness.
+A fullscreen comparison was attempted as the user exited and is inconclusive.
+One requested live draw dump caused an approximately 19-second diagnostic pause;
+that interval is excluded from game-performance conclusions.
+
+The same run exposed narrow transparent gaps between minimap tiles, and a later
+capture shows a vertical seam through a dialog balloon. Both use native rectangle
+helpers that shorten the right edge by 1/16 logical pixel. The generated dialog
+owner calls the four-colour rectangle helper for adjoining pieces. At the user's
+1920 by 1017 window size, the map's boundaries at logical x=460 and 476 can expose
+screen columns 1256 and 1290. Native rectangular helpers now use the full right
+boundary, preserving the existing nearest-filter UV inset. The GPU regression
+executes five real rectangle owners at four picture heights (448, 720, 1017 and
+1080), with adjacent translucent tiles and a contrasting neighboring atlas tile.
+Ten fractional-scale cases failed before the correction; all twenty pass after
+it. In the 1017-high fixture the previous gaps at columns 1256 and 1290 are covered
+without overlapping alpha or exposing the neighboring atlas tile. Existing
+balloon-mask and generated-flame GPU suites also pass. Fresh in-game map/dialog
+captures and continuous-motion qualification remain open.
+
+`--fullscreen` and `--no-vsync` expose presentation comparisons without changing
+the default windowed, VSync-enabled behavior. They do not themselves establish a
+smoothness fix.
+
+Two later 4,600-frame runs use identical starting cards, a movement script and a
+local diagnostic executable that buffers presentation samples until shutdown.
+Only VSync differs. In game frames 3300 through 4299, both record 1,000 samples,
+zero repeated or skipped submitted serials and no swap-return interval above
+25 ms. The 95th-percentile swap-return intervals are 18.02 ms with VSync and
+17.99 ms without it. This does not explain the reported continuous unevenness.
+Swap return is not a scanout timestamp, and the sampled geometry fingerprint is
+not a full rendered-image comparison. The observer is local only; engine source
+and the normal executable are restored without it.
+
+Exact sky texture/colour and full-game visual parity remain open.
 
 Local evidence is under `build/native-cleanup30/` and the two manual-session
 directories referenced by its handoff. Assets, cards, generated code and captures

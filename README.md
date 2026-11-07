@@ -207,6 +207,8 @@ engine with game-free fixtures and validates the offline tools/scripts; retail g
 `--pad-script <file>` accepts entries such as `1200:START/6,1500:CROSS/6`; `--live-pad <file>` reloads changed script
 text starting at the current game frame. `--frames 0` runs until the window closes (the window's default).
 `--capture-dir`, `--capture-frame` and `--wav` provide native captures. There is no fallback switch.
+`--fullscreen` starts fullscreen (F11 toggles it); `--no-vsync` disables VSync for presentation comparisons.
+The default remains windowed with VSync enabled.
 `--profile-io` prints remaining register accesses by guest PC/address after a bounded run; the validated Norune route
 prints a zero total. The guarded adaptations in `recomp/dc_native.patches` are applied automatically by CMake.
 MDT creation/remaking, shadow-model and cloth preparation now retain native asset bookkeeping without serializing

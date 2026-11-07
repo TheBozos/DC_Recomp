@@ -2653,11 +2653,13 @@ namespace dc::native
             return {static_cast<int32_t>(rd32(rdram, address)), static_cast<int32_t>(rd32(rdram, address + 4u)),
                     static_cast<int32_t>(rd32(rdram, address + 8u)), static_cast<int32_t>(rd32(rdram, address + 12u))};
         }
-        // A sprite: destination d (DC's view), texels from (u0, v0) to (u1, v1), one colour; the right edge one 1/16 short
-        // as the game writes it (0x6BFF).
+        // Native triangles cover the destination's full half-open rectangle.
+        // Carrying over the console's one-subpixel right-edge subtraction leaves
+        // uncovered pixel centres between adjoining map/dialog pieces at scale.
+        // Atlas sampling is handled independently by drawStrip's UV inset.
         void drawSprite(const uint8_t *rdram, uint32_t record, const Rect &d, float u0, float v0, float u1, float v1, uint32_t rgba)
         {
-            const float x0 = kOriginX + static_cast<float>(d.x), x1 = kOriginX + static_cast<float>(d.x + d.w) - 1.0f / 16.0f;
+            const float x0 = kOriginX + static_cast<float>(d.x), x1 = kOriginX + static_cast<float>(d.x + d.w);
             const float y0 = kOriginY + static_cast<float>(d.y) / 2.0f, y1 = kOriginY + static_cast<float>(d.y + d.h) / 2.0f;
             const Corner c[4] = {{x0, y0, u0, v0, rgba}, {x1, y0, u1, v0, rgba}, {x0, y1, u0, v1, rgba}, {x1, y1, u1, v1, rgba}};
             drawStrip(rdram, record, c);
@@ -2703,7 +2705,7 @@ namespace dc::native
             const Rect d = rectAt(rdram, getRegU32(ctx, 6)), src = rectAt(rdram, getRegU32(ctx, 7));
             const uint32_t tl = rd32(rdram, getRegU32(ctx, 8)), tr = rd32(rdram, getRegU32(ctx, 9)), bl = rd32(rdram, getRegU32(ctx, 10)),
                            br = rd32(rdram, getRegU32(ctx, 11));
-            const float x0 = kOriginX + static_cast<float>(d.x), x1 = kOriginX + static_cast<float>(d.x + d.w) - 1.0f / 16.0f;
+            const float x0 = kOriginX + static_cast<float>(d.x), x1 = kOriginX + static_cast<float>(d.x + d.w);
             const float y0 = kOriginY + static_cast<float>(d.y) / 2.0f, y1 = kOriginY + static_cast<float>(d.y + d.h) / 2.0f;
             const float u0 = static_cast<float>(src.x), v0 = static_cast<float>(src.y), u1 = static_cast<float>(src.x + src.w),
                         v1 = static_cast<float>(src.y + src.h);
@@ -2723,7 +2725,7 @@ namespace dc::native
         {
             ctx->pc = getRegU32(ctx, 31);
             const Rect d = rectAt(rdram, getRegU32(ctx, 5));
-            const float x0 = kOriginX + static_cast<float>(d.x), x1 = kOriginX + static_cast<float>(d.x + d.w) - 1.0f / 16.0f;
+            const float x0 = kOriginX + static_cast<float>(d.x), x1 = kOriginX + static_cast<float>(d.x + d.w);
             const float y0 = kOriginY + static_cast<float>(d.y) / 2.0f, y1 = kOriginY + static_cast<float>(d.y + d.h) / 2.0f;
             const Corner c[4] = {{x0, y0, 0, 0, rd32(rdram, getRegU32(ctx, 6))}, {x1, y0, 0, 0, rd32(rdram, getRegU32(ctx, 7))},
                                  {x0, y1, 0, 0, rd32(rdram, getRegU32(ctx, 8))}, {x1, y1, 0, 0, rd32(rdram, getRegU32(ctx, 9))}};
@@ -2864,7 +2866,7 @@ namespace dc::native
                     if (record != 0u)
                     {
                         // The bottom edge one 1/16 short as the table writes it (0x78FF).
-                        const float x0 = kOriginX + static_cast<float>(d.x), x1 = kOriginX + static_cast<float>(d.x + d.w) - 1.0f / 16.0f;
+                        const float x0 = kOriginX + static_cast<float>(d.x), x1 = kOriginX + static_cast<float>(d.x + d.w);
                         const float y0 = kOriginY + static_cast<float>(d.y) / 2.0f;
                         const float y1 = kOriginY + static_cast<float>(d.y + d.h) / 2.0f - 1.0f / 16.0f;
                         const float u1 = u + static_cast<float>(sh(6)), v1 = v + static_cast<float>(sh(7));

@@ -66,6 +66,10 @@ int main(int argc, char **argv)
         else if (a == "--profile-io")
             options.profileIo = true;
 #ifdef DC_WITH_WINDOW
+        else if (a == "--no-vsync")
+            windowOptions.vsync = false;
+        else if (a == "--fullscreen")
+            windowOptions.fullscreen = true;
         else if (a == "--capture-dir" && i + 1 < argc)
             windowOptions.captureDir = argv[++i];
         else if (a == "--capture-frame" && i + 1 < argc)
@@ -75,7 +79,8 @@ int main(int argc, char **argv)
         {
             std::fprintf(stderr, "Usage: dc [--frames N] [--headless] [--elf FILE] [--iso FILE]\n"
                                  "          [--card-dir DIR] [--pad-script FILE | --live-pad FILE] [--wav FILE]\n"
-                                 "          [--out FILE] [--capture-dir DIR] [--capture-frame N] [--profile-io]\n");
+                                 "          [--out FILE] [--capture-dir DIR] [--capture-frame N] [--profile-io]\n"
+                                 "          [--fullscreen] [--no-vsync]\n");
             return a == "--help" ? 0 : 2;
         }
     }

@@ -4541,6 +4541,13 @@ namespace dc::native
         registry.registerFunction(0x0012C800u, [](uint8_t *, R5900Context *, Runtime *) {
             throw std::runtime_error("native graphics: console StoreImage requires a native screenshot owner");
         });
+        registry.registerFunction(0x0012C720u, [](uint8_t *, R5900Context *, Runtime *) {
+            throw std::runtime_error("native graphics: retired packet-buffer initializer reached");
+        });
+        registry.registerFunction(0x0012E280u, [](uint8_t *, R5900Context *ctx, Runtime *) {
+            setReturnS32(ctx, 0); // compatibility argument; no global/packet object
+            ctx->pc = getRegU32(ctx, 31);
+        });
         g_enabled = true;
         std::fprintf(stderr, "[dc:native] 3D models drawn natively from the game's MDT models, RenderInfo and textures; VU1 runs nothing\n");
     }

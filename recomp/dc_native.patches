@@ -164,3 +164,20 @@
 # init_now_loading: retain scene setup/callback; retire packet Init
 0x001542b0 0x3c0201d0 0x080550b2 # continue at 0x1542c8
 0x001542b4 0x2444b370 0x00000000 # discard obsolete argument / guard empty delay slot
+
+# Retire dedicated packet storage and handles; data/model/query arenas remain live.
+# SetPacketReadBuffer: retain read allocation and logical query descriptor; skip packet/tile reserves
+0x00125b08 0x3c02002b 0x080496d6 # continue at query descriptor setup 0x125b58
+0x00125b0c 0x2444b080 0x24020000 # null obsolete query backing pointer in delay slot
+# BufferAllClear: retire the two 50000-qword VIF1 reserves and initializer
+0x00125dac 0x3c02002b 0x0804977a # continue at 0x125de8
+0x00125db0 0x2444b080 0x00000000 # discard obsolete packet setup
+# MGBeginFrame: retire opaque packet-object selection; native clear/matrix state remains
+0x0012ce74 0x8f828bc0 0x0804b3a6 # continue at 0x12ce98
+0x0012ce78 0x00021940 0x00000000 # discard obsolete packet setup
+0x0012c248 0xaf828bd4 0x00000000 # MGInit: no global packet-object handle
+0x0012e280 0x8f828bd4 0x24020000 # GetVif1Packet: null compatibility argument, no global load
+
+# BufferAllClear: no tile backing allocation; retain query descriptor/extent.
+0x00125d70 0x3c02002b 0x08049761 # continue at query descriptor setup 0x125d84
+0x00125d74 0x2444b080 0x24020000 # null obsolete query backing pointer in delay slot

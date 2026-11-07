@@ -193,7 +193,8 @@ int main(int argc, char **argv)
                 word(ram, gp - 0x742c, 0x12000000);
                 std::memset(ram + packets, 0xa5, 64); std::memset(ram + loadingPacket, 0xa5, 32);
                 std::memset(ram + output, 0xa5, 0x20000);
-                if (kind != 1) word(expected.data(), gp - 0x742c, 0x12000000);
+                // The packet handle is now retired in begin-frame too.
+                word(expected.data(), gp - 0x742c, 0x12000000);
                 std::memset(expected.data() + packets, 0xa5, 64); std::memset(expected.data() + loadingPacket, 0xa5, 32);
                 std::memset(expected.data() + output, 0xa5, 0x20000);
                 auto native = context(phase, mode); const auto before = native; events.clear(); packetCalls = 0;

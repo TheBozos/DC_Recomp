@@ -46,6 +46,18 @@ int main()
     std::memcpy(ram + 0x102008, &zbuf, 8);
     std::memcpy(ram + 0x102010, &alpha, 8);
     const std::vector<uint8_t> beforeMaterial(ram, ram + ramBytes);
+    const auto packetGetter = registry.find(0x12e280);
+    check(packetGetter != nullptr, "null compatibility getter is installed");
+    if (packetGetter)
+    {
+        R5900Context get;
+        get.pc = 0x12e280; get.r[28].uw[0] = 0x12000000;
+        get.r[29].uw[0] = 0x12000000; get.r[31].uw[0] = 0x123400;
+        packetGetter(ram, &get, runtime.get());
+        check(get.pc == 0x123400 && get.r[2].ud[0] == 0 && get.r[28].uw[0] == 0x12000000,
+              "getter returns null without a readable GP/stack/packet object");
+        check(std::memcmp(ram, beforeMaterial.data(), ramBytes) == 0, "getter leaves all guest RAM untouched");
+    }
     R5900Context ctx;
     ctx.r[4].uw[0] = 0x100000;
     ctx.r[5].uw[0] = 0x102000;

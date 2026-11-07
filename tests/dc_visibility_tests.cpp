@@ -99,7 +99,7 @@ int main()
             std::memcpy(expected.data(), ram + queries, expected.size());
             uint32_t expectedExtent; std::memcpy(&expectedExtent, ram + arena + 8, 4);
             std::memcpy(ram + queries, initial.data(), initial.size());
-            word(ram, arena, 0x12000000); // obsolete tile output need not be accessible
+            word(ram, arena, seed & 1 ? 0u : 0x12000000u); // no tile backing allocation is needed
             word(ram, arena + 8, 123);
             std::vector<uint8_t> expectedRam(ram, ram + bozo::kFlatScratchpadOffset);
             std::memcpy(expectedRam.data() + queries, expected.data(), expected.size());

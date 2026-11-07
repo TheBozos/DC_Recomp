@@ -81,6 +81,20 @@ int main()
     scalar(ram,asset+0x40,-0.25f);
     const auto updated=draw(*rt,registry);
     check(updated.vertices==3 && updated.hash!=animated.hash,"explicit MDT visual retains live vertex animation");
+    // A work-name/base coincidence cannot supply previous scene pixels. This
+    // case also runs in disc-free CI, independently of the GPU flame checks.
+    constexpr uint32_t manager=0x1c75870,record=manager+0x10f8;
+    word(ram,manager,0);word(ram,record,1024u<<16);word(ram,record+4,(4u<<16)|256u);
+    std::strcpy(reinterpret_cast<char *>(ram+record+8),"work");
+    const uint64_t work=0x1a40u|(uint64_t(10)<<26)|(uint64_t(8)<<30)|(uint64_t(1)<<34);
+    std::memcpy(ram+record+0x28,&work,8);
+    word(ram,asset+8,0x240);word(ram,asset+0x38,0x180);word(ram,asset+0xe8,0);
+    for(unsigned i=0;i<4;++i)scalar(ram,asset+0x180+i*4,1);
+    std::strcpy(reinterpret_cast<char *>(ram+asset+0x180+0x34),"work");
+    build(*rt,registry);draw(*rt,registry);
+    const auto unproduced=bozo::render::Renderer::instance().published();
+    check(unproduced && unproduced->batches.size()==1 && unproduced->batches[0].material.fromFrame==0 &&
+          !unproduced->batches[0].material.textured,"unproduced work image retains geometry without guessing previous-frame texture");
     std::printf("DC model lifetime: %d failures\n",failures);
     return failures ? 1 : 0;
 }

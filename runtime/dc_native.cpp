@@ -1400,23 +1400,10 @@ namespace dc::native
                     material.source = 0;
                     madeU = madeV = 1.0f;
                     static const bool s_noMadeModels = std::getenv("DC_NO_MADE_MODELS") != nullptr; // diagnosis
-                    // The towns' "work" (0x1A40: CT32, 640 wide, 1024 x 256), with no picture made there this frame, holds the
-                    // previous frame's pixels on the PS2 (matched against PCSX2; what the game last wrote there is not traced).
-                    // Norune's sky gradient (MDT 009d9e00, blue to white) is modulated by it: read as the previous frame, the
-                    // sky is pale as in PCSX2 (deep blue untextured), the band above the hills still bluer than PCSX2's.
-                    // DC_WORK_NOT_PREVIOUS=1 (diagnosis) leaves it untextured.
-                    static const bool s_workPrevious = std::getenv("DC_WORK_NOT_PREVIOUS") == nullptr;
-                    if (s_workPrevious && !texture && record != 0u && rd32(rdram, record + 0x38u) == 0u &&
-                        (material.tex0 & 0x3FFFu) == 0x1A40u && g_targetOfBase.find(0x1A40u) == g_targetOfBase.end())
-                    {
-                        material.fromFrame = 1;
-                        material.source = bozo::render::Material::kPreviousFrame;
-                        material.frameWidth = 640;
-                        material.frameHeight = 224;
-                        madeU = static_cast<float>(1u << ((material.tex0 >> 26) & 0xFu)) / 640.0f;
-                        madeV = static_cast<float>(1u << ((material.tex0 >> 30) & 0xFu)) / 224.0f;
-                    }
-                    else if (!s_noMadeModels && !texture && record != 0u && rd32(rdram, record + 0x38u) == 0u)
+                    // Only an actual native producer establishes a work image.
+                    // A matching legacy place is not provenance for the previous
+                    // scene: that guess fed village geometry back into the sky.
+                    if (!s_noMadeModels && !texture && record != 0u && rd32(rdram, record + 0x38u) == 0u)
                     {
                         bozo::render::Material made;
                         if (sampleMade(static_cast<uint32_t>(material.tex0 & 0x3FFFu), made) && made.source != 0u)
@@ -3805,7 +3792,13 @@ namespace dc::native
             };
             sprite(toA, fromA, 0u, bozo::render::Material::Blend::Opaque, false);
             sprite(toA, fromA, textureA, bozo::render::blendOf(g_alpha2D), true);
+            sprite(toA, fromA, textureA, bozo::render::Material::Blend::AlphaOnly, true);
             sprite(toB, fromB, textureB, bozo::render::Material::Blend::DestinationBySource, true);
+            // The colour equation does not accumulate coverage: the final B
+            // sprite writes its own alpha. Keep that alpha separately from the
+            // grey initialization and RGB blend, so transparent flame borders
+            // remain transparent when sampled by the fogged additive sprite.
+            sprite(toB, fromB, textureB, bozo::render::Material::Blend::AlphaOnly, true);
             // The frame dump: both textures (name, TEX0, alpha range) and where they go.
             if (g_dump2D)
                 for (const uint32_t record : {textureA, textureB})
@@ -4567,73 +4560,88 @@ namespace dc::native
         bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
         ++g_publishedFrames;
         static uint32_t s_frames = 0;
+        static const bool s_reportStats = [] {
+            const char *value = std::getenv("DC_NATIVE_STATS");
+            return value && value[0] == '1';
+        }();
         if (++s_frames % 300u == 0u)
         {
-            std::fprintf(stderr, "[dc:native] texture services cumulative: %llu reloads, %llu group selections, %llu TM2 loads, %llu file loads\n",
-                         static_cast<unsigned long long>(g_nativeTextureReloads), static_cast<unsigned long long>(g_nativeTextureSelections),
-                         static_cast<unsigned long long>(g_nativeTextureTm2), static_cast<unsigned long long>(g_nativeTextureFiles));
-            std::fprintf(stderr, "[dc:native] fixed texture services cumulative: %llu fixed, %llu fixed Z\n",
-                         static_cast<unsigned long long>(g_nativeFixedTextures), static_cast<unsigned long long>(g_nativeFixedZTextures));
-            std::fprintf(stderr, "[dc:native] packet-only state setters retired: %llu\n", static_cast<unsigned long long>(g_retiredStateCalls));
-            std::fprintf(stderr, "[dc:native] native window rectangles: %llu; packet envelopes retired: %llu\n",
-                         static_cast<unsigned long long>(g_nativeWindowRects), static_cast<unsigned long long>(g_retiredEnvelopes));
-            std::fprintf(stderr, "[dc:native] model packet wrappers retired: %llu\n",
-                         static_cast<unsigned long long>(g_retiredModelEnvelopes));
-            std::fprintf(stderr, "[dc:native] frame packet wrappers retired: %llu MGDraw, %llu member\n",
-                         static_cast<unsigned long long>(g_nativeFrameDraws), static_cast<unsigned long long>(g_nativeFrameMemberDraws));
-            std::fprintf(stderr, "[dc:native] asset builders cumulative: %llu models, %llu remakes, %llu shadows, %llu cloths; %llu bytes of legacy output extents bypassed\n",
-                         static_cast<unsigned long long>(g_nativeModelBuilds), static_cast<unsigned long long>(g_nativeModelRemakes),
-                         static_cast<unsigned long long>(g_nativeShadowBuilds), static_cast<unsigned long long>(g_nativeClothBuilds),
-                         static_cast<unsigned long long>(g_retiredModelBytes));
-            std::fprintf(stderr, "[dc:native] per 300 frames: %llu DrawVu1 calls (%llu without a known MDT, %llu drawn from a copy of their MDT), %llu primitives, "
-                                 "%llu triangles, %llu own textures, %llu untextured for lack of one; not drawn: %llu shadows, "
-                                 "%llu screen-space; %llu cloths; %llu shadow triangles; %llu waters;%llu GS-order textures not in the store; VU1 programs skipped: %llu\n",
-                         static_cast<unsigned long long>(g_stats.calls), static_cast<unsigned long long>(g_stats.noModel),
-                         static_cast<unsigned long long>(g_stats.copiedModel),
-                         static_cast<unsigned long long>(g_stats.primitives),
-                         static_cast<unsigned long long>(g_stats.triangles),
-                         static_cast<unsigned long long>(g_stats.ownTextures),
-                         static_cast<unsigned long long>(g_stats.noTexture),
-                         static_cast<unsigned long long>(g_stats.shadows),
-                         static_cast<unsigned long long>(g_stats.screenSpace),
-                         static_cast<unsigned long long>(g_stats.cloths),
-                         static_cast<unsigned long long>(g_stats.shadowTriangles),
-                         static_cast<unsigned long long>(g_stats.waters),
-                         static_cast<unsigned long long>(g_stats.gsOrderTextures),
-                         static_cast<unsigned long long>(g_gateSkipped.exchange(0)));
-            std::fprintf(stderr, "[dc:native] groups: %llu numbered here; skipped at pc 0: %llu, pc 8: %llu, other: %llu (last 0x%llx)\n",
-                         static_cast<unsigned long long>(g_group), static_cast<unsigned long long>(g_gateByPc[0].exchange(0)),
-                         static_cast<unsigned long long>(g_gateByPc[1].exchange(0)),
-                         static_cast<unsigned long long>(g_gateByPc[2].exchange(0)),
-                         static_cast<unsigned long long>(g_gateByPc[3].load()));
-            if (g_depthSamples || g_depthPending)
-                std::fprintf(stderr, "[dc:native] visibility depth samples: %llu from GPU, %llu pending (empty depth)\n",
-                             static_cast<unsigned long long>(g_depthSamples), static_cast<unsigned long long>(g_depthPending));
-            std::fprintf(stderr, "[dc:native] native visibility batches: %llu\n", static_cast<unsigned long long>(g_visibilityBatches));
-            std::fprintf(stderr, "[dc:native] objects without Z write (ZBUF ZMSK): %llu; depths of field: %llu; back faces culled: %llu; outside the guard band: %llu\n",
-                         static_cast<unsigned long long>(g_stats.noZWrite), static_cast<unsigned long long>(g_stats.depthOfFields),
-                         static_cast<unsigned long long>(g_stats.culled), static_cast<unsigned long long>(g_stats.guarded));
-            if (g_stats.madeDraws[0] + g_stats.madeDraws[1] + g_stats.madeDraws[8] + g_stats.clears != 0u)
-                std::fprintf(stderr, "[dc:native] made-picture sprites: frame %llu, previous %llu, targets %llu %llu %llu; clears %llu (last %06llx)\n",
-                             static_cast<unsigned long long>(g_stats.madeDraws[0]), static_cast<unsigned long long>(g_stats.madeDraws[8]),
-                             static_cast<unsigned long long>(g_stats.madeDraws[1]), static_cast<unsigned long long>(g_stats.madeDraws[2]),
-                             static_cast<unsigned long long>(g_stats.madeDraws[3]), static_cast<unsigned long long>(g_stats.clears),
-                             static_cast<unsigned long long>(g_stats.lastClear));
-            if (g_stats.stretches + g_stats.stretchesMissed != 0u)
-                std::fprintf(stderr, "[dc:native] frame stretches: %llu, %llu from or to a place not made natively\n",
-                             static_cast<unsigned long long>(g_stats.stretches), static_cast<unsigned long long>(g_stats.stretchesMissed));
-            if (g_stats.textureCopies != 0u)
-                std::fprintf(stderr, "[dc:native] texture copies: %llu, %llu between places no record holds\n",
-                             static_cast<unsigned long long>(g_stats.textureCopies), static_cast<unsigned long long>(g_stats.textureCopiesMissed));
-            if (g_stats.maxZ > -1e30)
-                std::fprintf(stderr, "[dc:native] GS Z of clipped vertices: %.0f .. %.0f, %llu past 2^24, %llu negative\n", g_stats.minZ,
-                             g_stats.maxZ, static_cast<unsigned long long>(g_stats.zPast24), static_cast<unsigned long long>(g_stats.zNegative));
+            // Synchronous diagnostics run before publishing the picture. A
+            // slow terminal/redirected output can otherwise stall play every
+            // five seconds while the FPS overlay still reads sixty between.
+            if (s_reportStats)
+            {
+                std::fprintf(stderr, "[dc:native] texture services cumulative: %llu reloads, %llu group selections, %llu TM2 loads, %llu file loads\n",
+                             static_cast<unsigned long long>(g_nativeTextureReloads), static_cast<unsigned long long>(g_nativeTextureSelections),
+                             static_cast<unsigned long long>(g_nativeTextureTm2), static_cast<unsigned long long>(g_nativeTextureFiles));
+                std::fprintf(stderr, "[dc:native] fixed texture services cumulative: %llu fixed, %llu fixed Z\n",
+                             static_cast<unsigned long long>(g_nativeFixedTextures), static_cast<unsigned long long>(g_nativeFixedZTextures));
+                std::fprintf(stderr, "[dc:native] packet-only state setters retired: %llu\n", static_cast<unsigned long long>(g_retiredStateCalls));
+                std::fprintf(stderr, "[dc:native] native window rectangles: %llu; packet envelopes retired: %llu\n",
+                             static_cast<unsigned long long>(g_nativeWindowRects), static_cast<unsigned long long>(g_retiredEnvelopes));
+                std::fprintf(stderr, "[dc:native] model packet wrappers retired: %llu\n",
+                             static_cast<unsigned long long>(g_retiredModelEnvelopes));
+                std::fprintf(stderr, "[dc:native] frame packet wrappers retired: %llu MGDraw, %llu member\n",
+                             static_cast<unsigned long long>(g_nativeFrameDraws), static_cast<unsigned long long>(g_nativeFrameMemberDraws));
+                std::fprintf(stderr, "[dc:native] asset builders cumulative: %llu models, %llu remakes, %llu shadows, %llu cloths; %llu bytes of legacy output extents bypassed\n",
+                             static_cast<unsigned long long>(g_nativeModelBuilds), static_cast<unsigned long long>(g_nativeModelRemakes),
+                             static_cast<unsigned long long>(g_nativeShadowBuilds), static_cast<unsigned long long>(g_nativeClothBuilds),
+                             static_cast<unsigned long long>(g_retiredModelBytes));
+                std::fprintf(stderr, "[dc:native] per 300 frames: %llu DrawVu1 calls (%llu without a known MDT, %llu drawn from a copy of their MDT), %llu primitives, "
+                                     "%llu triangles, %llu own textures, %llu untextured for lack of one; not drawn: %llu shadows, "
+                                     "%llu screen-space; %llu cloths; %llu shadow triangles; %llu waters;%llu GS-order textures not in the store; VU1 programs skipped: %llu\n",
+                             static_cast<unsigned long long>(g_stats.calls), static_cast<unsigned long long>(g_stats.noModel),
+                             static_cast<unsigned long long>(g_stats.copiedModel),
+                             static_cast<unsigned long long>(g_stats.primitives),
+                             static_cast<unsigned long long>(g_stats.triangles),
+                             static_cast<unsigned long long>(g_stats.ownTextures),
+                             static_cast<unsigned long long>(g_stats.noTexture),
+                             static_cast<unsigned long long>(g_stats.shadows),
+                             static_cast<unsigned long long>(g_stats.screenSpace),
+                             static_cast<unsigned long long>(g_stats.cloths),
+                             static_cast<unsigned long long>(g_stats.shadowTriangles),
+                             static_cast<unsigned long long>(g_stats.waters),
+                             static_cast<unsigned long long>(g_stats.gsOrderTextures),
+                             static_cast<unsigned long long>(g_gateSkipped.exchange(0)));
+                std::fprintf(stderr, "[dc:native] groups: %llu numbered here; skipped at pc 0: %llu, pc 8: %llu, other: %llu (last 0x%llx)\n",
+                             static_cast<unsigned long long>(g_group), static_cast<unsigned long long>(g_gateByPc[0].exchange(0)),
+                             static_cast<unsigned long long>(g_gateByPc[1].exchange(0)),
+                             static_cast<unsigned long long>(g_gateByPc[2].exchange(0)),
+                             static_cast<unsigned long long>(g_gateByPc[3].load()));
+                if (g_depthSamples || g_depthPending)
+                    std::fprintf(stderr, "[dc:native] visibility depth samples: %llu from GPU, %llu pending (empty depth)\n",
+                                 static_cast<unsigned long long>(g_depthSamples), static_cast<unsigned long long>(g_depthPending));
+                std::fprintf(stderr, "[dc:native] native visibility batches: %llu\n", static_cast<unsigned long long>(g_visibilityBatches));
+                std::fprintf(stderr, "[dc:native] objects without Z write (ZBUF ZMSK): %llu; depths of field: %llu; back faces culled: %llu; outside the guard band: %llu\n",
+                             static_cast<unsigned long long>(g_stats.noZWrite), static_cast<unsigned long long>(g_stats.depthOfFields),
+                             static_cast<unsigned long long>(g_stats.culled), static_cast<unsigned long long>(g_stats.guarded));
+                if (g_stats.madeDraws[0] + g_stats.madeDraws[1] + g_stats.madeDraws[8] + g_stats.clears != 0u)
+                    std::fprintf(stderr, "[dc:native] made-picture sprites: frame %llu, previous %llu, targets %llu %llu %llu; clears %llu (last %06llx)\n",
+                                 static_cast<unsigned long long>(g_stats.madeDraws[0]), static_cast<unsigned long long>(g_stats.madeDraws[8]),
+                                 static_cast<unsigned long long>(g_stats.madeDraws[1]), static_cast<unsigned long long>(g_stats.madeDraws[2]),
+                                 static_cast<unsigned long long>(g_stats.madeDraws[3]), static_cast<unsigned long long>(g_stats.clears),
+                                 static_cast<unsigned long long>(g_stats.lastClear));
+                if (g_stats.stretches + g_stats.stretchesMissed != 0u)
+                    std::fprintf(stderr, "[dc:native] frame stretches: %llu, %llu from or to a place not made natively\n",
+                                 static_cast<unsigned long long>(g_stats.stretches), static_cast<unsigned long long>(g_stats.stretchesMissed));
+                if (g_stats.textureCopies != 0u)
+                    std::fprintf(stderr, "[dc:native] texture copies: %llu, %llu between places no record holds\n",
+                                 static_cast<unsigned long long>(g_stats.textureCopies), static_cast<unsigned long long>(g_stats.textureCopiesMissed));
+                if (g_stats.maxZ > -1e30)
+                    std::fprintf(stderr, "[dc:native] GS Z of clipped vertices: %.0f .. %.0f, %llu past 2^24, %llu negative\n", g_stats.minZ,
+                                 g_stats.maxZ, static_cast<unsigned long long>(g_stats.zPast24), static_cast<unsigned long long>(g_stats.zNegative));
+            }
             g_stats = Stats{};
+            if (!s_reportStats)
+            {
+                g_gateSkipped.exchange(0);
+                for (unsigned i = 0; i < 3; ++i) g_gateByPc[i].exchange(0);
+            }
             for (FeederHook &hook : g_feeders)
-                if (const uint64_t calls = hook.calls.exchange(0))
+                if (const uint64_t calls = hook.calls.exchange(0); s_reportStats && calls)
                     std::fprintf(stderr, "[dc:feeder] %s: %llu calls\n", hook.name, static_cast<unsigned long long>(calls));
             for (CountHook &hook : g_countHooks)
-                if (const uint64_t calls = hook.calls.exchange(0))
+                if (const uint64_t calls = hook.calls.exchange(0); s_reportStats && calls)
                     std::fprintf(stderr, "[dc:probe] %s: %llu calls\n", hook.name, static_cast<unsigned long long>(calls));
         }
         flushShadows();

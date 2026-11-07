@@ -1304,5 +1304,5 @@ or GIF submissions. User progress and all evidence remain in copied local cards 
 
 DC's qualified engine pin is **`e78883f12f6362cb5570bed55aaa2aa7169d9589`**, containing these focused fixes on
 the preceding verified base. Engine PR [#73](https://github.com/TheBozos/BozoEngine/pull/73) integrates the
-generic rendering fix and additional Flush regressions with current main; **46/46 suites including GPU
+generic rendering fix and additional Flush regressions with current main; **47/47 suites including GPU
 readback pass** on that integration. Retail/generated assets, raw traces, cards and captures stay local.

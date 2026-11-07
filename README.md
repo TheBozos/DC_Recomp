@@ -236,6 +236,8 @@ handle loads in replaced bodies or guarded skipped spans, including compiler-kno
 The follow-up alias audit records recognized register/stack aliases and DUN root/table-pointer writes.
 Complete compiled assignments pass 24 synthetic cases preserving their own type's vptr. Unknown-address
 stores and callee effects remain explicit; these checks do not establish immutable dispatch tables.
+Bulk/callee follow-up includes the DUN file/BSS loading writes and 45 embedded effect vptrs; four raw
+copies carry 36 of those vptrs. Unknown pack-derived extents and bounded callee exploration remain open.
 
 ## Disc facts
 

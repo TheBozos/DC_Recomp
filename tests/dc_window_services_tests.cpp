@@ -1,6 +1,7 @@
 // Compare logical window metadata with compiled originals; no game data embedded.
 #include "dc_functions.h"
 #include "bozo/port.h"
+#include "bozo/libs/guest.h"
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -13,6 +14,15 @@ namespace
     int failures = 0, cases = 0;
     constexpr uint32_t rectangle = 0x01c75510, input = 0x400000;
     constexpr uint32_t packet = 0x500000, buffer = 0x510000, gp = 0x300000, stack = 0x700000;
+    int getterCalls = 0;
+    void referencePacket(uint8_t *, R5900Context *ctx, Runtime *rt)
+    {
+        // The production getter now returns null. This original setter fixture
+        // still needs its original opaque packet input to execute the SDK path.
+        ++getterCalls; bozo::libs::Guest guest(*rt, ctx);
+        ctx->r[2].sd[0] = static_cast<int32_t>(guest.read32(ctx->r[28].uw[0] - 0x742c));
+        ctx->pc = ctx->r[31].uw[0];
+    }
     void check(bool ok, const char *what)
     {
         if (!ok) { ++failures; std::printf("FAIL case %d: %s\n", cases, what); }
@@ -33,6 +43,7 @@ int main()
 {
     auto rt = std::make_unique<Runtime>();
     rt->functions.setGenerated(dc_function_table, dc_function_count);
+    rt->functions.setOverride(0x12e280, referencePacket);
     bozo::port::Registry registry;
     dc::native::install(*rt, registry);
     auto *ram = rt->memory.ram();
@@ -51,7 +62,9 @@ int main()
                     word(ram, packet, buffer); word(ram, packet + 4, buffer);
                     word(ram, gp - 0x742c, packet);
                     auto original = context(pc, source);
+                    getterCalls = 0;
                     rt->functions.generated(pc)(ram, &original, rt.get());
+                    check(getterCalls == 1, "original setter obtains its legacy packet once");
                     check(original.pc == 0x123450, "original setter returns");
                     std::array<uint32_t, 4> expected;
                     std::memcpy(expected.data(), ram + rectangle, 16);
@@ -63,7 +76,9 @@ int main()
                     std::memcpy(expectedRam.data() + rectangle, expected.data(), 16);
                     auto native = context(pc, pc == 0x12d9a0 ? 0x12000000 : source);
                     native.r[28].uw[0] = 0x12000000; // no packet/global-pointer dependency
+                    getterCalls = 0;
                     registry.find(pc)(ram, &native, rt.get());
+                    check(getterCalls == 0, "native setter never obtains the retired handle");
                     check(std::memcmp(ram, expectedRam.data(), expectedRam.size()) == 0,
                           "only the original logical rectangle changes; packet output remains untouched");
                     check(native.pc == 0x123450 && native.r[29].uw[0] == stack,

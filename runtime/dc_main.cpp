@@ -6,6 +6,9 @@
 #include "dc_functions.h"
 #include "dun_functions.h"
 #include "title_functions.h"
+#ifdef DC_AUDIT_INDIRECT
+#include "dc_indirect_trace.h"
+#endif
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -183,5 +186,8 @@ int main(int argc, char **argv)
 #endif
         result = run();
     recording.close();
+#ifdef DC_AUDIT_INDIRECT
+    if (!dcFinishIndirectTrace(result == 0)) result = 1;
+#endif
     return result;
 }

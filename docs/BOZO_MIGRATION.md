@@ -1109,3 +1109,100 @@ Qualification:
   subjective listening and exact timing remain unqualified (`qualified-evidence.py`).
 
 BozoEngine remains pinned at `4a8f70a5021cbb3429800a02259ae7b816581ee0`.
+
+## Dedicated packet storage and indirect-call audit
+
+Ten guarded words remove the remaining main packet-buffer reservations and handle lifecycle:
+
+- `SetPacketReadBuffer` `0x125ae0` keeps its first, real read-buffer allocation. Its two VIF1 reservations,
+  `MGInitVif1Packet` call and obsolete visibility-tile allocation are skipped at `0x125b08`. The query
+  descriptor keeps capacity `0x800` and cursor bookkeeping, with a null backing pointer.
+- `BufferAllClear` `0x125bc0` keeps its complete arena clear and the first seven allocations. The two
+  50,000-qword VIF1 reservations and the 4,096-qword visibility backing reserve are removed. This recovers
+  **104,096 qwords / 1,665,536 bytes of usable capacity inside the shared arena**. The fixed 27,040,000-byte
+  arena and its clear loop remain; this is not a reduction of the process's reserved memory/RSS.
+- `MGInit` no longer writes a packet-object handle at `0x12c248`; `MGBeginFrame` skips selection of the
+  alternating objects at `0x12ce74`. `GetVif1Packet` returns a null compatibility argument, both in guarded
+  compiled code and at the installed native entry, without reading GP or a packet object. The obsolete
+  buffer initializer now rejects unexpected entry; there are 31 tested rejection boundaries.
+
+Native visibility reads only the descriptor's capacity/cursor, not its old tile backing. Its existing
+original/native comparison now includes both null and inaccessible backing pointers. The updated CFG
+audit finds no admitted GP-relative writes to the three packet-handle/base globals and no admitted initializer
+calls. This is not an alias proof for arbitrary indirect stores. There are still 373 reachable GP-relative
+compatibility loads of the zero/BSS handle word in legacy calling sequences. This batch does not rewrite
+every legacy parameter or prove every indirect consumer's target set.
+
+The allocation audit deliberately retains these different owners:
+
+| Storage/extent | Current consumer and reason to retain it |
+| --- | --- |
+| Shared primary arena and read/data subarenas | Real files, models, game objects and allocator cursor/bounds behavior |
+| Visibility descriptor/capacity/cursor | Native depth queries and per-frame reset of their logical request extent; its backing reserve is removed |
+| Visual MDT data address and size | `CreateVisual` `0x126770` passes the native builder's visual size to `CDataAlloc2::Alloc`, then advances game bookkeeping; the data address keys `g_mdtCopies` and visual fields |
+| Model/shadow/cloth allocation extents | The shared game allocation ABI still advances by these sizes. `modelAllocationQwords` and `clothCreateHook` retain legacy VIF-size formulas without serializing packets. Shrinking them requires migrating address identity, reuse/lifetime and live-animation/remake contracts together |
+
+The earlier snapshot/lifetime and original/native builder tests still pass. No generic allocator is replaced,
+and the model/cloth size ABI is not collapsed to zero or a shared dummy identity.
+
+`dc-indirect-facts` exports the **pinned compiler's own** function ranges, register transfers and recognized
+switch targets after applying the production guards. `dc_packet_audit.py` now follows those switch cases,
+retaining their fallback as unresolved. The former 713-site direct-only walk becomes 773 reachable sites:
+58 additional register calls were hidden behind switch arms, and two `CActionSeq::Play` calls must remain
+because its installed hook forwards to the generated body. Forwarding hooks are explicitly retained in all
+audit checks; registry ownership alone does not retire their originals. The complete admitted compiler
+inventory contains **775 sites**, including two exception transfers outside the walk's reached blocks:
+
+| Classification | Sites | What is established |
+| --- | ---: | --- |
+| Compiler-recognized switch | 104 | Known compiled cases are followed; mutable tables/default fallback are not proved closed |
+| Function pointer loaded from memory | 649 | Local load/slot origin hint; callback/vtable target sets remain open |
+| Other register target | 18 | No locally sufficient target definition |
+| Register-copy call | 1 | Local copy hint, not a target-set proof |
+| Exception-runtime jump | 3 | `__sjthrow`/`__throw`/`__rethrow` at `0x10d8c0`, `0x10e298`, `0x10e480`; landing targets remain unresolved |
+
+An optional **`DC_AUDIT_INDIRECT=ON` build** adds probes to all 778 non-return transfers, including those in
+overridden originals. The transformer requires an exact ordered register-transfer match with compiler facts
+and checks total coverage. A probe returns the same target and never writes guest CPU/RAM or decides dispatch.
+Its image tag is generated with the owning code; target overlay identity comes from the runtime's actually
+selected resume-table entry, including resident-to-overlay calls. A regression switches TITLE/DUN identities
+at the same address and checks that both are distinguished. Register snapshots are taken **before link/delay
+slot execution** and must not be treated as the callee's consumed arguments.
+
+With `DC_INDIRECT_TRACE` naming an output file, completed audit routes record observed site/target counts.
+Two 5,800-frame inventory routes produce 3,416,012 transfer observations: **158 distinct sites and 378 unique
+edges** (104 switch-case edges, 269 compiled-entry edges and five native-override edges). Every observed target
+has one of these dispositions; none reaches a retired packet entry/interior or an unclassified address.
+`CFrameVu1::DrawVu1` `0x129400`, for example, remains compiled hierarchy/light work even though codegen declares
+it external; an external declaration alone is not an installed native replacement. TITLE and resident paths
+are observed; DUN is not exercised. **617 sites remain unobserved**, enumerated in `indirect-audit.json`, including
+all three exception jumps. These traces do not establish an exhaustive callback/vtable target set.
+
+Qualification (`build/native-cleanup23/`):
+
+- **67/67 production suites and 17/17 game-free suites pass.** Twenty-five new original/adapted storage cases
+  execute the real arena allocator: complete buffer owners, an exact initialization span and the getter.
+  The retained allocation prefix has identical inputs/addresses; only the dedicated reserves disappear.
+  All other non-stack RAM, the full arena clear/content, logical descriptors and saved registers match.
+  Existing window-setter references explicitly restore their original getter, while native setters still
+  obtain no handle. Model/cloth extent and lifetime suites remain intact.
+- Synthetic tests cover compiler switch/call facts, patch-guard failure, instrumentation mismatch, probe CPU
+  preservation, duplicate-edge counting and source/target image identity. Audit builds and normal builds both
+  pass their relevant suites. Traced binaries, input/trace SHA-256 hashes and raw observations remain local
+  (`traced-binaries`, `audit-manifest.json`, `audit-headless.json`, `audit-gameplay.json`).
+- Final production builds restore **`DC_AUDIT_INDIRECT=OFF`**. Both normal game executables have no probe
+  symbols; no tracing branch or collector is shipped in its game path. Its headless PCM is byte-identical
+  to the traced route (SHA-256 `21184606f8682af2902a519b98cf882de03b676ce69351f827658816c7176a9a`).
+- Final headless/windowed routes each complete 5,800 frames with zero register/unknown accesses, VU0 calls or
+  GIF submissions. Native VIF1 completion counts are 5,686 / 6,047 and sync counts 6,884 / 7,245. Final 48 kHz
+  stereo PCM: headless 4,686,527 frames, RMS 3,599.338, tail RMS 3,496.547, peak 28,775; window 5,075,496 frames,
+  RMS 3,553.549, tail RMS 3,015.392, peak 32,766. Audio is active; listening/exact timing remain unqualified.
+- Production captures 3,400 (character/platform) and 5,400 (menu) were inspected. The menu was also compared
+  with the previous batch and traced build; the expected scene/UI remain visible. This is bounded visual
+  checking, not console parity, dungeon/combat coverage or a full playthrough.
+- Negative trace checks reject incomplete runs, mismatched source sites, retired SDK targets and unresolved
+  observed targets. Static/unobserved target sets still remain explicitly open.
+
+Remaining work is explicit: the 617 unobserved indirect sites and their mutable target writers, legacy ABI
+parameter loads, model/cloth identity-and-size migration, display/setup metadata and unsupported readbacks.
+The engine pin remains `4a8f70a5021cbb3429800a02259ae7b816581ee0`.

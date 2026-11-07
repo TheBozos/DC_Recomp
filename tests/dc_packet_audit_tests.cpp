@@ -53,6 +53,7 @@ int main(int argc, char **argv)
             const std::string message = e.what();
             rejected = message.starts_with("native graphics: retired packet builder reached") ||
                 message == "native graphics: console StoreImage requires a native screenshot owner" ||
+                message == "native graphics: retired packet-buffer initializer reached" ||
                 message == "native graphics: legacy balloon helper requires the native MakeFukidashi owner";
         }
         if (!rejected || std::memcmp(ram, initial.data(), initial.size()) || std::memcmp(&ctx, &before, sizeof(ctx)))

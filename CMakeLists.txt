@@ -369,7 +369,7 @@ if(DC_ENGINE_TESTS)
       ${dc_gen}/dun.indirect.json ${dun_dispatch_dir}
     COMMAND bozo-recomp ${dun_dispatch_dir}/fixture.elf ${dun_dispatch_dir} --prefix dun_dispatch
       --symbol-prefix dun_dispatch_ --files 1 --no-comments --externals ${dun_dispatch_dir}/fixture.externals
-    DEPENDS bozo-recomp tests/make_dun_dispatch_fixture.py tools/dc_packet_audit.py tools/symtab_map.py
+    DEPENDS bozo-recomp tests/make_dun_dispatch_fixture.py tools/dc_packet_audit.py tools/dc_alias_audit.py tools/symtab_map.py
       ${dc_gen}/dun.elf ${dc_gen}/dun.indirect.json game/DUN.BIN recomp/dun_native.patches)
   add_executable(dc-dun-dispatch-tests tests/dc_dun_dispatch_tests.cpp ${dun_dispatch_outputs})
   target_link_libraries(dc-dun-dispatch-tests PRIVATE bozo_host)
@@ -378,6 +378,12 @@ if(DC_ENGINE_TESTS)
     target_link_options(dc-dun-dispatch-tests PRIVATE -static)
   endif()
   add_test(NAME dc_dun_remaining_dispatch COMMAND dc-dun-dispatch-tests ${dun_dispatch_dir}/fixture.elf)
+  add_executable(dc-dispatch-assignment-tests tests/dc_dispatch_assignment_tests.cpp)
+  target_link_libraries(dc-dispatch-assignment-tests PRIVATE dc_game bozo_host)
+  if(MINGW)
+    target_link_options(dc-dispatch-assignment-tests PRIVATE -static)
+  endif()
+  add_test(NAME dc_native_dispatch_assignment COMMAND dc-dispatch-assignment-tests)
   add_executable(dc-indirect-trace-tests tests/dc_indirect_trace_tests.cpp runtime/dc_indirect_trace.cpp)
   target_link_libraries(dc-indirect-trace-tests PRIVATE dc_game bozo_host)
   target_compile_definitions(dc-indirect-trace-tests PRIVATE DC_TRACE_GAME)
@@ -388,4 +394,5 @@ if(DC_ENGINE_TESTS)
   add_test(NAME dc_indirect_tools COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/test_indirect_audit.py
     $<TARGET_FILE:dc-indirect-facts> $<TARGET_FILE:dc-indirect-trace-tests> --game-modules)
   add_test(NAME dc_external_image_boundaries COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/test_externals.py)
+  add_test(NAME dc_pointer_alias_tools COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/test_alias_audit.py)
 endif()

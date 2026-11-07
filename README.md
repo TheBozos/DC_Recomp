@@ -233,6 +233,9 @@ The global packet reset and admitted direct handle/base loads are retired. The a
 handle loads in replaced bodies or guarded skipped spans, including compiler-known interior entries. Another
 74 controlled cases exercise the ten DUN dispatch sites absent from the manual trace; live DUN coverage remains
 33/43 sites. Mutable target writers, pointer aliases and model/cloth allocation migration remain open.
+The follow-up alias audit records recognized register/stack aliases and DUN root/table-pointer writes.
+Complete compiled assignments pass 24 synthetic cases preserving their own type's vptr. Unknown-address
+stores and callee effects remain explicit; these checks do not establish immutable dispatch tables.
 
 ## Disc facts
 

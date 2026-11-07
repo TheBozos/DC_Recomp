@@ -14,11 +14,11 @@ class ExternalImages(unittest.TestCase):
             root = pathlib.Path(folder)
             (root / "runtime").mkdir()
             (root / "runtime" / "dc_fixture.cpp").write_text(
-                "0x12C19C 0x15434C 0x12D268 0x1AB290 0x12DAE0")
+                "0x12C19C 0x15434C 0x12D268 0x1AB290 0x13DFA8 0x13DFF0 0x13E314 0x13E420 0x12DAE0")
             output = root / "overrides.txt"
             subprocess.run([sys.executable, "-I", str(SCRIPT), "--overrides", str(root), str(output)], check=True)
             entries = output.read_text().splitlines()
-            for pc in ("12c19c", "15434c", "12d268", "1ab290"):
+            for pc in ("12c19c", "15434c", "12d268", "1ab290", "13dfa8", "13dff0", "13e314", "13e420"):
                 self.assertIn("native 0x" + pc, entries)
                 self.assertNotIn("override 0x" + pc, entries)
             self.assertIn("override 0x12dae0", entries)

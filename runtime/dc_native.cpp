@@ -2550,7 +2550,12 @@ namespace dc::native
                 std::max(c[0].v, c[3].v) <= static_cast<float>(blended->second.second) + 1.0f &&
                 g_targetOfBase.count(madeBase | kBlendedPlace) != 0u)
                 madeBase |= kBlendedPlace;
-            if (record != 0u && rd32(rdram, record + 0x38u) == 0u && sampleMade(madeBase, made))
+            // A native composition owns pixels even when its retail record has
+            // no CPU buffer. It takes priority over an old frame-target alias.
+            const auto pinned = g_pinned.find(record);
+            const bool ownsNativePixels = pinned != g_pinned.end() &&
+                pinned->second.pixels == rd32(rdram, record + 0x38u) && pinned->second.tex0 == rd64(rdram, record + 0x28u);
+            if (record != 0u && rd32(rdram, record + 0x38u) == 0u && !ownsNativePixels && sampleMade(madeBase, made))
             {
                 bozo::render::Material material = made;
                 ++g_stats.madeDraws[std::min<uint32_t>(made.source, 8u)];
@@ -4284,6 +4289,107 @@ namespace dc::native
         }
         strip.previous = point;
         strip.next = index + 1u;
+    }
+
+    // The compiled debug-font loop keeps its cursor and original texture lookups.
+    // Its atlas-to-picture copies are ordinary native pixels. Work is keyed by
+    // runtime and guest stack, so a scheduler unwind cannot discard a partial
+    // composition or confuse it with another thread's call.
+    void debugFontBoundary(uint8_t *ram, R5900Context *ctx, Runtime *runtime, uint32_t pc)
+    {
+        struct Work
+        {
+            uint32_t font = 0, atlasRecord = 0, destination = 0, format = 0;
+            uint32_t destinationPixels = 0;
+            uint64_t atlasTex0 = 0, destinationTex0 = 0;
+            uint8_t alpha = 0;
+            std::shared_ptr<const bozo::render::Texture> atlas;
+            std::shared_ptr<bozo::render::Texture> image;
+        };
+        static thread_local std::unordered_map<Runtime *, std::unordered_map<uint32_t, Work>> pending;
+        const uint32_t stack = getRegU32(ctx, 29);
+        bozo::libs::Guest guest(*runtime, ctx);
+        if (pc == 0x0013DFA8u)
+        {
+            auto &work = pending[runtime][stack]; work = {};
+            work.font = getRegU32(ctx, 21); work.atlasRecord = getRegU32(ctx, 2);
+            guest.in(work.font, 0x1c); guest.in(work.atlasRecord, 0x50);
+            work.atlasTex0 = rd64(ram, work.atlasRecord + 0x28u);
+            if (((work.atlasTex0 >> 20) & 0x3fu) > 1u)
+                throw std::runtime_error("native debug font: atlas must be a true-color picture");
+            work.atlas = recordTexture(ram, work.atlasRecord);
+            if (!work.atlas) throw std::runtime_error("native debug font: atlas is not decoded");
+            return;
+        }
+        auto owner = pending.find(runtime);
+        if (owner == pending.end() || !owner->second.count(stack))
+            throw std::runtime_error("native debug font: missing composition");
+        auto &work = owner->second.at(stack);
+        if (pc == 0x0013DFF0u)
+        {
+            work.destination = getRegU32(ctx, 2); guest.in(work.destination, 0x50);
+            const uint64_t tex0 = rd64(ram, work.destination + 0x28u);
+            work.destinationTex0 = tex0; work.destinationPixels = guest.read32(work.destination + 0x38u);
+            work.format = static_cast<uint32_t>((tex0 >> 20) & 0x3fu);
+            if (work.format != 0u && work.format != 1u)
+                throw std::runtime_error("native debug font: destination must be a true-color picture");
+            if ((tex0 & 0x3fffu) == (work.atlasTex0 & 0x3fffu))
+                throw std::runtime_error("native debug font: atlas aliases destination");
+            const uint32_t tw = (tex0 >> 26) & 15u, th = (tex0 >> 30) & 15u;
+            const int32_t width = static_cast<int32_t>(getRegU32(ctx, 22)), height = static_cast<int32_t>(getRegU32(ctx, 16));
+            if (tw > 10u || th > 10u || width <= 0 || height <= 0 ||
+                static_cast<uint32_t>(width) > (1u << tw) || static_cast<uint32_t>(height) > (1u << th))
+                throw std::runtime_error("native debug font: invalid picture extent");
+            const auto previous = recordTexture(ram, work.destination);
+            work.image = previous ? std::make_shared<bozo::render::Texture>(*previous) : std::make_shared<bozo::render::Texture>();
+            if (!previous)
+            {
+                work.image->width = 1u << tw; work.image->height = 1u << th;
+                work.image->rgba.assign(static_cast<size_t>(work.image->width) * work.image->height, 0u);
+            }
+            if (work.image->width < static_cast<uint32_t>(width) || work.image->height < static_cast<uint32_t>(height))
+                throw std::runtime_error("native debug font: decoded picture is smaller than its extent");
+            work.alpha = guest.read8(work.font + 0x14u);
+            if (work.format == 1u)
+                for (auto &pixel : work.image->rgba)
+                    pixel = (pixel & 0xffffffu) | ((pixel & 0xffffffu) ? uint32_t(work.alpha) << 24 : 0u);
+            const uint32_t clear = (work.format == 1u ? uint32_t(work.alpha) << 24 : 0x80000000u) | 0x010101u;
+            for (int32_t y = 0; y < height; ++y)
+                std::fill_n(work.image->rgba.begin() + static_cast<size_t>(y) * work.image->width, width, clear);
+            // Retained game-side TEXA fields; no device register or packet state.
+            const uint32_t gp = getRegU32(ctx, 28);
+            guest.write8(gp - 0x73ffu, guest.read8(gp - 0x73ffu) | 0x80u);
+            guest.write8(gp - 0x7400u, work.alpha);
+            return;
+        }
+        if (!work.image) throw std::runtime_error("native debug font: destination is not initialized");
+        if (pc == 0x0013E314u)
+        {
+            const uint32_t glyph = (guest.read8(getRegU32(ctx, 17)) - 33u) & 0xffu;
+            const uint32_t sx = (glyph & 15u) * 8u, sy = (glyph >> 4) * 16u;
+            if (sx + 8u > work.atlas->width || sy + 16u > work.atlas->height)
+                throw std::runtime_error("native debug font: glyph lies outside its atlas");
+            const int64_t dx = static_cast<int32_t>(getRegU32(ctx, 18)), dy = static_cast<int32_t>(getRegU32(ctx, 19));
+            for (uint32_t y = 0; y < 16u; ++y)
+                for (uint32_t x = 0; x < 8u; ++x)
+                {
+                    const int64_t tx = dx + x, ty = dy + y;
+                    if (tx < 0 || ty < 0 || tx >= work.image->width || ty >= work.image->height) continue;
+                    const uint32_t rgb = work.atlas->rgba[static_cast<size_t>(sy + y) * work.atlas->width + sx + x] & 0xffffffu;
+                    auto &pixel = work.image->rgba[static_cast<size_t>(ty) * work.image->width + static_cast<size_t>(tx)];
+                    const uint32_t alpha = work.format == 1u ? (rgb ? uint32_t(work.alpha) << 24 : 0u) : pixel & 0xff000000u;
+                    pixel = rgb | alpha;
+                }
+            return;
+        }
+        if (pc != 0x0013E420u) throw std::runtime_error("native debug font: unknown boundary");
+        work.image->key = work.destination; work.image->version = ++g_textureVersion;
+        // Bind the identity captured at lookup, not a record which another
+        // resumed call may have rebound while this string was being composed.
+        g_pinned[work.destination] = {work.destinationPixels, work.destinationTex0, work.image};
+        guest.write32(work.font + 0x18u, 0u);
+        owner->second.erase(stack);
+        if (owner->second.empty()) pending.erase(owner);
     }
 
     void install(Runtime &runtime, bozo::port::Registry &registry)

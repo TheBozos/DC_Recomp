@@ -133,3 +133,20 @@
 0x00130638 0xdf828bf0 0x00000000 # discard unused ZBUF scalar load in delay slot
 0x00130730 0x3c020024 0x0804c1d2 # retain matrices/mode restore, skip chain to epilogue 0x130748
 0x00130734 0x24456100 0x00000000 # discard unused chain address
+# CDebugFont: retain all three texture lookups, native frame query, text cursor/space/newline logic,
+# string-count reset and final native sprite. Native boundaries compose pixels
+# from the looked-up atlas and destination records, never from transfer packets.
+0x0013dfa8 0x27a30110 0x27a30110 # capture looked-up atlas, before descriptor packing
+0x0013dfac 0xdc420028 0x0804f7f6 # continue at second texture lookup setup 0x13dfd8
+0x0013dfb0 0xfc620000 0x00000000 # discard obsolete descriptor store in delay slot
+0x0013dff0 0x27a30118 0x27a30118 # native destination clear and TEXA bookkeeping
+0x0013dff4 0xdc420028 0x0804f890 # skip state/clear/output setup to retained frame query 0x13e240
+0x0013dff8 0xfc620000 0x00000000 # discard obsolete descriptor store in delay slot
+0x0013e24c 0x97a20130 0x0804f8b2 # retain query's native bookkeeping; skip descriptor packing to cursor init 0x13e2c8
+0x0013e250 0x30423fff 0x00000000 # discard unused descriptor mask in delay slot
+0x0013e314 0x92220000 0x92220000 # native glyph copy from current character/cursor
+0x0013e318 0x2442ffdf 0x0804f903 # continue at retained cursor increment 0x13e40c
+0x0013e31c 0x304200ff 0x00000000 # discard obsolete glyph/transfer packing
+0x0013e420 0xaea00018 0xaea00018 # publish immutable native texture; retain count reset
+0x0013e424 0x8f848bd4 0x0804f911 # skip packet flush/close to final sprite setup 0x13e444
+0x0013e428 0x2405003f 0x00000000 # discard obsolete packet argument

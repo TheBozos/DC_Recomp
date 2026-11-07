@@ -852,8 +852,7 @@ parity or qualify fishing gameplay.
 
 Evidence in `build/native-cleanup18/`:
 
-- The full pre-existing suite plus whole-function fishing comparison passes **38/38** (`tests.log`); after adding
-  the disc-free boundary suite, both fishing suites pass again (`final-fishing-tests.log`). The disc-free project
+- The final complete native suite passes **39/39** (`final-tests.log`), including both fishing suites. The disc-free project
   also passes **14/14**, including the new boundary suite, and CI builds this same game-free project (`disc-free.log`).
 - **144 original/adapted whole-function cases** cover both modes, all pole/model enable combinations, rejected,
   accepted and alternating projection masks, threshold boundaries, repeated points and edge coordinates. The

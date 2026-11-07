@@ -118,3 +118,18 @@
 0x001ab2cc 0x27828be8 0x0806acbf # skip state restore/packet close to pole logic 0x1ab2fc
 0x001ab2d0 0x72802628 0x00000000 # discard obsolete packet argument in delay slot
 0x001ab6e8 0x0c04b8a0 0x24020000 # final model texture reload also needs no packet
+# Native shadow wrappers: the model draw consumes the retained vectors/mode,
+# not the old TEST/ZBUF setters or prebuilt VIF/VU1 program-chain calls.
+# Keep the null-frame exits, vector copies, mode reset and matrix save/restore.
+0x001303f4 0x27a40030 0x0804c120 # MGDrawShadowFast: to mode/draw setup 0x130480
+0x001303f8 0xdf828bf0 0x00000000 # discard unused ZBUF scalar load in delay slot
+0x001304a0 0x3c020024 0x0804c12e # retain mode reset, skip restore chain to epilogue 0x1304b8
+0x001304a4 0x24456100 0x00000000 # discard unused chain address
+0x00130514 0x27a40030 0x0804c168 # MGDrawShadowFast2: to mode/draw setup 0x1305a0
+0x00130518 0xdf828bf0 0x00000000 # discard unused ZBUF scalar load in delay slot
+0x001305c0 0x3c020024 0x0804c176 # retain mode reset, skip restore chain to epilogue 0x1305d8
+0x001305c4 0x24456100 0x00000000 # discard unused chain address
+0x00130634 0x27a400b0 0x0804c1b0 # MGDrawShadow: to mode/matrix-save setup 0x1306c0
+0x00130638 0xdf828bf0 0x00000000 # discard unused ZBUF scalar load in delay slot
+0x00130730 0x3c020024 0x0804c1d2 # retain matrices/mode restore, skip chain to epilogue 0x130748
+0x00130734 0x24456100 0x00000000 # discard unused chain address

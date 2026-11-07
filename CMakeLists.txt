@@ -47,13 +47,13 @@ foreach(image dc title dun)
     endif()
     list(APPEND files ${dc_gen}/${image}_${n}.cpp)
   endforeach()
-  set(native_adaptations)
-  set(native_adaptation_inputs)
+  # Patches belong to an image's compiled table. TITLE and DUN reuse virtual
+  # addresses, so their adaptations must never become global runtime overrides.
+  set(native_adaptation_inputs ${CMAKE_SOURCE_DIR}/recomp/${image}_native.patches)
+  set(native_adaptations --patches ${native_adaptation_inputs})
   set(image_externals ${dc_overlay_externals})
   if(image STREQUAL "dc")
     set(image_externals ${dc_externals})
-    set(native_adaptation_inputs ${CMAKE_SOURCE_DIR}/recomp/dc_native.patches)
-    set(native_adaptations --patches ${native_adaptation_inputs})
   endif()
   add_custom_command(OUTPUT ${files}
     COMMAND bozo-recomp ${dc_gen}/${image}.elf ${dc_gen} --prefix ${image} --symbol-prefix ${image}_ --files ${chunks} --no-comments --externals ${image_externals} ${native_adaptations}
@@ -267,5 +267,38 @@ if(DC_ENGINE_TESTS)
   dc_packet_wrapper_fixture(shadow_fast2)
   dc_packet_wrapper_fixture(shadow)
   dc_packet_wrapper_fixture(debug_font)
+  function(dc_overlay_packet_fixture kind image)
+    set(fixture_dir ${CMAKE_BINARY_DIR}/${kind}_reference)
+    string(TOUPPER ${image} raw_image)
+    set(outputs ${fixture_dir}/overlay_case.h)
+    foreach(variant ${kind}_ref ${kind}_native)
+      list(APPEND outputs ${fixture_dir}/${variant}_000.cpp ${fixture_dir}/${variant}_table.cpp
+                          ${fixture_dir}/${variant}_functions.h)
+    endforeach()
+    add_custom_command(OUTPUT ${outputs}
+      COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/make_overlay_packet_fixture.py ${kind}
+        ${dc_gen}/${image}.elf ${CMAKE_SOURCE_DIR}/game/${raw_image}.BIN
+        ${CMAKE_SOURCE_DIR}/recomp/${image}_native.patches ${fixture_dir}/reference.elf
+      COMMAND bozo-recomp ${fixture_dir}/reference.elf ${fixture_dir} --prefix ${kind}_ref
+        --symbol-prefix ${kind}_ref_ --files 1 --no-comments --externals ${fixture_dir}/reference.externals
+      COMMAND bozo-recomp ${fixture_dir}/reference.elf ${fixture_dir} --prefix ${kind}_native
+        --symbol-prefix ${kind}_native_ --files 1 --no-comments --externals ${fixture_dir}/reference.externals
+        --patches ${fixture_dir}/reference.patches
+      DEPENDS bozo-recomp ${dc_gen}/${image}.elf game/${raw_image}.BIN recomp/${image}_native.patches
+              tests/make_overlay_packet_fixture.py tests/overlay_packet_cases.py)
+    add_executable(dc-${kind}-packet-tests tests/dc_overlay_packet_tests.cpp ${outputs})
+    target_link_libraries(dc-${kind}-packet-tests PRIVATE dc_game bozo_host)
+    target_include_directories(dc-${kind}-packet-tests PRIVATE ${fixture_dir})
+    if(MINGW)
+      target_link_options(dc-${kind}-packet-tests PRIVATE -static)
+    endif()
+    add_test(NAME dc_native_${kind}_packets COMMAND dc-${kind}-packet-tests ${dc_gen}/${image}.elf)
+  endfunction()
+  foreach(address 1db0780 1db82d0 1db8550 1db87d0 1dbb8a0 1dbba90 1dc3ad0 1dc3c90 1dc8930 1dc9e70 1dd2220)
+    dc_overlay_packet_fixture(title_${address} title)
+  endforeach()
+  foreach(address 1dae2a0 1dc1510)
+    dc_overlay_packet_fixture(dun_${address} dun)
+  endforeach()
   add_test(NAME dc_external_image_boundaries COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/test_externals.py)
 endif()

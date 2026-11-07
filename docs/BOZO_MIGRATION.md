@@ -1554,3 +1554,83 @@ admitted packet-global overlap is established by the bounded positive pass. Runt
 patches and engine pin remain unchanged. Evidence stays under `build/native-cleanup27/`; no retail
 data, generated code, cards or captures are committed. Live DUN coverage remains **33/43** and
 497 sites remain unobserved globally; these tests add no gameplay, visual or full-game qualification.
+
+## LoadChara2 pack extents and cursor boundaries
+
+The three unresolved copies now have an explicit conditional contract in `dc_loadchara_audit.py`.
+Instruction fingerprints cover their selector predicates, lookup/copy/reservation sequences,
+complete `GetPackFile`, complete child allocator, global allocation/alignment helpers and the
+`GameInit` child-capacity binding. Installed replacements or native instruction hooks reject these
+contracts. They document the compiled path without resolving its mutable inputs in generic alias flow.
+
+`dc_pack_inventory.py` reads the initial character table, both archive indexes and the selected
+outer files. It checks HED/HD2 names/byte offsets/sizes/sectors, bounded headers and payloads,
+terminating node traversal and source hashes. The six initial selector packs contain 79 nodes;
+all their payload extents fit their outer files. These are validator checks, **not checks performed
+by the game's lookup**. No payload bytes are emitted or committed.
+
+| Copy PC | Initial selector / outer pack | Requested member | Artifact bytes | Reservation bytes |
+| --- | --- | --- | ---: | ---: |
+| `0x1dba73c` | 5 / `c18a.chr` | `c05w_h.img` | 132,224 | 132,288 |
+| `0x1dba7e0` | 5 / `c18a.chr` | `mgan01.chr` | 25,360 | 25,408 |
+| `0x1dba860` | 3 / `c05a.chr` | `c05_f03.chr` | 53,552 | 53,568 |
+
+The ordinary resident paths at `0x1d1230` and `0x20e98c` pass the selected pack base as `a2`.
+The latter uses background file loading; completion and preserved globals remain conditions.
+Normal DUN `LoadData` sets selector zero and loads `c01d.chr`, so that ordinary path does not take
+these three copies. Computed callers, changed paths/tables, short/failed reads and changed source
+headers are not closed. Earlier `LoadPackData* → ReadInfo` calls also use `CharaModelBuffer`;
+resetting its cursor at function entry does **not** prove a zero cursor at these copies.
+
+For an explicit snapshot, destination formation is
+`u32(base + u32(usedQwords << 4))`. The nominal child capacity is `0x33450` qwords.
+Assume its complete arena lies in global payload `[0x2ab080, 0x1c74980)` and
+`0 <= usedQwords <= capacityQwords`. Any destination then lies between the global start and
+one-past-end. With the largest verified member size, the write ends no later than `0x1c94e00`,
+below the first DUN switch array at `0x1dc2e70`. The envelope is disjoint from all 91 watched
+dispatch/packet ranges, including the resident vtables below the global payload. This establishes
+**conditional direct-write disjointness**, even allowing a child overflow; it does not establish
+the preconditions, preservation of pack metadata or capacity safety. Following allocations and the
+global allocator counter at `0x1c74980` may still be corrupted by a child overflow, with unresolved
+effects on later calls. This result is not fed back as an unconditional alias-flow fact.
+
+`memcpy` consumes the raw unsigned 32-bit pack size. Only **after** copying does the caller execute
+`SRA 6; ADDIU 1; SLL 6; SRA 4` and call the child allocator. For ordinary nonnegative sizes below
+the sign transition this reserves the next multiple of 64 bytes, including an extra block for
+an exact multiple and 64 bytes for zero. At `0x7fffffc0` it instead yields `-0x8000000` qwords;
+`0xffffffc0..0xffffffff` yields zero. The allocator adds in 32 bits and compares the signed result
+against signed capacity. Negative inputs and wrapped sums can pass. These arithmetic facts do
+not make a huge native copy succeed: full mapped source/destination ranges are checked first.
+Conversely a mapped copy can change a synthetic dispatch-table byte **before** a subsequent
+capacity rejection. The allocator prediction requires its metadata and the stack size to survive
+the copy; arbitrary copies can overwrite those inputs themselves.
+
+A missing/null pack lookup returns zero and leaves the output size untouched. Source zero is
+mapped guest RAM, so a missing member need not fault in native copying. The first and third size
+locals have no established initialization on their missing-member path. The second reuses the
+first local after it has been transformed to a qword reservation: with the first artifact size,
+that stale value is **8,268**, then interpreted as **bytes**, unless intervening texture calls alter
+it. Their complete source/arena effects remain open. No gameplay overflow or malformed-pack bug
+has been observed by this pass, and runtime behavior is unchanged.
+
+Reproduce the artifact envelope after producing a current packet-audit report:
+
+```bash
+python -I tools/dc_pack_inventory.py --root . --audit-report build/player-audit.json
+```
+
+Synthetic validation executes the generated resume spans through real compiled
+`GetPackFile`/`strcasecmp`, production `memcpy` and the complete child allocator. Stops are explicit
+at allocator completion or before its rejection diagnostic/infinite loop. Arithmetic-only cases
+start after copying and do not pretend to execute invalid huge copies. Cases cover actual-sized
+synthetic payloads, mapped source zero/stale lengths, RAM mirrors, child overflows, dispatch-byte
+mutation before rejection, negative cursors and signed wrapping. All fixture RAM is synthetic;
+these are controlled effects, not gameplay or observed source-pack mutation. Local evidence and
+source hashes remain under `build/native-cleanup28/`. The retired global packet reset, runtime,
+production patches, engine pin, player saves and live DUN coverage **33/43** are unchanged.
+
+Validation comprises **75 normal suites**, **20 disc-free suites**, **79 compiled boundary cases**
+and **14 Python unit methods**. Nine private-ELF negative audits include changed pack-size fields,
+signed rounding, capacity checks and selector predicates, in addition to the previous bulk/callee
+overlap, constructor and loader guards. Source-local qualification records distinguish the full
+suite run from the final targeted rebuild of strengthened fixture assertions.

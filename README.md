@@ -89,6 +89,8 @@ See [the cleanup and validation notes](docs/BOZO_MIGRATION.md#native-graphics-cl
 
 Static models now retain their captured geometry after loading buffers are reused. This fixes a source-lifetime
 failure that could remove Norune's terrain; the controlled before/after reproduction is recorded in the migration notes.
+The fishing-line drawing loop now hands its projected points directly to native segments, retaining its visibility
+and pole/model work without constructing graphics packets. Fishing gameplay and console line rasterization remain unchecked.
 
 Known defects, including issues carried over from the earlier build:
 

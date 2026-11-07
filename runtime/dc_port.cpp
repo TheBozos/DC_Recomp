@@ -9,11 +9,17 @@ namespace dc::native
 {
     void install(Runtime &, bozo::port::Registry &);
     void publish();
+    void fishLineVertex(uint8_t *, R5900Context *, Runtime *);
 } // namespace dc::native
 namespace dc
 {
-    bool nativeInstruction(uint8_t *, R5900Context *ctx, Runtime *rt, uint32_t pc)
+    bool nativeInstruction(uint8_t *ram, R5900Context *ctx, Runtime *rt, uint32_t pc)
     {
+        if (pc == 0x001AB290u)
+        {
+            dc::native::fishLineVertex(ram, ctx, rt);
+            return true;
+        }
         if (pc == 0x0012D268u)
         {
             dc::native::queryVisibility(*rt, *ctx);

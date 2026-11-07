@@ -4244,6 +4244,48 @@ namespace dc::native
         });
     }
 
+    // FishLineDraw's compiled loop has already projected this point and decided
+    // whether it connects to its predecessor. No packed graphics output is read.
+    // Like DrawLine, native segments are one-pixel-wide quads; console line
+    // rasterization and fishing gameplay still require visual qualification.
+    void fishLineVertex(uint8_t *ram, R5900Context *ctx, Runtime *runtime)
+    {
+        struct Strip
+        {
+            Runtime *owner = nullptr;
+            uint32_t next = 0;
+            Point3 previous{};
+        };
+        static thread_local Strip strip;
+        const uint32_t index = getRegU32(ctx, 19), decision = getRegU32(ctx, 5);
+        if (index >= 24u || (decision != 4u && decision != 12u))
+            throw std::runtime_error("native fishing line: invalid point boundary");
+        if (index == 0u) strip = {runtime, 0u, {}};
+        if (strip.owner != runtime || strip.next != index)
+            throw std::runtime_error("native fishing line: nonsequential points");
+        bozo::libs::Guest guest(*runtime, ctx);
+        const uint32_t address = getRegU32(ctx, 29) + 0x70u;
+        guest.in(address, 12);
+        const Point3 point = pointAt(ram, address, false);
+        if (index != 0u && decision == 4u)
+        {
+            const Point3 &a = strip.previous, &b = point;
+            float nx = -(b.y - a.y), ny = b.x - a.x;
+            const float length = std::sqrt(nx * nx + ny * ny);
+            if (length > 0.0f)
+            {
+                nx *= 0.5f / length; ny *= 0.5f / length;
+                const Point3 corners[4] = {{a.x - nx, a.y - ny, a.z, 1}, {a.x + nx, a.y + ny, a.z, 1},
+                                          {b.x - nx, b.y - ny, b.z, 1}, {b.x + nx, b.y + ny, b.z, 1}};
+                const float zero[4] = {};
+                const uint32_t colours[4] = {0x80808080u, 0x80808080u, 0x80808080u, 0x80808080u};
+                draw3D(ram, 0u, corners, zero, zero, colours, false, true);
+            }
+        }
+        strip.previous = point;
+        strip.next = index + 1u;
+    }
+
     void install(Runtime &runtime, bozo::port::Registry &registry)
     {
         // DC_NO_DOF=1 (diagnosis): DepthOfField (0x1652C0, the cutscenes' blur behind the focus plane) does nothing.

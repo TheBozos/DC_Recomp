@@ -1,0 +1,45 @@
+# SCUS-97111 TITLE.BIN only. Applied during image codegen, never a global override.
+# Guard every replaced word; preserve surrounding native copies and state logic.
+# title_1db82d0 setTexScroll__Fv
+0x01db832c 0x8f848bd4 0x0876e0e6 # skip packet-only envelope to 0x1db8398
+0x01db8330 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+# title_1db8550 setCloudTexScroll__Fv
+0x01db85ac 0x8f848bd4 0x0876e186 # skip packet-only envelope to 0x1db8618
+0x01db85b0 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+# title_1db87d0 FaceChange__Fi
+0x01db8810 0x8f848bd4 0x0876e21f # skip packet-only envelope to 0x1db887c
+0x01db8814 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+0x01db8e68 0x8f848bd4 0x0876e3b3 # skip packet-only envelope to 0x1db8ecc
+0x01db8e6c 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+# title_1dbb8a0 setTexAnime__Fv
+0x01dbb8cc 0x8f848bd4 0x0876ee4e # skip packet-only envelope to 0x1dbb938
+0x01dbb8d0 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+# title_1dbba90 FaceChange__Fi
+0x01dbbab8 0x8f848bd4 0x0876eec7 # skip packet-only envelope to 0x1dbbb1c
+0x01dbbabc 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+0x01dbbe10 0x8f848bd4 0x0876ef9d # skip packet-only envelope to 0x1dbbe74
+0x01dbbe14 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+# title_1dc3ad0 setTexAnim__Fv
+0x01dc3adc 0x8f848bd4 0x08770ed0 # skip packet-only envelope to 0x1dc3b40
+0x01dc3ae0 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+0x01dc3c18 0x8f848bd4 0x08770f1f # skip packet-only envelope to 0x1dc3c7c
+0x01dc3c1c 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+# title_1dc3c90 FaceChange__Fi
+0x01dc3cb8 0x8f848bd4 0x08770f47 # skip packet-only envelope to 0x1dc3d1c
+0x01dc3cbc 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+0x01dc401c 0x8f848bd4 0x08771020 # skip packet-only envelope to 0x1dc4080
+0x01dc4020 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+# title_1dc8930 FaceChange__Fi
+0x01dc8950 0x8f848bd4 0x0877226d # skip packet-only envelope to 0x1dc89b4
+0x01dc8954 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+0x01dc8bc4 0x8f848bd4 0x0877230a # skip packet-only envelope to 0x1dc8c28
+0x01dc8bc8 0x70002e28 0x00000000 # discard obsolete packet argument in delay slot
+# title_1db0780 retained native draw boundary
+0x01db0850 0x3c020024 0x0876c21d # skip packet-only envelope to 0x1db0874
+0x01db0854 0x24456100 0x00000000 # discard obsolete packet argument in delay slot
+# title_1dc9e70 retained native draw boundary
+0x01dc9f30 0x3c020024 0x087727d5 # skip packet-only envelope to 0x1dc9f54
+0x01dc9f34 0x24456100 0x00000000 # discard obsolete packet argument in delay slot
+# title_1dd2220 retained native draw boundary
+0x01dd222c 0x3c020024 0x08774891 # skip packet-only envelope to 0x1dd2244
+0x01dd2230 0x24456100 0x00000000 # discard obsolete packet argument in delay slot

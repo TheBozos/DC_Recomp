@@ -969,3 +969,64 @@ images. It finds statically reachable packet calls in resident `main`, `MGInitVi
 The audit accounts for the current guarded resident jumps; it is not a whole-program proof through indirect
 calls or all runtime conditions. Existing native replacements still cover many other listed retail producers.
 These remaining paths are why the global reset is retained. No retail assets or generated code are committed.
+
+## Image-scoped TITLE and DUN packet retirement
+
+The next batch removes 18 packet-only envelopes in 13 overlay owners. `recomp/title_native.patches`
+contains 32 guarded words; `recomp/dun_native.patches` contains four. CMake applies each list only while
+compiling its owning ELF. The raw overlay identities and identity-selected module dispatch remain intact.
+No runtime override is installed at an overlay address: TITLE and DUN share the same virtual address slot.
+BozoEngine stays pinned at `4a8f70a5021cbb3429800a02259ae7b816581ee0`.
+
+| Image | Owner | Retired work |
+| --- | --- | --- |
+| TITLE | `DrawProcess` `0x01db0780`, `0x01dc9e70` | Static VIF chain call and terminate |
+| TITLE | `setTexScroll` `0x01db82d0`, `setCloudTexScroll` `0x01db8550` | Leading texture-flush envelope |
+| TITLE | `FaceChange` `0x01db87d0` | Leading flush/terminate and trailing flush |
+| TITLE | `setTexAnime` `0x01dbb8a0` | Leading texture-flush envelope |
+| TITLE | `FaceChange` `0x01dbba90`, `0x01dc3c90`, `0x01dc8930` | Leading and trailing texture-flush envelopes |
+| TITLE | `setTexAnim` `0x01dc3ad0` | Leading and trailing texture-flush envelopes |
+| TITLE | `TitleLoop` `0x01dd2220` | Static VIF chain call |
+| DUN | `MainDraw` `0x01dae2a0` | Static VIF chain call |
+| DUN | `LoaderLoop` `0x01dc1510` | Static VIF chain call and terminate |
+
+Every envelope becomes a guarded jump with an empty delay slot. The surrounding original code retains
+texture lookup, TEX0 identifier decoding, rectangle construction, native `MoveImageTest`/`MGMoveImage`
+copies, phase arithmetic, RNG, writable face tables and animation flags. Camera/draw helpers, texture
+reload and debug-font composition remain at their original call sites. `MoveImageTest` and texture reload
+already ignore their compatibility packet arguments. Unused static tag copies to local stack scratch
+are left in place; they do not publish packet output.
+
+Qualification uses original/adapted code generated from the same retail bytes and the exact production
+patch subset (`tests/make_overlay_packet_fixture.py`, `tests/overlay_packet_cases.py`). Raw-image SHA-1
+checks reject another overlay or revision. No retail code or generated fixture is committed.
+
+- Eight small texture/face owners execute as complete original functions. Five larger draw/loop owners
+  use exact mid-function spans around each retired envelope and adjacent retained calls, with a synthetic
+  save/return wrapper. These spans do not exercise the complete draw/loader state machines.
+- **1,904 original/adapted cases pass** across the 13 owners. They exercise absent/distinct/aliased
+  textures, raw and synthetic populated face tables, selectors, phase boundaries and animation flags.
+  Both versions together make 1,100 controlled native copies and 28 real compiled RNG calls. The original
+  packet builders and float conversion execute compiled resident implementations. Native copy/lookup and
+  adjacent camera/draw helpers are controlled boundaries whose ordered consumed inputs are compared.
+- All non-stack logical RAM, native-copy rectangles/identifiers/stack arguments, saved full registers, return
+  state and outgoing float status match. The adapted versions make zero packet-helper calls with an
+  inaccessible packet pointer and untouched packet guards. The synthetic span wrapper reserves `s7`
+  for its return address; that register is excluded from those spans' saved-register assertion.
+- **57/57 local suites pass** (`build/native-cleanup21/qualified-tests.log`). Negative codegen checks
+  reject DUN patches on TITLE and TITLE patches on DUN with expected-word mismatches, and fixture
+  extraction rejects the other raw overlay's hash.
+- The final **5,800-frame headless/windowed inventory routes complete**, with zero register/unknown
+  accesses, VU0 microprogram calls or GIF submissions. Native VIF1 completion counts are 5,686 / 6,055;
+  sync counts are 6,884 / 7,253 (`qualified-headless.log`, `qualified-gameplay.log`). Eight window captures
+  are retained without visual inspection. The feeder probe covers resident owners, so these runs do not
+  establish execution of each changed overlay owner or dungeon/combat coverage. Targeted coverage remains
+  the fixtures above; no console/visual-parity claim is made.
+- Final headless 48 kHz stereo PCM contains 4,686,527 frames, RMS 3,599.338, tail RMS 3,496.547, peak 28,775.
+  Windowed PCM contains 5,074,570 frames, RMS 3,576.803, tail RMS 2,985.746, peak 32,766. Audio is active;
+  subjective listening and exact timing remain unqualified (`qualified-evidence.py`).
+
+The updated local CFG audit applies all three image patch lists and finds no remaining direct statically
+reachable calls to the packet SDK in either overlay (`build/native-cleanup21/reachable-packet-callers.txt`).
+It does not prove indirect-call or all-runtime-path coverage. Resident startup/frame/loading producers
+remain, including `MGInitVif1Packet`, `MGBeginFrame` and `init_now_loading`; the global packet reset stays.

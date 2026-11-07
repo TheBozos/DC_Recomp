@@ -1,0 +1,8 @@
+# SCUS-97111 DUN.BIN only. Applied during image codegen, never a global override.
+# Guard every replaced word; preserve surrounding native copies and state logic.
+# dun_1dae2a0 retained native draw boundary
+0x01dae31c 0x3c020024 0x0876b8cd # skip packet-only envelope to 0x1dae334
+0x01dae320 0x24456100 0x00000000 # discard obsolete packet argument in delay slot
+# dun_1dc1510 retained native draw boundary
+0x01dc1720 0x3c020024 0x087705d1 # skip packet-only envelope to 0x1dc1744
+0x01dc1724 0x24456100 0x00000000 # discard obsolete packet argument in delay slot

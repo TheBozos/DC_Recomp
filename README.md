@@ -209,6 +209,9 @@ text starting at the current game frame. `--frames 0` runs until the window clos
 `--capture-dir`, `--capture-frame` and `--wav` provide native captures. There is no fallback switch.
 `--fullscreen` starts fullscreen (F11 toggles it); `--no-vsync` disables VSync for presentation comparisons.
 The default remains windowed with VSync enabled.
+Open **F2 → Cheats** for independent **Infinite health**, **Infinite weapon durability** and **Infinite thirst**
+toggles. They keep party HP, equipped-weapon WHP and thirst gauges full. All start disabled on each launch;
+turning a toggle off restores normal depletion.
 `--profile-io` prints remaining register accesses by guest PC/address after a bounded run; the validated Norune route
 prints a zero total. The guarded adaptations in `recomp/dc_native.patches` are applied automatically by CMake.
 MDT creation/remaking, shadow-model and cloth preparation now retain native asset bookkeeping without serializing

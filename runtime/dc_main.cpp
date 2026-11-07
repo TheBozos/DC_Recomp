@@ -4,6 +4,7 @@
 #include "bozo/host/free_host.h"
 #include "bozo/port.h"
 #include "dc_functions.h"
+#include "dc_cheats.h"
 #include "dun_functions.h"
 #include "title_functions.h"
 #ifdef DC_AUDIT_INDIRECT
@@ -98,6 +99,7 @@ int main(int argc, char **argv)
     d.setFunctions(dc_function_table, dc_function_count, dc_resume_table, dc_resume_count);
     bozo::port::Registry registry;
     dc::install(d.runtime(), registry);
+    dc::cheats::install(d.runtime(), registry);
     std::string error;
     if (!host.setUp(d, dc_external_table, dc_external_count, &registry, error))
     {
@@ -181,6 +183,7 @@ int main(int argc, char **argv)
 #ifdef DC_WITH_WINDOW
     if (window)
     {
+        dc::cheats::registerMenu();
         bozo::app::Game game;
         game.run = run;
         game.stop = [&] { host.requestStop(); };

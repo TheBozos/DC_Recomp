@@ -107,3 +107,14 @@
 # Keep the complete fade/input/draw state machine and selected-language result.
 0x00244c78 0x3c020024 0x08091327 # skip static append/terminate to state read 0x244c9c
 0x00244c7c 0x24456100 0x00000000 # discard obsolete chain pointer in delay slot
+# FishLineDraw: retain all 24 projections/visibility decisions and pole/model math.
+# An inline native boundary consumes the unpacked point and connection decision.
+0x001ab114 0x0c04b8a0 0x24020000 # texture reload needs no packet argument
+0x001ab138 0x0c04b8a0 0x0806ac7a # skip state envelope to point-loop initialization 0x1ab1e8
+0x001ab13c 0x00000000 0x00000000 # guard unchanged delay slot
+0x001ab290 0x8fa30070 0x8fa30070 # native projected-point boundary, before any XYZ packing
+0x001ab294 0x8fa20074 0x0806acae # continue at retained previous-visibility update 0x1ab2b8
+0x001ab298 0x00021438 0x00000000 # discard obsolete coordinate shift in delay slot
+0x001ab2cc 0x27828be8 0x0806acbf # skip state restore/packet close to pole logic 0x1ab2fc
+0x001ab2d0 0x72802628 0x00000000 # discard obsolete packet argument in delay slot
+0x001ab6e8 0x0c04b8a0 0x24020000 # final model texture reload also needs no packet

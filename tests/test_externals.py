@@ -14,11 +14,11 @@ class ExternalImages(unittest.TestCase):
             root = pathlib.Path(folder)
             (root / "runtime").mkdir()
             (root / "runtime" / "dc_fixture.cpp").write_text(
-                "0x12C19C 0x15434C 0x12D268 0x12DAE0")
+                "0x12C19C 0x15434C 0x12D268 0x1AB290 0x12DAE0")
             output = root / "overrides.txt"
             subprocess.run([sys.executable, "-I", str(SCRIPT), "--overrides", str(root), str(output)], check=True)
             entries = output.read_text().splitlines()
-            for pc in ("12c19c", "15434c", "12d268"):
+            for pc in ("12c19c", "15434c", "12d268", "1ab290"):
                 self.assertIn("native 0x" + pc, entries)
                 self.assertNotIn("override 0x" + pc, entries)
             self.assertIn("override 0x12dae0", entries)
@@ -32,11 +32,12 @@ class ExternalImages(unittest.TestCase):
                               "override 0x3000\n"
                               "native 0x12c19c\n"
                               "native 0x15434c\n"
-                              "native 0x12d268\n")
+                              "native 0x12d268\n"
+                              "native 0x1ab290\n")
             subprocess.run([sys.executable, "-I", str(SCRIPT), str(source), str(resident), str(overlay)], check=True)
             base, extra = resident.read_text().splitlines(), overlay.read_text().splitlines()
             self.assertEqual([line for line in base if line.startswith("native ")],
-                             ["native 0x12c19c", "native 0x15434c", "native 0x12d268"])
+                             ["native 0x12c19c", "native 0x15434c", "native 0x12d268", "native 0x1ab290"])
             self.assertFalse(any(line.startswith("native ") for line in extra))
             self.assertEqual([line for line in base if not line.startswith("native ")], extra)
             self.assertIn("stub 0x1000 # memcpy", extra)

@@ -5,7 +5,7 @@ if sys.argv[1]=='--overrides':
     addresses=set()
     for path in (root/'runtime').glob('dc_*.cpp'):
         addresses.update(int(x,16) for x in re.findall(r'0x([0-9a-fA-F]+)',path.read_text()))
-    native_sites=(0x12C19C,0x15434C,0x12D268) # logical fields/visibility; guarded by dc_native.patches
+    native_sites=(0x12C19C,0x15434C,0x12D268,0x1AB290) # fields/visibility/fishing point; guarded by dc_native.patches
     out.write_text(''.join(f'override 0x{x:x}\n' for x in sorted(addresses) if 0x100000 <= x < 0x245300 and x not in native_sites)
                    + ''.join(f'native 0x{x:x}\n' for x in native_sites))
     sys.exit(0)

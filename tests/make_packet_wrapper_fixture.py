@@ -35,6 +35,9 @@ base, end, helpers = {
     'texanim_state': (0x19f9b0, 0x19fb70, [0x1110b0, 0x1312d0, 0x12f210]),
     'item_state': (0x1b1ef0, 0x1b20bc, [0x1312d0, 0x140660]),
     'language': (0x244c70, 0x244d54, [0x120d70, 0x120c28, 0x2451f0, 0x245240, 0x244d60, 0x244e40]),
+    'fishing': (0x1ab0f0, 0x1ab73c, [0x12e280, 0x133070, 0x12e290, 0x122ff0, 0x122fd0,
+        0x1217a0, 0x1217e8, 0x1217b8, 0x121648, 0x121600, 0x12a230, 0x128560,
+        0x127ee0, 0x128180, 0x12ed80]),
 }[kind]
 phoff = struct.unpack_from('<I', data, 28)[0]
 for i in range(struct.unpack_from('<H', data, 44)[0]):
@@ -70,10 +73,12 @@ target.write_bytes(out + b''.join(struct.pack('<10I', *s) for s in sections))
 target.with_suffix('.externals').write_text(''.join(f'override 0x{pc:x}\n' for pc in
     helpers + [0x120c80, 0x120e38, 0x120ec0, 0x121028, 0x120ed8, 0x120e90])
     + ('native 0x15434c\n' if kind == 'loading' else ''))
+target.with_suffix('.native.externals').write_text(target.with_suffix('.externals').read_text()
+    + ('native 0x1ab290\n' if kind == 'fishing' else ''))
 selected = [line for line in patches.read_text().splitlines()
             if line.split('#')[0].strip() and span_start <= int(line.split()[0], 16) < end]
 expected = {'frame_close': 2, 'frame_draw': 0, 'frame_member': 0, 'mdt_draw': 2,
-            'message': 2, 'edit_state': 2, 'menu_state': 2, 'loading': 9, 'fire': 6, 'language': 2}.get(kind, 4)
+            'message': 2, 'edit_state': 2, 'menu_state': 2, 'loading': 9, 'fire': 6, 'language': 2, 'fishing': 9}.get(kind, 4)
 if len(selected) != expected:
     raise SystemExit('wrapper fixture requires its complete guarded production adaptation subset')
 target.with_suffix('.patches').write_text('\n'.join(selected) + '\n')

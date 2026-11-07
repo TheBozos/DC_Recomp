@@ -834,3 +834,47 @@ The earlier failed captures remain useful evidence; this fixes the demonstrated 
 not every possible rendering defect. Other mixed builders, main packet reset, legacy extents, native-copy
 identifiers, unsupported readbacks and FishLineDraw geometry remain separate work. Coordination updates remain
 queued locally during the C2C/F2F outage. No retail assets, RAM captures or generated code are committed.
+
+## Native fishing-line geometry
+
+`FishLineDraw` (`0x1ab0f0`) previously placed its actual projected line geometry into an unused console output
+stream. Nine guarded offline entries now bypass its two packet getters, leading state envelope, coordinate
+packing/append and trailing state/close calls. The inline native boundary at `0x1ab290` receives the unpacked
+stack point, loop index and already-computed connect/skip decision. All 24 compiled projections, threshold/mode
+branches, previous-projection acceptance updates, vector math, texture selection and pole/model calls remain.
+No packet output or console state is read by the native boundary; no engine change or pin update is required.
+
+Native segments follow the existing `DrawLine` convention: one logical-pixel-wide untextured quads, depth-tested
+without depth writes, using the current native alpha blend. Each call starts a fresh strip; skipped connections
+still advance its endpoint, and zero-length segments emit nothing. Invalid indices/decisions or nonsequential
+entries fail explicitly. This geometry translation does **not** establish console line rasterization/material
+parity or qualify fishing gameplay.
+
+Evidence in `build/native-cleanup18/`:
+
+- The final complete native suite passes **39/39** (`final-tests.log`), including both fishing suites. The disc-free project
+  also passes **14/14**, including the new boundary suite, and CI builds this same game-free project (`disc-free.log`).
+- **144 original/adapted whole-function cases** cover both modes, all pole/model enable combinations, rejected,
+  accepted and alternating projection masks, threshold boundaries, repeated points and edge coordinates. The
+  original packet helpers and retained vector math execute their compiled implementations. Texture/model and
+  projection services are controlled boundaries; their ordered semantic inputs and logical effects match.
+  All 24 unpacked points and connection decisions match the reference's emitted coordinates. The adapted loop
+  executes no packet helper/getter with an inaccessible global packet pointer and untouched packet guards.
+- The comparison checks **292 native segments** in the actual published renderer frames: connection counts,
+  endpoint centers/depths, six vertices per segment and one-pixel width. Saved full registers, stack/return,
+  floating-point status and all non-stack logical RAM match. The inline draw preserves the complete register
+  context. The separate game-free suite also checks signed coordinates, depth truncation, color, skipped and
+  degenerate segments, fresh-call resets, explicit invalid-entry failures and no native RAM writes.
+
+- Both **5,800-frame headless/windowed inventory routes complete** with zero register/unknown accesses, zero
+  VU0 microprogram calls and zero GIF SDK submissions. Native VIF1 completion counts are 5,686 / 6,051 and sync
+  counts 6,884 / 7,249 (`headless.log`, `gameplay.log`). Neither sampled feeder report includes `FishLineDraw`;
+  these routes do not qualify its gameplay execution. Eight window captures are retained but were not visually
+  inspected in this batch; no new visual-parity claim is made.
+- Headless 48 kHz stereo PCM contains 4,686,527 frames, RMS 3,599.338, tail RMS 3,496.547 and peak 28,775.
+  Windowed PCM contains 5,093,752 frames, RMS 3,568.074, tail RMS 2,992.469 and peak 32,766. Audio is active;
+  subjective listening and exact audio timing remain unchecked (`evidence.py`).
+
+Fishing itself remains fixture-qualified until a live fishing route and its captures are checked. The main packet reset, other mixed
+builders, legacy allocation extents, console-format native-copy identifiers and unsupported readbacks remain
+separate work. No retail assets or generated code are committed.

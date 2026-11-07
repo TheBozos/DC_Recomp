@@ -241,6 +241,11 @@ copies carry 36 of those vptrs. Unknown pack-derived extents and bounded callee 
 The three `LoadChara2` copies now have guarded size/cursor contracts and a read-only pack inventory.
 Current artifact sizes cannot directly reach dispatch data under valid arena/cursor preconditions;
 post-copy allocation checks, stale sizes and possible corruption of later allocator state remain open.
+The intervening `LoadPackData` / `ReadInfo` audit preserves those conditions: parser-state resets
+do not reset the shared arena cursor, CFG comment removal can write one byte beyond its declared
+payload, and aliased IMG destinations can change pack headers or DUN dispatch bytes. The eight
+initial CFG snapshots have no preprocessing header hits; nested loaders and mutable callbacks
+still prevent a complete header-preservation or dispatch-disjointness proof.
 
 ## Disc facts
 

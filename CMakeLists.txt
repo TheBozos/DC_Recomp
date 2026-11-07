@@ -360,6 +360,24 @@ if(DC_ENGINE_TESTS)
   endif()
   add_test(NAME dc_native_packet_audit COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_packet_audit.py
     --root ${CMAKE_SOURCE_DIR} --registry $<TARGET_FILE:dc-packet-audit-tests> --images ${dc_gen})
+  set(dun_dispatch_dir ${CMAKE_BINARY_DIR}/dun_dispatch_fixture)
+  set(dun_dispatch_outputs ${dun_dispatch_dir}/dun_dispatch_000.cpp ${dun_dispatch_dir}/dun_dispatch_table.cpp
+      ${dun_dispatch_dir}/dun_dispatch_functions.h ${dun_dispatch_dir}/dispatch_cases.h)
+  add_custom_command(OUTPUT ${dun_dispatch_outputs}
+    COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/make_dun_dispatch_fixture.py
+      ${dc_gen}/dun.elf ${CMAKE_SOURCE_DIR}/game/DUN.BIN ${CMAKE_SOURCE_DIR}/recomp/dun_native.patches
+      ${dc_gen}/dun.indirect.json ${dun_dispatch_dir}
+    COMMAND bozo-recomp ${dun_dispatch_dir}/fixture.elf ${dun_dispatch_dir} --prefix dun_dispatch
+      --symbol-prefix dun_dispatch_ --files 1 --no-comments --externals ${dun_dispatch_dir}/fixture.externals
+    DEPENDS bozo-recomp tests/make_dun_dispatch_fixture.py tools/dc_packet_audit.py tools/symtab_map.py
+      ${dc_gen}/dun.elf ${dc_gen}/dun.indirect.json game/DUN.BIN recomp/dun_native.patches)
+  add_executable(dc-dun-dispatch-tests tests/dc_dun_dispatch_tests.cpp ${dun_dispatch_outputs})
+  target_link_libraries(dc-dun-dispatch-tests PRIVATE bozo_host)
+  target_include_directories(dc-dun-dispatch-tests PRIVATE ${dun_dispatch_dir})
+  if(MINGW)
+    target_link_options(dc-dun-dispatch-tests PRIVATE -static)
+  endif()
+  add_test(NAME dc_dun_remaining_dispatch COMMAND dc-dun-dispatch-tests ${dun_dispatch_dir}/fixture.elf)
   add_executable(dc-indirect-trace-tests tests/dc_indirect_trace_tests.cpp runtime/dc_indirect_trace.cpp)
   target_link_libraries(dc-indirect-trace-tests PRIVATE dc_game bozo_host)
   target_compile_definitions(dc-indirect-trace-tests PRIVATE DC_TRACE_GAME)

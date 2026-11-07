@@ -1514,7 +1514,9 @@ preservation result from the preceding batch does not apply to these raw copies.
 their watched and symbolic writes. It preserves the active overlay through resident callees, keeps
 caller-stack pointers distinct from the callee's frame, and stops at native/SDK boundaries rather
 than analyzing a replaced original. Known `__construct_array` bindings supply guarded normal-loop
-constructor candidates. Contexts recover the 45 embedded constructor vptr stores and the pack
+constructor candidates after proving the count's 64-bit value from a dominating local immediate
+within the compiler-known CFG; unproved counts remain opaque. The complete helper body is
+fingerprinted. Contexts recover the 45 embedded constructor vptr stores and the pack
 lookup's size-output stores. Callee records are possible effects, not an interleaved trace or a
 complete memory/return summary; they are not fed back as assumed values into callers.
 
@@ -1543,7 +1545,7 @@ Mapped-RAM validation in native copying also does not establish this logical are
 Pack metadata, failed lookup/stale outputs, cursor arithmetic and opaque native writes therefore
 remain unresolved; no disjointness or complete target-set proof is claimed for these copies.
 
-Validation: **73/73 normal suites**, **19/19 game-free suites**, including 24 alias tests and 16
+Validation: **73/73 normal suites**, **19/19 game-free suites**, including 24 alias tests and 17
 callee/range tests. Another **94 cases** check the production copy/fill handlers and complete compiled
 `memmove` for canonical sizes, mirror addresses, overlaps, field boundaries and exact byte effects.
 Five private-ELF negative audits reject packet overlap through a bulk call or a callee, shifted

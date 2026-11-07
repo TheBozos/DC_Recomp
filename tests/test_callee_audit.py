@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'tools'))
 from dc_alias_audit import constant, value, encode
-from dc_callee_audit import bulk_effect, contextual_writes, overlay_load_contract, nested_effect_regions
+from dc_callee_audit import bulk_effect, contextual_writes, overlay_load_contract, nested_effect_regions, straightline_array_count
 
 REGIONS=[dict(name='table',start=0x4000,end=0x4004)]
 
@@ -121,6 +121,14 @@ class CalleeAudit(unittest.TestCase):
     def test_constructor_layout_cannot_be_guessed_from_offset(self):
         with self.assertRaisesRegex(ValueError,'layout changed'):
             nested_effect_regions([],lambda pc:0)
+
+    def test_array_count_requires_a_64_bit_definition_and_no_bypass(self):
+        p=programs({0x1000:[0x24080008,0x0c0488b4,0,0x03e00008,0]})['dc']
+        self.assertEqual(straightline_array_count(p,dict(pc=0x1004)),8)
+        p=programs({0x1000:[0x24080001,0x0008403c,0x0c0488b4,0,0x03e00008,0]})['dc']
+        self.assertIsNone(straightline_array_count(p,dict(pc=0x1008)))
+        p=programs({0x1000:[0x10000003,0,0,0x24080008,0x0c0488b4,0,0x03e00008,0]})['dc']
+        self.assertIsNone(straightline_array_count(p,dict(pc=0x1010)))
 
 
 if __name__=='__main__':unittest.main()

@@ -4,6 +4,8 @@ This reports possible writes, not successful execution or immutable tables.
 Unknown lengths, invalid ranges, opaque calls and exploration bounds stay open.
 """
 import collections
+import hashlib
+import struct
 
 from dc_alias_audit import (BULK_CALLS, NATIVE_BULK, Pointer, UNKNOWN, WIDENED, analyze,
                             constant, decode, describe, encode, physical, scalar, shifted)
@@ -109,6 +111,36 @@ def overlay_load_contract(raw, regions, word=None):
             'limit':'artifact-instantiated loader contract, conditional on successful exact-file read at the declared base; mutable loader destinations and header aliases remain open'}
 
 
+def straightline_array_count(program, event):
+    """Prove a positive/zero 64-bit count from an adjacent zero-based immediate.
+
+    Compiler-known entries, branches/cases and preceding delay slots must not
+    bypass the definition. Arbitrary unproved interior entries remain out of scope.
+    """
+    pc=event['pc'];word=program['word']
+    owner=next((f for f in program['functions'] if f['start']<=pc<f['end']),None)
+    if owner is None or pc-4<owner['start'] or pc in owner.get('entries',()):return None
+    try:
+        if word(pc)!=0x0c0488b4 or word(pc+4)!=0:return None
+        definition=word(pc-4);op=definition>>26
+        if (definition>>21&31)!=0 or (definition>>16&31)!=8 or op not in (9,13):return None
+        n=definition&0xffff
+        if op==9 and n>=0x8000:return None
+        if any(at in program['natives'] for at in (pc-4,pc,pc+4)):return None
+        for at in range(owner['start'],owner['end'],4):
+            w=word(at);opcode=w>>26;rs=w>>21&31;rt=w>>16&31
+            branch=opcode in (1,4,5,6,7,20,21,22,23) or (opcode in (16,17,18) and rs==8)
+            transfer=branch or opcode in (2,3) or (opcode==0 and w&63 in (8,9))
+            if at==pc-8 and transfer:return None
+            if opcode in (2,3) and ((at+4)&0xf0000000 | (w&0x3ffffff)<<2)==pc:return None
+            if branch:
+                imm=(w&0xffff)-(0x10000 if w&0x8000 else 0)
+                if at+4+imm*4==pc:return None
+        if any(pc in s.get('targets',()) for s in program['facts'].values()):return None
+        return n
+    except (KeyError,ValueError):return None
+
+
 def contextual_writes(programs, seed_calls, regions, objects, gp, roots, max_depth=4,max_contexts=1536,array_limit=16):
     """Instantiate direct callees with caller values. Never run a replaced body.
 
@@ -157,12 +189,10 @@ def contextual_writes(programs, seed_calls, regions, objects, gp, roots, max_dep
         owner=next((f for f in program['functions'] if target==f['start'] or target in f.get('entries',())),None)
         if owner is None:
             boundaries.append(dict(path,target_image=selected,reason='no_compiler_entry'));continue
-        if target==0x1222d0:
-            guards={0x1222fc:0x70e0ae28,0x122308:0x7100a628,0x122324:0x70a0b628,
-                    0x122328:0x70808628,0x122338:0x24050001,0x12233c:0x02c0f809,
-                    0x122340:0x72002628,0x122348:0x02158021,0x12235c:0x00b4182b,
-                    0x122360:0x5460fff6,0x122364:0x24050001}
-            if any(program['word'](pc)!=expected for pc,expected in guards.items()):
+        count_proof=straightline_array_count(programs[source],event) if target==0x1222d0 else None
+        if target==0x1222d0 and count_proof is not None and scalar(args[4])==count_proof:
+            body=b''.join(struct.pack('<I',program['word'](pc)) for pc in range(0x1222d0,0x1223fc,4))
+            if hashlib.sha256(body).hexdigest()!='dc1f0d3ccf0538499373499d9d31be35b5f1d81b1a4bfeafa4db5fbaca20306b':
                 raise ValueError('constructor-array normal-loop contract changed')
         if depth>max_depth or len(contexts)>=max_contexts:
             boundaries.append(dict(path,target_image=selected,reason='context_depth_bound' if depth>max_depth else 'context_count_bound'));continue
@@ -172,6 +202,8 @@ def contextual_writes(programs, seed_calls, regions, objects, gp, roots, max_dep
         index=len(contexts);seen[key]=index
         row=dict(path,id=index,target_image=selected,active_overlay=active_overlay,condition=condition,
                  arguments=[encode(v) for v in args],also_reached_from=[])
+        canonical_array=target==0x1222d0 and count_proof is not None and scalar(args[4])==count_proof
+        if target==0x1222d0:row['array_count_64_proof']=count_proof if canonical_array else None
         contexts.append(row)
         flow=analyze(program['word'],owner,program['facts'],gp,regions,roots,program['names'],
                      native_pcs=program['natives'],input_arguments=args,entry_addresses=(target,))
@@ -180,13 +212,15 @@ def contextual_writes(programs, seed_calls, regions, objects, gp, roots, max_dep
             if e['kind']=='symbolic_write':row['symbolic_writes'].append(e)
             if e['kind'] in ('region_write','pointer_store','untyped_field_write'):row['writes'].append(e)
             if e['kind']=='bulk_call':row['bulk_calls'].append(bulk_effect(e,regions))
-            if e['kind']=='call' and not (target==0x1222d0 and e['pc']==0x12233c):
+            if e['kind']=='call' and not (canonical_array and e['pc']==0x12233c):
                 enqueue(selected,dict(e,owner=owner['start']),depth+1,index,condition,active_overlay)
         # __construct_array's normal loop calls ctor(element,1). Exception and
         # destructor paths remain separate opaque effects, not an exhaustive loop proof.
         if target==0x1222d0:
             ctor,stride,count=scalar(args[1]),scalar(args[3]),scalar(args[4])
-            if ctor is None or stride is None or count is None:
+            if not canonical_array:
+                boundaries.append(dict(path,parent=index,reason='array_count_64_unproved'))
+            elif ctor is None or stride is None or count is None:
                 boundaries.append(dict(path,parent=index,reason='array_constructor_arguments_unknown'))
             else:
                 for i in range(min(count,array_limit)):

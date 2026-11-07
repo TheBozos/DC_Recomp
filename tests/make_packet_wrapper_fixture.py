@@ -94,7 +94,11 @@ expected = {'frame_close': 2, 'frame_draw': 0, 'frame_member': 0, 'mdt_draw': 2,
             'message': 2, 'edit_state': 2, 'menu_state': 2, 'loading': 9, 'fire': 6, 'language': 2, 'fishing': 9,
             'debug_font': 14, 'packet_init': 2, 'begin_frame': 5, 'resident_chain': 2, 'loading_init': 2,
             'packet_reserve': 2, 'buffer_clear': 4, 'packet_handle': 1, 'packet_get': 1}.get(kind, 4)
-if len(selected) != expected:
+handle_sites = {int(line.split()[0], 16) for line in selected
+                if int(line.split()[0], 16) != 0x12e280
+                and int(line.split()[1], 16) & 0xffe0ffff == 0x8f808bd4
+                and int(line.split()[2], 16) == (0x24000000 | (int(line.split()[1], 16) & 0x1f0000))}
+if len(selected) - len(handle_sites) != expected:
     raise SystemExit('wrapper fixture requires its complete guarded production adaptation subset')
 target.with_suffix('.patches').write_text('\n'.join(selected) + '\n')
 # Frame-submit/loading references retain their published native changes in BOTH

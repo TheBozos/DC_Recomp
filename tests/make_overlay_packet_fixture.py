@@ -53,7 +53,10 @@ target.with_suffix('.externals').write_text(''.join(f'override 0x{pc:x}\n' for p
 selected = [line for line in patches.read_text().splitlines()
             if line.split('#')[0].strip() and start <= int(line.split()[0], 16) < end]
 sites = {pc + offset for pc, _ in groups for offset in (0, 4)}
-if {int(line.split()[0], 16) for line in selected} != sites or len(selected) != len(sites):
+handle_sites = {int(line.split()[0], 16) for line in selected
+                if int(line.split()[1], 16) & 0xffe0ffff == 0x8f808bd4
+                and int(line.split()[2], 16) == (0x24000000 | (int(line.split()[1], 16) & 0x1f0000))}
+if {int(line.split()[0], 16) for line in selected} != sites | handle_sites or len(selected) != len(sites | handle_sites):
     raise SystemExit('overlay fixture requires its complete production patch subset')
 target.with_suffix('.patches').write_text('\n'.join(selected) + '\n')
 def array(name, values):

@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parent))
 from dc_loadchara_audit import SITES, size_envelope
+from dc_readinfo_audit import config_effects, guard_preprocess
 
 
 def pack_nodes(blob, limit=10000):
@@ -53,6 +54,7 @@ def inventory(root, regions):
         for p in segments:
             if p[0]==1 and p[2]<=at and at+size<=p[2]+p[4]:return boot[p[1]+at-p[2]:p[1]+at-p[2]+size]
         raise ValueError('resident table/name not file backed')
+    guard_preprocess(resident)
     table=[]
     for selector in range(6):
         pointer=struct.unpack('<I',resident(0x27e7b0+4*selector,4))[0]
@@ -86,7 +88,8 @@ def inventory(root, regions):
             if len(blob)!=size:raise ValueError('short artifact read')
             nodes=pack_nodes(blob);digest=hashlib.sha256(blob).hexdigest()
             selector=selected[normalize(name)]
-            packs.append(dict(name=name,selector=selector,hed_record=i,offset=offset,size=size,sha256=digest,nodes=nodes))
+            packs.append(dict(name=name,selector=selector,hed_record=i,offset=offset,size=size,sha256=digest,nodes=nodes,
+                              config_preprocess_effects=config_effects(blob,nodes)))
             for node in nodes:
                 request=requests.get(node['name'].lower())
                 if request is None:continue

@@ -1634,3 +1634,82 @@ and **14 Python unit methods**. Nine private-ELF negative audits include changed
 signed rounding, capacity checks and selector predicates, in addition to the previous bulk/callee
 overlap, constructor and loader guards. Source-local qualification records distinguish the full
 suite run from the final targeted rebuild of strengthened fixture assertions.
+
+## Intervening LoadPackData / ReadInfo effects
+
+`dc_readinfo_audit.py` records a guarded local contract for the earlier `LoadChara2`
+parser calls. It fingerprints the complete DUN caller, the three resident wrappers,
+ReadInfo, the nineteen initial command bodies, token/comment parsers, pack lookup and
+child allocator. Native instruction hooks or replaced owners reject this contract.
+The report keeps initial callback words separate from runtime target values; no
+effect is promoted into generic alias-flow facts.
+
+| DUN call PC | Wrapper | CFG | Arena roles passed by this caller |
+| --- | --- | --- | --- |
+| `0x1dba544` | `LoadPackData2` at `0x139850` | `base.cfg` | All four roles use `CharaModelBuffer` |
+| `0x1dba5ac` | `LoadPackData` at `0x139820` | `hand_up.cfg`, selector 1 | Model/motion share the buffer; shadow/IMG are null |
+| `0x1dba61c` | Same | `hand_up.cfg`, selector 3 | Same |
+
+The separate wrapper at `0x1397f0` uses the character's mutable virtual slot `+0xb8`;
+it is not an unconditional direct edge to ReadInfo. Compiled synthetic tests execute
+the three DUN argument spans through their actual complete wrappers and ReadInfo,
+then stop immediately at the wrapper return before subsequent character calls.
+
+ReadInfo resets parser globals, allocation-name-list heads and four IMG slots, but
+does **not** reset the child arena's used counter. Its nested loaders and command
+callbacks can advance that same cursor before the later three pack copies. Direct
+child allocations occur in MODEL (`0x13a13c`), MOTION_END (`0x13a740`) and IMG
+(`0x13aac0`); the initial callback inventory also retains direct-call candidates and
+compiler-known computed sites. MODEL calls the mutable character virtual slot
+`+0xc4` before lookup and `LoadMDSFile`, while motion loading reaches `AnimeDataInit`.
+Their complete nested writes, allocations and source relocations remain open.
+
+IMG checks its optional arena and slot, then looks up the member. A missing member
+returns without allocating or copying. A match reserves `(s32(size) >> 4) + 1` qwords
+**before** copying the raw unsigned byte count, including an extra qword for zero or
+an exact multiple of sixteen. This differs from the three later LoadChara2 copies,
+whose checks follow their copies. It still inherits the signed/wrapping allocator's
+invalid-state cases. Synthetic complete ReadInfo cases demonstrate preserved
+nonzero cursors across successive calls, capacity rejection before copying, and
+negative cursors accepted by the signed check. A separately seeded complete
+MOTION_END callback advances the motion arena; this is not execution of the preceding
+MOTION loader.
+
+Pack headers are **not generally preserved by ReadInfo**. `PreProcess` at `0x13b270`
+replaces comments in the source CFG with spaces. Its closing block-comment store at
+`0x13b340` can write at `payload + size`: a declared `/*x*` followed by `/` just outside
+the payload writes five spaces. A complete compiled ReadInfo fixture places that
+slash at the next valid header's first byte and checks the exact resulting outer
+pack bytes. The header changes without a callback or cursor change. Bounded payload
+extents alone therefore do not prove preservation of the surrounding headers.
+
+The read-only pack inventory now records this leaf's planned writes and lookahead
+reads for all eight initial `base.cfg` / `hand_up.cfg` snapshots. It fingerprints
+the current boot artifact's PreProcess body before using the offline walk, rather
+than relying on a prior report's identity. None of their
+planned stores leaves its CFG payload or touches an outer header. Optional local
+qualification also invokes the complete compiled PreProcess leaf on those eight
+outer snapshots, checks every RAM byte outside the declared CFG and every complete
+node header, and compares changed-byte counts with the static walk. These checks
+require the snapshot's stable pointer/size and disjoint input metadata. They do not
+execute complete retail ReadInfo or its callbacks, or establish preservation after
+earlier aliases, failed reads or nested loader effects.
+
+GetArg writes parsed strings to the caller's output slots rather than inserting
+terminators in the source CFG. SearchCommand and GetArg nevertheless copy tokens
+to local 256-byte buffers without a token-length bound; the descriptor type scan
+has no explicit sixteen-argument cap. Stack/pack/global/arena nonaliasing and valid
+metadata remain preconditions. ReadInfo reloads its callback from mutable
+`CommandExe` (`0x251470..0x2514bb`) at `0x139f30`, then calls it at `0x139f34`.
+Synthetic IMG destinations can replace outer header bytes or a DUN switch-table
+word. Another synthetic IMG copy changes the next callback-table word, and the
+actual compiled loop calls that replacement on its next command. These controlled
+effects do not establish a gameplay corruption or a complete runtime target set.
+
+Validation for this batch is recorded under `build/native-cleanup29/`: 38 synthetic
+compiled cases, eight compiled artifact leaf checks, thirteen disc-free Python unit
+methods and six changed-instruction guard rejections. **77/77 normal suites** and
+**21/21 disc-free suites** pass; the final artifact-guard unit also passes separately.
+Runtime, production patches,
+the engine pin and saves are unchanged. Live DUN coverage remains **33/43** with
+497 unobserved sites globally; fixtures add no gameplay or visual qualification.

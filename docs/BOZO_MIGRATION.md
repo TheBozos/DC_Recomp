@@ -878,3 +878,39 @@ Evidence in `build/native-cleanup18/`:
 Fishing itself remains fixture-qualified until a live fishing route and its captures are checked. The main packet reset, other mixed
 builders, legacy allocation extents, console-format native-copy identifiers and unsupported readbacks remain
 separate work. No retail assets or generated code are committed.
+
+## Shadow wrapper state and static-chain retirement
+
+Twelve guarded offline words bypass the leading TEST/ZBUF construction and prebuilt program-chain calls in
+`MGDrawShadowFast` (`0x1303b0`), `MGDrawShadowFast2` (`0x1304d0`) and `MGDrawShadow` (`0x1305f0`), plus their trailing
+default-chain calls. Their null-frame exits, two ordered vector copies, mode 1/2 selection, native `MGDraw`, mode
+reset and (for the non-fast owner) both camera-matrix saves/restores remain compiled. The native draw already
+consumes the retained game data; it never consumed these program chains. `MGDrawShade`, the native blend-preserving
+wrapper and the engine pin (`4a8f70a`) are unchanged. No new runtime hook, device path or completion mechanism is added.
+
+Evidence in `build/native-cleanup19/`:
+
+- **42/42 local suites pass**, including native GPU readback (`tests.log`).
+- Three whole-function original/adapted suites pass **384 comparisons** (128 per owner), using the exact production
+  patch subset. Original vector/matrix-copy and packet-call helpers execute their compiled implementations. The
+  two published native packet-only setters are controlled no-ops; native model drawing is a controlled boundary
+  with compared mode, frame, vector/matrix inputs and logical effects. This does not qualify that boundary's
+  rendering math or console visual parity.
+- Cases cover null/present frames, four vector-alias arrangements (including sequential overwrite), varied 128-bit
+  vector/matrix patterns, default TEST/ZBUF values and packet alignment/open state. The draw deliberately changes
+  both matrices; the non-fast owner restores both, while the fast owners retain their original effects. Reference
+  owners call two state setters and two static chains only for a non-null frame; adapted owners call none, with an
+  inaccessible packet pointer and untouched guards. Both paths make 384 controlled model draws across the fixtures.
+- Ordered retained helper inputs, all non-stack logical RAM, full saved registers/stack/return and floating-point
+  status match. No unexpected library, device or VU0 microprogram call is accepted by the fixtures.
+- Both **5,800-frame headless/windowed inventory routes complete**, with zero register/unknown accesses, zero VU0
+  microprogram calls and zero GIF submissions (`headless.log`, `gameplay.log`). Native VIF1 completion counts are
+  5,686 / 6,003 and sync counts 6,884 / 7,201. Neither sampled feeder report includes these three owners, so their
+  execution remains fixture-qualified. Eight window captures are retained but were not visually inspected here.
+- Headless 48 kHz stereo PCM contains 4,686,527 frames, RMS 3,599.338, tail RMS 3,496.547 and peak 28,775. Windowed
+  PCM contains 5,058,493 frames, RMS 3,569.191, tail RMS 2,918.091 and peak 32,766 (`evidence.py`). Audio is active;
+  subjective listening, exact timing and a complete playthrough remain unchecked.
+
+The known shadow-plane/rendering defect remains open: retiring these unused state chains is not a visual fix.
+The main packet reset, remaining mixed producers, legacy extents, native-copy identifiers and unsupported readbacks
+remain separate audits. No retail files, generated code or RAM captures are committed.

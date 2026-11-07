@@ -224,6 +224,9 @@ Water and running-effect wrappers also bypass their packet-only state envelopes 
 game bookkeeping. Another 96 water and 384 effect comparisons check their retained callbacks, data and ABI.
 Frame-end completion also runs without packet closing or packet-header reads; the native SDK completion and its
 masked callback queue remain intact, checked in 32 reference/adapted cases.
+The three shadow wrappers also bypass their unused TEST/ZBUF setup and static VIF/VU1 chains. Another 384
+original/adapted cases check their retained vectors, shadow modes, model calls and matrix restoration; the known
+shadow rendering defect remains open.
 
 ## Disc facts
 

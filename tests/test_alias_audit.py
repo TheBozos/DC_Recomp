@@ -113,7 +113,38 @@ class AliasAudit(unittest.TestCase):
     def test_bulk_table_write_and_unknown_callee_are_not_ignored(self):
         r=flow([0x3c04002a,0x248412b0,0x24060004,0x0c040cec,0,0x03e00008,0])
         self.assertTrue(any(e['kind']=='bulk_region_write' and e['region']=='table' for e in r['events']))
-        self.assertIn('callee_memory_and_return_effects_unmodeled',r['limitations'])
+        self.assertIn('bulk_contents_and_failure_paths_unmodeled',r['limitations'])
+
+    def test_local_absolute_store_forwarding_is_not_image_folding(self):
+        # Store zero to 0x3000, reload locally, use it as an exact fill length.
+        r=flow([0x24083000,0xad000000,0x8d060000,0x27848bd4,0x0c040d5a,0,0x03e00008,0])
+        self.assertFalse(any(e['kind']=='bulk_region_write' for e in r['events']))
+        self.assertEqual(next(e for e in r['events'] if e['kind']=='bulk_call')['length'],[dict(base='absolute',offset=0)])
+
+    def test_mixed_width_join_recovers_all_possible_low_words(self):
+        # SW and SQ at the same start can coexist after a join. Neither cache
+        # entry is a sole reaching definition of a subsequent word load.
+        for stores in ((0xad090000,0x7d000000),(0xad000000,0x7d090000)):
+            r=flow([0x24083000,0x27898bd4,0x10850004,0,stores[0],0x10000002,0,
+                    stores[1],0x8d080000,0xad000000,0x03e00008,0])
+            self.assertTrue(writes(r))
+
+    def test_intervening_call_and_partial_store_kill_forwarded_global(self):
+        for middle in ([0x0c000800,0],[0xa1000001]):
+            r=flow([0x24083000,0xad000000]+middle+[0x24083000,0x8d060000,0x27848bd4,0x0c040d5a,0,0x03e00008,0])
+            self.assertIn('bulk_write_length_unknown',r['limitations'])
+
+    def test_copy_return_is_a_destination_alias(self):
+        r=flow([0x27848bd4,0x24060000,0x0c040cec,0,0xac400000,0x03e00008,0])
+        self.assertTrue(writes(r))
+
+    def test_explicit_callee_arguments_and_entry_are_respected(self):
+        code={0x1000:0xac800000,0x1004:0,0x1008:0x03e00008,0x100c:0}
+        from dc_alias_audit import constant
+        f=dict(start=0x1000,end=0x1010,entries=[])
+        args=[constant(HANDLE),*[None]*7]
+        self.assertTrue(writes(analyze(code.__getitem__,f,{},GP,REGIONS,input_arguments=args)))
+        self.assertFalse(writes(analyze(code.__getitem__,f,{},GP,REGIONS,input_arguments=args,entry_addresses=[0x1008])))
 
     def test_native_instruction_is_an_opaque_boundary(self):
         r=flow([0x27888bd4,0xad000000,0x03e00008,0],native_pcs={0x1004})

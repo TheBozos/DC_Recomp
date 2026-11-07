@@ -352,6 +352,10 @@ def main():
                                                     list(elf_symbols((root/'game/SCUS_971.11').read_bytes())))
         if report['pointer_alias_audit']['admitted_packet_alias_accesses']:
             raise ValueError('recognized admitted alias accesses a retired packet global')
+        if report['pointer_alias_audit']['admitted_bulk_packet_overlaps']:
+            raise ValueError('recognized admitted bulk copy overlaps a retired packet global')
+        if report['pointer_alias_audit']['admitted_callee_packet_overlaps']:
+            raise ValueError('recognized callee write overlaps a retired packet global')
         report['observed_edges'] = []
         observed_sites = set()
         for path in args.trace:

@@ -1462,3 +1462,93 @@ engine pin `e78883f12f6362cb5570bed55aaa2aa7169d9589` are unchanged. The global 
 retired; model/cloth identity/extent migration remains separate. Local evidence is retained under
 `build/native-cleanup26/`, including source hashes and the writer ledger. No retail assets, generated
 sources, saves or captures are committed, and no new gameplay or visual parity is claimed.
+
+## Bulk copies and caller-instantiated callee writes
+
+The next pass retains **all recognized direct bulk-call sites**, including unknown arguments, rather
+than filtering them out when they do not point into the original 46 watched ranges. The current flow
+records 369 value-set variants at **270 distinct source sites**, including seven DUN `memcpy` sites.
+These are static candidates, not execution counts. Native `memcpy` / `memset` use explicit unsigned
+32-bit byte-range and destination-return contracts from the pinned handlers. The compiled `memmove`
+uses 64-bit size comparisons, so low-word flow alone does **not** establish its extent, including
+when the low word is zero. It remains a compiled callee with explicit unknowns.
+
+There are genuine writes to DUN dispatch data in the load lifecycle. Under the declared DUN base,
+correct file/header and a successful **complete** read, the guarded loader contract gives:
+
+| Phase | Destination byte interval | Watched dispatch data affected |
+| --- | --- | --- |
+| Read `DUN.BIN` | `[0x1dabd00, 0x1dc4480)` | All 11 DUN switch-table arrays |
+| Clear module BSS | `[0x1dc4480, 0x1f06b6c)` | Seven root-object vptrs and 45 embedded effect vptrs |
+| Constructor table | `0x1dc4410..0x1dc4414` → `0x1dc3580` | Static object initialization, followed by later game initialization |
+
+`LoadOverlay` (`0x140aa0`) obtains a mutable destination from the overlay-group table; the file reader
+reaches native `sceRead` at `0x122ef4`. `mwOverlayInit` calls `memset` at `0x122e2c`, then constructors
+at `0x122e44`. Relevant argument, header-field and call instructions are guarded. Artifact header
+ranges instantiate this contract separately from generic instruction flow: an initial destination
+word is not silently promoted to an invariant. Short/failed reads, mutated destinations/headers and
+other native disc/file/card outputs remain open. These are module-loading writes; the retired
+global packet reset is unchanged.
+
+The original seven-root-vptr inventory missed dispatch pointers embedded in `MasekiEffect`, a DUN
+array of five `CSHOT_EFFECT` objects at `0x1e5b380`, stride `0xa160`. The guarded static initializer
+and complete constructor establish nine embedded `CCharacter` vptr offsets per element:
+`0xb0`, and `0x1260 + i*0x11b0` for `i=0..7`. The watch set now contains **91 ranges**, adding all
+**45 embedded vptrs**. This is a typed constructor/layout fact, not an offset-only inference.
+
+Four full-object copies in `LoadData` propagate the first element into the other four:
+
+| DUN call PC | Destination | Source / length | Embedded vptr words copied |
+| --- | --- | --- | ---: |
+| `0x1dbaed8` | `0x1e654e0` | `0x1e5b380` / `0xa160` | 9 |
+| `0x1dbaf14` | `0x1e6f640` | Same | 9 |
+| `0x1dbaf50` | `0x1e797a0` | Same | 9 |
+| `0x1dbaf8c` | `0x1e83900` | Same | 9 |
+
+The intervals stop at `0x1e8da60`; they are disjoint from the earlier 46 ranges while carrying
+**36 embedded vptrs**. The report records source-byte origins for each affected field. Their pointer
+values remain mutable; raw copying propagates the current prototype bytes. The typed-assignment
+preservation result from the preceding batch does not apply to these raw copies.
+
+`dc_callee_audit.py` instantiates compiled callees with established caller arguments and records
+their watched and symbolic writes. It preserves the active overlay through resident callees, keeps
+caller-stack pointers distinct from the callee's frame, and stops at native/SDK boundaries rather
+than analyzing a replaced original. Known `__construct_array` bindings supply guarded normal-loop
+constructor candidates. Contexts recover the 45 embedded constructor vptr stores and the pack
+lookup's size-output stores. Callee records are possible effects, not an interleaved trace or a
+complete memory/return summary; they are not fed back as assumed values into callers.
+
+This pass reaches its declared limits: **1,536 contexts**, depth **4**, and at most **16** expanded
+array elements. The report retains all count/depth/element boundaries, computed callbacks, opaque
+native effects, unknown stores and widening. Empty effect lists do not establish absence of writes.
+Overlay selection held through a context remains conditional across opaque loader effects.
+
+Local forwarding now uses a function's own observed store→load flow, with alias invalidation and
+joins over all compatible low-word definitions; mutable ELF data is still not constant-folded.
+This establishes `InitializeDataBuffer`'s local zero counter before `memset` at `0x1259c4`, yielding
+`[0x2ab080, 0x1c74980)`, disjoint from all 91 watched ranges on that path.
+
+Three DUN copies remain unresolved: `0x1dba73c`, `0x1dba7e0` and `0x1dba860` in `LoadChara2`.
+Their lengths come through stack outputs of **`GetPackFile` (`0x13f720`)**. On a match it returns a
+node-relative payload and writes the raw node size at `0x13f7b8`; on absent/null input it returns
+zero without initializing the size output. Its comparison helper is the compiled **`strcasecmp`
+at `0x105238`**. The complete lookup/helper pass 24 synthetic cases covering names/paths, null and
+missing nodes, optional output, zero/raw/maximal size metadata and source/stack write boundaries.
+Those cases validate the lookup contract, not payload-size validity.
+
+The destination comes from `CharaModelBuffer` (`0x1f06660`) and its qword cursor. Game initialization
+sets a `0x33450`-qword capacity, but the three child-allocation checks occur **after** their copies
+(`0x1dba768`, `0x1dba80c`, `0x1dba88c`). They are not preceding bounds checks for pack-derived sizes.
+Mapped-RAM validation in native copying also does not establish this logical arena contract.
+Pack metadata, failed lookup/stale outputs, cursor arithmetic and opaque native writes therefore
+remain unresolved; no disjointness or complete target-set proof is claimed for these copies.
+
+Validation: **73/73 normal suites**, **19/19 game-free suites**, including 24 alias tests and 16
+callee/range tests. Another **94 cases** check the production copy/fill handlers and complete compiled
+`memmove` for canonical sizes, mirror addresses, overlaps, field boundaries and exact byte effects.
+Five private-ELF negative audits reject packet overlap through a bulk call or a callee, shifted
+constructor `this`, changed static-array binding and altered loader BSS field. No additional
+admitted packet-global overlap is established by the bounded positive pass. Runtime, production
+patches and engine pin remain unchanged. Evidence stays under `build/native-cleanup27/`; no retail
+data, generated code, cards or captures are committed. Live DUN coverage remains **33/43** and
+497 sites remain unobserved globally; these tests add no gameplay, visual or full-game qualification.

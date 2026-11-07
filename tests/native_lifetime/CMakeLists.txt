@@ -54,4 +54,5 @@ if(BUILD_TESTING)
   add_test(NAME dc_indirect_tools COMMAND ${Python3_EXECUTABLE} -I "${DC_ROOT}/tests/test_indirect_audit.py"
     $<TARGET_FILE:dc-indirect-facts> $<TARGET_FILE:dc-indirect-trace-tests>)
   add_test(NAME dc_pointer_alias_tools COMMAND ${Python3_EXECUTABLE} -I "${DC_ROOT}/tests/test_alias_audit.py")
+  add_test(NAME dc_callee_effect_tools COMMAND ${Python3_EXECUTABLE} -I "${DC_ROOT}/tests/test_callee_audit.py")
 endif()

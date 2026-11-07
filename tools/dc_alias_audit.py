@@ -138,7 +138,7 @@ def analyze(word, function, sites, gp, regions, roots=(), names=None, max_steps=
                 result.add(p)
         return frozenset(result) if result else None
 
-    def memory_access(pc, at, width, write, source, bulk=False):
+    def memory_access(pc, at, width, write, source, bulk=False, complete_pointer=True):
         if at is None or any(p in (UNKNOWN,WIDENED) for p in at):
             stats['unknown_address_writes' if write else 'unknown_address_reads'] += 1
             if at is None:return
@@ -151,7 +151,7 @@ def analyze(word, function, sites, gp, regions, roots=(), names=None, max_steps=
                              address=p.offset,width=width,source=describe(source) if write else [])
             elif write and p.base != 'stack' and any(p.offset < f+4 and f < p.offset+width for f in (0xa0,0x2b8)):
                 emit('untyped_field_write',pc,address=describe(frozenset((p,))),width=width,source=describe(source))
-        if write and source is not None:
+        if write and source is not None and width>=4 and complete_pointer:
             for p in source:
                 if p.base == 'absolute':
                     for region in regions:
@@ -166,7 +166,7 @@ def analyze(word, function, sites, gp, regions, roots=(), names=None, max_steps=
             width,write,gpr,alignment = MEMORY[op]
             at = addresses(registers[rs],imm,alignment)
             source = registers[rt] if op in (31,40,41,42,43,44,45,46,63) else None
-            memory_access(pc,at,width,write,source)
+            memory_access(pc,at,width,write,source,complete_pointer=op not in PARTIAL)
             if write:
                 if at is None or any(p.base not in ('absolute','stack') for p in at):
                     memory.clear()  # unknown store may alias a saved pointer

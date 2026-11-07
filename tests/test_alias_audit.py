@@ -124,6 +124,10 @@ class AliasAudit(unittest.TestCase):
         r=flow([0x3c08002a,0x250812b1,0xa1000000,0x01001025,0x03e00008,0])
         self.assertEqual(writes(r,'table')[0]['width'],1)
         self.assertTrue(any(e['kind']=='return' and e['value']==['absolute+0x2a12b1'] for e in r['events']))
+        # Storing only a byte/partial word of an address is not publication of
+        # the complete pointer, though its destination write still matters.
+        r=flow([0x3c08002a,0x250812b0,0xa0880000,0xa8880000,0x03e00008,0])
+        self.assertFalse(any(e['kind']=='pointer_store' for e in r['events']))
 
     def test_unknown_arithmetic_widening_and_bounds_are_explicit(self):
         # Loop changes an affine argument offset until the value-set bound widens.

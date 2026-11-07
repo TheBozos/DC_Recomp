@@ -10,11 +10,17 @@ namespace dc::native
     void install(Runtime &, bozo::port::Registry &);
     void publish();
     void fishLineVertex(uint8_t *, R5900Context *, Runtime *);
+    void debugFontBoundary(uint8_t *, R5900Context *, Runtime *, uint32_t);
 } // namespace dc::native
 namespace dc
 {
     bool nativeInstruction(uint8_t *ram, R5900Context *ctx, Runtime *rt, uint32_t pc)
     {
+        if (pc == 0x0013DFA8u || pc == 0x0013DFF0u || pc == 0x0013E314u || pc == 0x0013E420u)
+        {
+            dc::native::debugFontBoundary(ram, ctx, rt, pc);
+            return true;
+        }
         if (pc == 0x001AB290u)
         {
             dc::native::fishLineVertex(ram, ctx, rt);

@@ -41,6 +41,7 @@ base, end, helpers = {
     'shadow_fast': (0x1303b0, 0x1304d0, [0x121830, 0x12eec0, 0x12edf0, 0x120d70, 0x12ed80]),
     'shadow_fast2': (0x1304d0, 0x1305f0, [0x121830, 0x12eec0, 0x12edf0, 0x120d70, 0x12ed80]),
     'shadow': (0x1305f0, 0x130760, [0x121830, 0x121840, 0x12eec0, 0x12edf0, 0x120d70, 0x12ed80]),
+    'debug_font': (0x13df40, 0x13e4dc, [0x1312d0, 0x13dea0, 0x13df00, 0x12f130, 0x15c310]),
 }[kind]
 phoff = struct.unpack_from('<I', data, 28)[0]
 for i in range(struct.unpack_from('<H', data, 44)[0]):
@@ -77,11 +78,13 @@ target.with_suffix('.externals').write_text(''.join(f'override 0x{pc:x}\n' for p
     helpers + [0x120c80, 0x120e38, 0x120ec0, 0x121028, 0x120ed8, 0x120e90])
     + ('native 0x15434c\n' if kind == 'loading' else ''))
 target.with_suffix('.native.externals').write_text(target.with_suffix('.externals').read_text()
-    + ('native 0x1ab290\n' if kind == 'fishing' else ''))
+    + ('native 0x1ab290\n' if kind == 'fishing' else '')
+    + (''.join(f'native 0x{pc:x}\n' for pc in (0x13dfa8,0x13dff0,0x13e314,0x13e420)) if kind == 'debug_font' else ''))
 selected = [line for line in patches.read_text().splitlines()
             if line.split('#')[0].strip() and span_start <= int(line.split()[0], 16) < end]
 expected = {'frame_close': 2, 'frame_draw': 0, 'frame_member': 0, 'mdt_draw': 2,
-            'message': 2, 'edit_state': 2, 'menu_state': 2, 'loading': 9, 'fire': 6, 'language': 2, 'fishing': 9}.get(kind, 4)
+            'message': 2, 'edit_state': 2, 'menu_state': 2, 'loading': 9, 'fire': 6, 'language': 2, 'fishing': 9,
+            'debug_font': 14}.get(kind, 4)
 if len(selected) != expected:
     raise SystemExit('wrapper fixture requires its complete guarded production adaptation subset')
 target.with_suffix('.patches').write_text('\n'.join(selected) + '\n')

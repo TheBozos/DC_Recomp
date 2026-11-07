@@ -227,6 +227,9 @@ masked callback queue remain intact, checked in 32 reference/adapted cases.
 The three shadow wrappers also bypass their unused TEST/ZBUF setup and static VIF/VU1 chains. Another 384
 original/adapted cases check their retained vectors, shadow modes, model calls and matrix restoration; the known
 shadow rendering defect remains open.
+`CDebugFont::Draw` now composes its 8-by-16 glyphs into an owned native picture, retaining the original text loop
+and final sprite. Another 192 comparisons check every composed texel against the original copy rectangles.
+The global packet reset remains while the resident startup and TITLE/DUN overlays still have packet-producing paths.
 
 ## Disc facts
 

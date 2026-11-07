@@ -914,3 +914,58 @@ Evidence in `build/native-cleanup19/`:
 The known shadow-plane/rendering defect remains open: retiring these unused state chains is not a visual fix.
 The main packet reset, remaining mixed producers, legacy extents, native-copy identifiers and unsupported readbacks
 remain separate audits. No retail files, generated code or RAM captures are committed.
+
+## Native debug-font picture composition and reset audit
+
+`CDebugFont::Draw` (`0x13df40`) clears a destination picture, copies 8-by-16 glyphs from `ankfnt24`, then displays
+that picture. Four resident instruction boundaries now capture the looked-up atlas, initialize the destination,
+copy a glyph and publish the completed native texture. Fourteen guarded offline words bypass the old transfer,
+state, descriptor-packing and flush/close blocks. All three original texture lookups, compiled space/newline/cursor
+logic, count reset and final native sprite remain. The frame-texture query also remains: its native bookkeeping
+must survive even though this owner's later packet-only descriptor packing is unused. The query's compatibility
+descriptor output is still written to scratch storage; native-copy identifiers remain a separate audit.
+
+Compositions own their decoded source/pixels and are keyed by runtime and guest stack across scheduler unwinds.
+Completed pictures are immutable. Atlas/destination identity is captured at lookup, so a record rebound before
+completion cannot acquire the previous asset's picture under its new identity. A valid native picture also takes
+priority over a stale frame-target association when the retail record has no CPU pixel buffer.
+
+The supported source/destination pictures are true-color CT32/CT24. RGB copies retain destination alpha for CT32;
+CT24 uses the retained TA0/AEM rule. Extents and glyph bounds are checked. Indexed pictures, atlas/destination
+place aliases and missing composition setup fail explicitly; no graphics-memory interpreter or
+fallback is added. Newly allocated native destination storage starts blank outside the explicitly cleared/copied
+region. This is not a claim of console rasterization or shared-VRAM alias parity.
+
+Evidence in `build/native-cleanup20/`:
+
+- **44/44 local suites** and **15/15 game-free suites** pass (`qualified-tests.log`, `qualified-disc-free.log`),
+  including GPU readback and both new font suites. The game-free font regression is included in CI.
+- **192 whole-function original/adapted comparisons** cover CT32/CT24 source/destination combinations, three alpha
+  values, empty/mixed/extended-byte text, spaces, newlines, clipping and partial clears. The real compiled append
+  helper executes in the reference; its **1,032 glyph-copy rectangles** form an independent texel oracle. Texture
+  lookup, frame query and sprite calls are controlled boundaries with compared semantic inputs/order. The adapted
+  final sprite also executes its actual native hook, exposing the composed texture in the published draw list;
+  every texel matches. This does not qualify those controlled services' own implementation or console GPU output.
+- Count/TEXA bookkeeping and all other non-stack logical RAM match; packet guards remain untouched with an
+  inaccessible packet pointer. Saved full registers/stack/return and outgoing float status match. Every inline
+  pixel boundary preserves the complete CPU context. The original append/envelope calls are absent from adapted
+  execution, while all three lookups and the native frame query remain.
+- The separate synthetic suite interleaves two calls and resumes copied CPU contexts outside any outer draw scope.
+  It checks independent images, immutable previous frames, rebinding a record before completion, a generated
+  picture with no CPU buffer sharing an old frame identifier, no pixel/packet RAM writes, and explicit invalid
+  setup/extent/format/alias failures. All fixture assets are synthetic.
+- The final **5,800-frame headless/windowed inventory routes complete**, with zero register/unknown accesses, zero
+  VU0 microprogram calls and zero GIF submissions (`qualified-headless.log`, `qualified-gameplay.log`). Native VIF1
+  completion counts are 5,686 / 6,084 and sync counts 6,884 / 7,282. The debug-font owner is absent from the sampled
+  feeder reports, so its execution remains fixture-qualified. Eight final window captures are retained without
+  a new visual-parity claim; they were not visually inspected in this batch.
+- Headless 48 kHz stereo PCM contains 4,686,527 frames, RMS 3,599.338, tail RMS 3,496.547 and peak 28,775. Final
+  windowed PCM contains 5,080,769 frames, RMS 3,579.984, tail RMS 2,985.728 and peak 32,766. Audio is active;
+  subjective listening, exact timing and a full playthrough remain unqualified (`qualified-evidence.py`).
+
+The local instruction/call audit (`packet_audit.py`, `reachable-packet-callers.txt`) also examines both overlay
+images. It finds statically reachable packet calls in resident `main`, `MGInitVif1Packet`, `MGBeginFrame` and
+`init_now_loading`, plus TITLE draw/scroll/face-animation/title-loop owners and DUN `MainDraw`/`LoaderLoop`.
+The audit accounts for the current guarded resident jumps; it is not a whole-program proof through indirect
+calls or all runtime conditions. Existing native replacements still cover many other listed retail producers.
+These remaining paths are why the global reset is retained. No retail assets or generated code are committed.

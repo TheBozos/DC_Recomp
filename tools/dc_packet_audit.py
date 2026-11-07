@@ -13,6 +13,7 @@ import collections
 import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from symtab_map import elf_symbols
+from dc_alias_audit import audit_images
 
 # These ordinary native hooks call their generated body. Registry ownership
 # alone therefore cannot retire that body's calls, loads or indirect sites.
@@ -347,6 +348,10 @@ def main():
         report['cfg_unreached_sites'] = [{'image': image, 'pc': pc, 'category': fact['category']} for image, group in facts.items()
             for pc, fact in group.items() if fact['kind'] != 'return' and not replaced_body(image, fact['owner'], overrides)
             and (image, pc) not in reached]
+        report['pointer_alias_audit'] = audit_images(root, args.images, entries, overrides, replaced_body, image_words,
+                                                    list(elf_symbols((root/'game/SCUS_971.11').read_bytes())))
+        if report['pointer_alias_audit']['admitted_packet_alias_accesses']:
+            raise ValueError('recognized admitted alias accesses a retired packet global')
         report['observed_edges'] = []
         observed_sites = set()
         for path in args.trace:

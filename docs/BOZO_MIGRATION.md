@@ -1378,3 +1378,87 @@ manual trace leaves coverage unchanged: **DUN 33/43**, resident 226/601, TITLE 1
 unobserved. Controlled cases are not added to those counts. The engine pin remains
 `e78883f12f6362cb5570bed55aaa2aa7169d9589`; runtime and production patches are unchanged. Evidence stays
 local under `build/native-cleanup25/`; no new visual, audio or gameplay qualification is claimed.
+
+## Pointer aliases and DUN table writers
+
+The pointer used by the remaining weapon calls is **`NowWeapon`**, at `gp-0x6300` (`0x2a34f0`),
+not a generic player-character root. `NowCamera` is at `gp-0x6358` (`0x2a3498`). The original ELF
+contains several symbols named `NowCamera` or `MainCamera`; this audit selects exact addresses and
+the DUN symbol section rather than combining equal names across overlays.
+
+`dc_alias_audit.py` adds bounded low-word flow through constants, GP address formation, register
+copies/additions, stack spills/reloads, control-flow joins and delay slots. It recognizes the runtime's
+KSEG and `0x20000000` / `0x30000000` RAM aliases and enclosing ranges for partial/wide stores.
+It retains up to four known values alongside an unknown path, then widens explicitly. It checks
+46 byte ranges: three retired packet globals, two roots, seven named DUN object vptrs, all 23 named
+resident vtables and the 11 DUN compiler-switch tables. Aligned pointer words in allocated,
+non-executable file-backed data sections are inventoried separately. Mutable image contents are
+never folded into constant pointer values.
+
+The recognized root writers are:
+
+| Root | Source image / stores | Established source |
+| --- | --- | --- |
+| `NowWeapon` | DUN `0x1db966c`, `EquipWeaponFrame` | Its incoming `a0` |
+| `NowWeapon` | DUN `0x1dba54c`, `LoadChara2` | Null |
+| `NowCamera` | DUN `0x1dac590`, `GameInit` | `MainCamera` `0x1dc45e0` |
+| `NowCamera` | Resident `0x1bb398`, `0x1d1c20`, `0x1d2710`, `0x1d2f84`, `0x1d38e8` | `SubCamera` `0x1dc48e0` |
+| `NowCamera` | Resident `0x1bb8c8`, `0x1d1ef0`, `0x1d2a28`, `0x1d31ec`, `0x1d3a50` | `MainCamera` |
+
+Direct DUN calls to `EquipWeaponFrame` supply `MainWeapon` (`0x1ea4080`) at `0x1db9a64`,
+`CrashWeapon` (`0x1ea63e0`) at `0x1db9d1c`, and `DefaultWeapon` (`0x1ea5230`) at `0x1db9d88`.
+Resident transfers at `0x2041ac`, `0x20453c` and `0x2100d0` supply `DefaultWeapon` to that address;
+its DUN binding requires DUN to be selected. The three direct DUN calls to `EquipReAttach`
+(`0x1db45f0`, `0x1db6554`, `0x1db68c4`) reload `NowWeapon`, with branch argument 1/0/0.
+These constrain known direct paths; they do not close indirect entries into either setter or caller.
+
+The DUN static initializer installs `CCharacter` table `0x2a12b0` into the three weapon objects
+using **absolute-address stores**, which an immediate-offset-only search misses:
+
+| Store | Destination |
+| --- | --- |
+| `0x1dc3ad0` | `MainWeapon + 0xa0` (`0x1ea4120`) |
+| `0x1dc3b94` | `DefaultWeapon + 0xa0` (`0x1ea52d0`) |
+| `0x1dc3c58` | `CrashWeapon + 0xa0` (`0x1ea6480`) |
+
+The same initializer installs `CharaMain` / `CharaHand` vptrs at `0x1dc3948` / `0x1dc3a0c`.
+Their base constructor first installs the temporary `CObject` table at `0x157028`; later inline
+construction replaces it with `CCharacter`. CameraFollow construction is called for MainCamera
+and SubCamera at `0x1dc35ac` / `0x1dc35f4`, with destructors registered afterwards. Destruction
+also writes table pointers: `CCamera` at `0x124790` reinstalls `0x2a10b0`, and `CameraFollow`
+at `0x124ca8` reinstalls `0x2a1090` before calling the base destructor. This is a remaining
+writer, not evidence that the table contents themselves are modified.
+
+Assignment is checked with the **complete compiled owners and their real helper**, not mocked
+copies: `CCharacter::operator=` (`0x142da0`), `CObject::operator=` (`0x1431e0`) and
+`CameraFollow::operator=` (`0x124aa0`). All **24 cases** pass, including distinct inaccessible
+source/destination vptrs, self-assignment, copied fields, full saved registers, source preservation
+and RAM changes confined to destination/stack. The first two preserve the destination's
+`+0xa0..0xaf`; CameraFollow copies only its six scalar fields at `+0x2c0..0x2d7`, preserving
+`+0x2b8`. Its three known direct callers copy MainCamera into SubCamera before selecting it.
+Conversely, CCharacter copies its ordinary data at numeric offset `+0x2b8`. An offset match
+without object provenance must therefore remain **untyped**, rather than become a camera-vptr claim.
+
+The recognized flow finds no additional admitted alias access to the retired packet globals, and
+no recognized store into the watched resident vtable or DUN switch-table contents. It records
+pointer publication, root writes and matching untyped field writes separately. New negative audits
+on private ELF copies reject a GP address copied through another register, an uncached absolute
+quadword overlap, and a pointer recovered from a stack spill. The production audit rejects these
+recognized packet aliases as well as its earlier direct GP forms.
+
+These are bounded static findings. Unknown stores and bulk-copy lengths, affine/value-set widening,
+unknown upper register words, arbitrary heap/data aliases and computed transfers remain open.
+Calls retain only ABI-preserved registers; their memory and return effects are unmodeled. Native
+instruction hooks and system effects (`SYSCALL`, `BREAK`, COP0 control operations) stop the affected
+flow path explicitly. Unknown-store statistics count analysis visits, not distinct writers or
+runtime executions. The native ELF/disc/file-loading paths can write guest RAM; they are outside
+this instruction-flow audit. Overlay address coincidences, especially from TITLE, do not establish
+DUN runtime writes. Consequently no table is declared immutable and no dynamic dispatch is replaced.
+
+The final normal build passes **71/71 suites**, with **18/18 game-free suites**, including 19 adversarial
+alias tests. The preserved gameplay trace still reports **DUN 33/43**, with **497 unobserved sites**
+globally; none of these fixtures is added to live coverage. Runtime, production adaptations and the
+engine pin `e78883f12f6362cb5570bed55aaa2aa7169d9589` are unchanged. The global packet reset stays
+retired; model/cloth identity/extent migration remains separate. Local evidence is retained under
+`build/native-cleanup26/`, including source hashes and the writer ledger. No retail assets, generated
+sources, saves or captures are committed, and no new gameplay or visual parity is claimed.

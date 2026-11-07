@@ -17,5 +17,6 @@ jobs:
       - name: Check offline tools and shell commands
         run: |
           python3 -m py_compile tools/dc_bozo_prepare.py tools/dc_bozo_audio.py tools/dc_bozo_externals.py tools/dc_texconv.py tools/gs_layout.py tools/wrap_elf.py tools/symtab_map.py tools/dc_packet_audit.py tools/dc_instrument_indirect.py tests/test_indirect_audit.py tests/make_visibility_fixture.py tests/make_packet_wrapper_fixture.py tests/make_overlay_packet_fixture.py tests/overlay_packet_cases.py tests/make_dun_dispatch_fixture.py
+          python3 -m py_compile tools/dc_alias_audit.py tests/test_alias_audit.py
           python3 -I tests/test_externals.py
           for script in scripts/*.sh; do bash -n "$script"; done

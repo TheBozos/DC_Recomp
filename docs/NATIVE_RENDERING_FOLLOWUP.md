@@ -1,4 +1,4 @@
-# Native sky, generated flames and periodic hitches
+# Native rendering masks, sprite seams and periodic hitches
 
 The user-controlled November 7 run exposed scene shapes in Norune's sky, rectangular
 halos around the dungeon entrance fires, and brief freezes despite a counter near
@@ -62,16 +62,44 @@ These results support the report-linked hitch fix on this route. An earlier
 100.65 ms interval remained in the quiet run; qualification covers the recurring
 report-linked stalls in the stable window, rather than all possible pauses.
 
+## Outdoor shadow-mask coverage
+
+The subsequent manual run exposed missing-looking outdoor shadows and a darker
+scene. The native shadow work image was cleared with an opaque black draw. The
+renderer intentionally assigns alpha 1 to opaque draws, so that cleared image
+still covered the entire screen. Compositing it at shadow strength darkened all
+pixels, including the character, instead of revealing the silhouette where the
+shadow geometry marked it. A live pass-enabled/pass-disabled comparison exposed
+this global darkening.
+
+The shadow owner now clears alpha separately after clearing RGB, using the same
+alpha-only operation already used by the native dialog mask. Shared scene depth,
+shadow geometry, projection and per-pass strength are unchanged. Every pass clears
+coverage again so same-frame work-target reuse cannot repeat old shadows.
+
+`dc_shadow_mask_tests.cpp` runs actual native begin/draw/end owners with invented
+geometry and GPU readback. Seven assertions fail before the correction and pass
+after it. They cover untouched background, overlapping draws darkening once,
+foreground depth occlusion, and two independent passes reusing the target. All
+five GPU suites pass. The corrected Norune replay capture shows a localized
+character shadow while preserving scene brightness. Full-game shadow placement
+and exact console visual parity remain unqualified.
+
 ## Qualification status
 
-The final rebuild passes **79/79 normal suites** and **21/21 disc-free suites**,
+The final rebuild passes **80/80 normal suites** and **21/21 disc-free suites**,
 including generated-texture GPU, balloon GPU and model-lifetime regressions.
-Both paired timing runs complete normally, and both GitHub CI jobs pass. The
+Both paired timing runs complete normally. GitHub CI exercises the disc-free
+fixtures; GPU and retail checks described here run locally. The
 subsequent user-controlled quiet run completed 48,292 frames with zero register
 accesses, unknown accesses, VU0 calls or GIF submissions. The user still reports
 continuously uneven motion. The existing counter timestamps precede rendering
 and buffer swap, so a 60 FPS reading does not settle presentation smoothness.
-A fullscreen comparison was attempted as the user exited and is inconclusive.
+A first fullscreen comparison was attempted as the user exited and is inconclusive.
+In the next fullscreen run the user reported smoother movement. Fullscreen and
+benchmark isolation changed together, so this is subjective improvement without
+an established single cause. That run subsequently completed 172,663 frames
+normally, again with zero register/unknown accesses, VU0 calls and GIF submissions.
 One requested live draw dump caused an approximately 19-second diagnostic pause;
 that interval is excluded from game-performance conclusions.
 

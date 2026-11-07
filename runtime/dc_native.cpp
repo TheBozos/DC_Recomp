@@ -2013,6 +2013,13 @@ namespace dc::native
             mark.target = work;
             const std::vector<bozo::render::Vertex> clear = screenQuad(0u);
             renderer.draw(mark, kIdentity, clear.data(), static_cast<uint32_t>(clear.size()));
+            // Opaque draws clear RGB but publish alpha 1. Reset coverage too,
+            // otherwise sampling this mask darkens the entire scene, including
+            // characters and pixels outside every shadow. Repeat for each pass
+            // so reusing the target cannot carry earlier marks into a later one.
+            auto clearCoverage = mark;
+            clearCoverage.blend = bozo::render::Material::Blend::AlphaOnly;
+            renderer.draw(clearCoverage, kIdentity, clear.data(), static_cast<uint32_t>(clear.size()));
             // The marks are depth-tested against the scene (the work target shares the frame's depth, as the GS's work
             // texture shares its Z buffer): where a character stands in front of the ground, its depth hides the flattened
             // shadow, the work texture stays unmarked and the character is not darkened.

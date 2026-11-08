@@ -604,3 +604,24 @@ DC moves to BozoEngine main `296ac6d`. Qualification on this PC:
 
 Not covered by these routes: dungeon combat, the new-game opening, Georama and a human play session on the new
 engine. The released v0.1.0 keeps its `2278ba0` engine; this change applies to the next release.
+
+## Texture change checks once per model draw (2026-11-08)
+
+A human fullscreen run on engine main dropped to 36-42 FPS in a house interior after eleven minutes at 60.
+A four-second instruction-pointer sample of the running game put 265 of 455 game-thread samples in
+`contentHash`: the record-texture cache's change check, which hashes a record's texels and palette (whole
+pictures up to 256 KiB) on every lookup. The presentation thread was mostly waiting. This is the cost the
+"Dran's house frame rate" section reduced with XXH64, not an engine-main regression.
+
+The model draw looked a record up once per primitive, and a model's primitives mostly share one picture. No game
+code runs between the primitives of one native draw, so their textures cannot change in between. `drawModel` now
+looks each record up once per draw and reuses the result for its other primitives. Lookups across draws still
+check every time: game code runs between them (character faces are rewritten between characters).
+
+`DC_NATIVE_STATS=1` now also reports record-texture lookups and hashed bytes per frame, averaged over 300 frames.
+At the Matataki spot of the run's save: 480 lookups and 4.71 MiB hashed per frame before, 208 and 2.00 after; on
+the scripted Matataki route 1.84 MiB before, 1.01 after. The build passes 125/125 suites, and the seven scripted
+routes match the previous build (faces, HUD, menus, identical cards); the only differences are the known fade
+timing and the random dungeon floor. A 42-minute human fullscreen run on this build averaged 60 FPS every
+minute, its slowest two-second window 56.6 FPS, with up to 10.8 MiB hashed in a frame. The player revisited
+the slow house in that run and reported no frame drop there.

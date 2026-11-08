@@ -149,6 +149,7 @@ add_custom_command(OUTPUT ${dc_textures}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/textures
   COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_texconv.py ${DC_GAME_DIR} ${dc_textures} --progress
   DEPENDS tools/dc_texconv.py tools/gs_layout.py ${DC_GAME_DIR}/DATA.HD2 ${DC_GAME_DIR}/DATA.DAT
+  USES_TERMINAL
   COMMENT "Converting the user-owned disc textures offline")
 add_custom_target(dc_assets DEPENDS ${dc_textures})
 foreach(target dc-headless dc)

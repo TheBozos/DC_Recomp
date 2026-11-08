@@ -6,7 +6,7 @@
 - BozoEngine moves to its current main (296ac6d), with the other ports' engine work since 0.1.0.
 
 ### Fixed
-- Frame-rate drops in heavy interiors (36-42 FPS in a Matataki house): a model's texture is checked once per draw instead of once per piece.
+- Frame-rate drops in heavy interiors (36-42 FPS in a house interior): a model's texture is checked once per draw instead of once per piece.
 - Loading screens no longer wait forever on the newer engine: the game's own vsync interrupt handler is kept.
 
 ### Known limits

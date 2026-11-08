@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- BozoEngine moves to its current main (296ac6d), with the other ports' engine work since the release.
+
+### Fixed
+- Loading screens no longer wait forever on the newer engine: the game's own vsync interrupt handler is kept.
+
 ## [0.1.0] - 2026-11-08
 
 ### Added

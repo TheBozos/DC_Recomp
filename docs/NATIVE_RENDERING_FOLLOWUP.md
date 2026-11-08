@@ -568,3 +568,39 @@ DC therefore retains its published, player-accepted 2278ba0 engine pin while
 the shared fixes land upstream. Its original cancellation regression is kept
 with that pin's contract. The newer engine upgrade remains deferred; merging
 the gameplay fixes and refreshed README does not enable the trial upgrade.
+
+## Engine main and the loading-screen vsync callback (2026-11-08)
+
+The frame-76 stall on engine main came from one changed binding. `init_now_loading` installs
+`VSyncCallBack_Load` through `MGInitVSyncCallBack`, and `wait_now_loading_vsync` then spins on
+`now_loading_vsync_end`, which only that vsync callback sets. `MGInit` registers `VSyncCallBack` with
+`sceGsSyncVCallback`. The previous pin had no native `sceGsSyncVCallback`, so the game's libgraph code ran:
+`AddIntcHandler(2, VSyncCallBack)` and `EnableIntc(2)`, fired by the kernel's field clock. Engine main
+answers `sceGsSyncVCallback` natively and queues the callback only in `Dispatcher::frameCompleted`, where a game
+frame ends (its `kernel.md` section 2). The loading wait ends no frame, so the callback never ran.
+
+DC now registers its compiled `sceGsSyncVCallback` (`0x113DE8`) in the port registry, which takes precedence over
+the engine's native library at that external address. The callback is the vblank interrupt again, as on the
+previous pin. No engine change is involved. The CD-cancel regression asserts main's `sceCdBreak` contract: an
+active read ends at the current native time, and an idle drive's error is unchanged.
+
+DC moves to BozoEngine main `296ac6d`. Qualification on this PC:
+
+- **125/125** local suites including eight GPU checks, and the 14 release-tool tests.
+- Seven scripted routes on the new build and on a pin build carrying the same fix (`2278ba0`), each from identical
+  copied cards: Matataki travel (9,000 frames), in-game Cheats ending in Quit Game, the outdoor water route, the
+  companion menu, a main-menu route, a save route and a fresh-process reload. All end identically on both, with
+  zero register/unknown accesses, native VU0 calls or GIF submissions. VIF1 operation counts differ by under 1%.
+- Captures match where the scene is the same, mostly under 1.5 mean levels. A separate save route on copied cards
+  shows "Saving completed." on engine main; its written `darkcloud0` is byte-identical to the pin build's, and a
+  fresh process lists and loads that save.
+- Two kinds of difference were examined, not dismissed. Some transitions finish a few frames later on engine
+  main, so fade captures land at another point of the same fade. Windowed runs of the unchanged pin also move
+  that fade from run to run. A dungeon floor entered by the save route starts Toan at another position on engine
+  main, while two pin runs agree. `buildRandomMap` seeds each new floor from `rand()`, a sequence that other code
+  also draws from and reseeds (`DrawFire`, villager placement). A different number of frames before the floor
+  therefore gives another valid random floor. The seed itself was not dumped; the walk, menus and fades before
+  the floor match.
+
+Not covered by these routes: dungeon combat, the new-game opening, Georama and a human play session on the new
+engine. The released v0.1.0 keeps its `2278ba0` engine; this change applies to the next release.

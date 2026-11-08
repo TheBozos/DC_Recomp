@@ -96,7 +96,7 @@ the full encounter still needs a player comparison. Matataki's reported sharp sk
 and confirmed in the player's comparison.
 
 [docs/NATIVE_RENDERING_FOLLOWUP.md](docs/NATIVE_RENDERING_FOLLOWUP.md) records recent fixes, playtest
-coverage and the retained engine pin. [docs/BOZO_MIGRATION.md](docs/BOZO_MIGRATION.md) retains the migration
+coverage and the move to engine main (the loading-screen vsync callback). [docs/BOZO_MIGRATION.md](docs/BOZO_MIGRATION.md) retains the migration
 and conditional dispatch audit; [docs/RECOMP_NOTES.md](docs/RECOMP_NOTES.md) records earlier bring-up work.
 
 ## Screenshots

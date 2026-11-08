@@ -26,6 +26,24 @@ BozoEngine replaces the PS2Recomp fork completely; there is no emulation fallbac
 > | `TITLE.BIN` | `8da27dd6a4f8d2090216b17d5d64a0c142cfd6d5` |
 > | `DUN.BIN` | `ab7e56a4eeb69e178638088de6e57857d48f1d98` |
 
+## For players (Windows)
+
+Download **`DC_Recomp-0.1.0-bozo.zip`** from [Releases](https://github.com/TheBozos/DC_Recomp/releases/latest),
+check its `.sha256`, and extract it to a writable folder such as `D:\Games\DC_Recomp_Bozo`.
+Open **DC Launcher.exe**, select your own USA disc image (`.iso` or `.bin`/`.cue`), click **Prepare the game**,
+then **Play**. Preparation runs locally with the bundled offline tools; no developer software is needed.
+It can be cancelled and resumed. The launcher follows TMB_Recomp's layout and supports English and French.
+
+You need Windows 10 version 1903 or newer (or Windows 11), an AVX2/FMA CPU, OpenGL 3.3 and about **10 GB free**.
+Only the unmodified `SCUS-97111` version 1.02 disc is supported; the executable and both overlays are verified.
+The unsigned launcher may trigger Windows SmartScreen. Game files and generated game code are never distributed.
+
+Use the launcher's **Settings** for display options, logs, maintenance and updates. **F2** opens the game's
+settings. Saves, controls, video settings and cheats are stored in `%APPDATA%\DC_Recomp` and survive launcher
+updates. Existing development saves are kept separately; copy only the desired card files into that directory.
+The in-game pause menu includes **Cheats** and **Quit Game**. Updates offer a rebuild when the source changes.
+See [CHANGELOG.md](CHANGELOG.md) for release changes and the checked routes above for current coverage.
+
 ## Status
 
 **Playable Windows port, under active gameplay testing.** Checked routes include Norune,
@@ -133,24 +151,6 @@ disc files (game/) ──► tools/dc_bozo_prepare.py ──► resident ELF + T
 [BozoEngine](https://github.com/TheBozos/BozoEngine) is the sole engine submodule. Game-specific addresses, formats,
 hook choices and module layouts stay in DC_Recomp; engine changes must be generic and reusable by other recompiles.
 
-## For players (Windows)
-
-Download **`DC_Recomp-0.1.0-bozo.zip`** from [Releases](https://github.com/TheBozos/DC_Recomp/releases/latest),
-check its `.sha256`, and extract it to a writable folder such as `D:\Games\DC_Recomp_Bozo`.
-Open **DC Launcher.exe**, select your own USA disc image (`.iso` or `.bin`/`.cue`), click **Prepare the game**,
-then **Play**. Preparation runs locally with the bundled offline tools; no developer software is needed.
-It can be cancelled and resumed. The launcher follows TMB_Recomp's layout and supports English and French.
-
-You need Windows 10 version 1903 or newer (or Windows 11), an AVX2/FMA CPU, OpenGL 3.3 and about **10 GB free**.
-Only the unmodified `SCUS-97111` version 1.02 disc is supported; the executable and both overlays are verified.
-The unsigned launcher may trigger Windows SmartScreen. Game files and generated game code are never distributed.
-
-Use the launcher's **Settings** for display options, logs, maintenance and updates. **F2** opens the game's
-settings. Saves, controls, video settings and cheats are stored in `%APPDATA%\DC_Recomp` and survive launcher
-updates. Existing development saves are kept separately; copy only the desired card files into that directory.
-The in-game pause menu includes **Cheats** and **Quit Game**. Updates offer a rebuild when the source changes.
-See [CHANGELOG.md](CHANGELOG.md) for release changes and the checked routes above for current coverage.
-
 ## Requirements
 
 - Windows 10/11 with [MSYS2](https://www.msys2.org/) (UCRT64, see below); Linux is not qualified yet
@@ -163,6 +163,20 @@ See [CHANGELOG.md](CHANGELOG.md) for release changes and the checked routes abov
 ## Build and run
 
 The following is the developer workflow; players can use the launcher above.
+
+### One command, from your disc
+
+The launcher uses this same resumable pipeline. With an installed development toolchain:
+
+```bash
+python tools/dc_build.py --disc "Dark Cloud (USA).iso" --out build/player
+```
+
+With an extracted release, use `kit/python/python.exe -I -X utf8 source/tools/dc_build.py` instead; it discovers
+`kit/` automatically and builds offline. `--check` verifies the selected disc without preparing anything;
+`--redo STEP` repeats a step and its successors. Detailed logs are in `<out>/logs/`.
+
+### Developer build and regression suites
 
 ```bash
 git clone --recurse-submodules https://github.com/TheBozos/DC_Recomp.git

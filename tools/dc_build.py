@@ -328,10 +328,13 @@ class Build:
         if step == 'configure':
             return fingerprint(self.find_toolchain(), a.build_type, a.debug_info, a.fetch_cache, self.ffmpeg_root,
                                self.toolchain_key(), cmake_rc_flags(), ROOT, ENGINE, sys.executable, prev('extract'),
-                               [file_stamp(os.path.join(ROOT,n)) for n in ('CMakeLists.txt','VERSION')])
+                               [file_stamp(os.path.join(ROOT,n)) for n in ('CMakeLists.txt','VERSION')],
+                               [file_stamp(os.path.join(ENGINE,n)) for n in ('CMakeLists.txt','runtime/CMakeLists.txt')],
+                               file_stamp(os.path.join(self.kit,KIT_MANIFEST)) if self.kit else None)
         if step == 'tools': return fingerprint(prev('configure'), tree_stamp(os.path.join(ENGINE,'recompiler'),SOURCE_EXTS),tree_stamp(os.path.join(ENGINE,'tools','externals'),SOURCE_EXTS))
         if step == 'recompile':
-            return fingerprint(prev('tools'), *[tree_stamp(os.path.join(ROOT,d),SOURCE_EXTS+('.py','.csv','.patches')) for d in ('runtime','recomp','tools')])
+            return fingerprint(prev('tools'), *[tree_stamp(os.path.join(ROOT,d),SOURCE_EXTS+('.py','.csv','.patches')) for d in ('runtime','recomp','tools')],
+                               tree_stamp(os.path.join(ENGINE,'tools','native_irx'), SOURCE_EXTS))
         if step == 'packs': return fingerprint(prev('configure'), *[file_stamp(os.path.join(ROOT,'tools',n)) for n in ('dc_texconv.py','gs_layout.py')])
         if step == 'compile': return fingerprint(prev('recompile'),prev('packs'),tree_stamp(os.path.join(ROOT,'runtime'),SOURCE_EXTS),tree_stamp(os.path.join(ENGINE,'runtime'),SOURCE_EXTS))
         if step == 'stage': return fingerprint(prev('compile'),self.game)
@@ -574,7 +577,7 @@ class Build:
         self.cmake_build_targets('dc_generate', 'dc_native_audio', percent=ninja_percent)
 
     def step_packs(self):
-        self.cmake_build_targets('dc_assets', percent=ninja_percent)
+        self.cmake_build_targets('dc_assets', percent=texture_percent)
 
     def step_compile(self):
         self.cmake_build_targets(GAME_EXE, percent=ninja_percent)
@@ -740,6 +743,11 @@ STEP_TITLES = {
 }
 
 NINJA_RE = re.compile(r'^\[(\d+)/(\d+)\]')
+
+
+def texture_percent(line):
+    m = re.search(r"^TEXTURE_PROGRESS (100|[0-9]{1,2})$", line.strip())
+    return int(m.group(1)) if m else None
 
 
 def ninja_percent(line):

@@ -205,4 +205,18 @@ class ResumeTests(unittest.TestCase):
             (Path(folder)/'native_images/dun.identity').unlink()
             self.assertFalse(b.outputs_present('stage'))
 
+class TextureProgressTests(unittest.TestCase):
+    def test_conversion_reports_progress_and_writes_a_valid_empty_store(self):
+        import struct
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root/'DATA.HD2').write_bytes(struct.pack('<8I',32,0,0,0,0,0,0,0))
+            (root/'DATA.DAT').write_bytes(b'')
+            out = root/'textures.bin'
+            result = subprocess.run([sys.executable,'-I',str(ROOT/'tools/dc_texconv.py'),folder,str(out),'--progress'],
+                                    check=True,capture_output=True,text=True)
+            values = [dc_build.texture_percent(line) for line in result.stdout.splitlines()]
+            self.assertEqual([v for v in values if v is not None],[0,100])
+            self.assertEqual(struct.unpack('<4sII',out.read_bytes()),(b'DCTX',3,0))
+
 if __name__ == '__main__': unittest.main()

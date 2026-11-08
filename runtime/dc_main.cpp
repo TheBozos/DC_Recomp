@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #ifdef DC_WITH_WINDOW
 #include "bozo/app/app.h"
 #include "bozo/app/audio_device.h"

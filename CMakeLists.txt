@@ -1,18 +1,22 @@
 cmake_minimum_required(VERSION 3.21)
-project(DC_Recomp LANGUAGES CXX)
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/VERSION" DC_RELEASE_VERSION LIMIT_COUNT 1)
+project(DC_Recomp VERSION ${DC_RELEASE_VERSION} LANGUAGES CXX)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+option(DC_GUI_SUBSYSTEM "Build the Windows player without a console" OFF)
+set(DC_GAME_DIR "${CMAKE_SOURCE_DIR}/game" CACHE PATH "User-owned extracted disc files")
+set(BOZO_ENGINE_DIR "${CMAKE_SOURCE_DIR}/BozoEngine" CACHE PATH "Pinned native engine source")
 option(DC_WINDOW "Build the SDL3 native game window" ON)
 option(DC_AUDIT_INDIRECT "Instrument generated register transfers for local audit traces" OFF)
 set(BOZO_APP ${DC_WINDOW} CACHE BOOL "" FORCE)
 set(BOZO_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(BOZO_REQUIRE_FFMPEG ON CACHE BOOL "Native movie decoding is required by this port" FORCE)
 set(DC_ISO "${CMAKE_SOURCE_DIR}/Dark Cloud (USA).iso" CACHE FILEPATH "User-owned NTSC-U disc image")
-add_subdirectory(BozoEngine)
+add_subdirectory("${BOZO_ENGINE_DIR}" BozoEngine)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_executable(dc-indirect-facts tools/dc_indirect_facts.cpp)
 target_link_libraries(dc-indirect-facts PRIVATE bozo_recomp_lib)
@@ -24,19 +28,19 @@ file(MAKE_DIRECTORY ${dc_gen})
 set(dc_images ${dc_gen}/dc.elf ${dc_gen}/title.elf ${dc_gen}/dun.elf
               ${dc_gen}/title.identity ${dc_gen}/dun.identity)
 add_custom_command(OUTPUT ${dc_images}
-  COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_bozo_prepare.py ${CMAKE_SOURCE_DIR} ${dc_gen}
+  COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_bozo_prepare.py ${CMAKE_SOURCE_DIR} ${dc_gen} ${DC_GAME_DIR}
   DEPENDS tools/dc_bozo_prepare.py tools/wrap_elf.py tools/symtab_map.py
-          game/SCUS_971.11 game/TITLE.BIN game/DUN.BIN recomp/maps/dc_title.csv recomp/maps/dc_dun.csv
+          ${DC_GAME_DIR}/SCUS_971.11 ${DC_GAME_DIR}/TITLE.BIN ${DC_GAME_DIR}/DUN.BIN recomp/maps/dc_title.csv recomp/maps/dc_dun.csv
   COMMENT "Preparing the resident and overlay ELF images offline")
 set(dc_externals ${dc_gen}/dc_externals.txt)
 set(dc_overlay_externals ${dc_gen}/dc_overlay_externals.txt)
 add_custom_command(OUTPUT ${dc_externals} ${dc_overlay_externals}
   COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_bozo_externals.py --overrides ${CMAKE_SOURCE_DIR} ${dc_gen}/dc_overrides.txt
-  COMMAND bozo-externals ${CMAKE_SOURCE_DIR}/game/SCUS_971.11 ${dc_gen}/native_externals.txt --overrides ${dc_gen}/dc_overrides.txt
+  COMMAND bozo-externals ${DC_GAME_DIR}/SCUS_971.11 ${dc_gen}/native_externals.txt --overrides ${dc_gen}/dc_overrides.txt
   COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_bozo_externals.py ${dc_gen}/native_externals.txt ${dc_externals} ${dc_overlay_externals}
   DEPENDS bozo-externals ${CMAKE_SOURCE_DIR}/tools/dc_bozo_externals.py ${CMAKE_SOURCE_DIR}/runtime/dc_native.cpp
           ${CMAKE_SOURCE_DIR}/runtime/dc_port.cpp ${CMAKE_SOURCE_DIR}/runtime/dc_cheats.cpp
-          ${CMAKE_SOURCE_DIR}/runtime/dc_ingame_cheats.cpp ${CMAKE_SOURCE_DIR}/game/SCUS_971.11)
+          ${CMAKE_SOURCE_DIR}/runtime/dc_ingame_cheats.cpp ${DC_GAME_DIR}/SCUS_971.11)
 set(dc_sources)
 foreach(image dc title dun)
   set(chunks 32)
@@ -103,12 +107,12 @@ set(dc_audio_inputs)
 foreach(module LIBSD SDRDRV MODMIDI MODHSYN EZMIDI)
   string(TOLOWER "${module}" lower)
   list(APPEND dc_audio_outputs ${dc_audio_gen}/${lower}_iop.cpp)
-  list(APPEND dc_audio_inputs ${CMAKE_SOURCE_DIR}/game/MODULES/${module}.IRX)
+  list(APPEND dc_audio_inputs ${DC_GAME_DIR}/MODULES/${module}.IRX)
 endforeach()
 add_custom_command(OUTPUT ${dc_audio_outputs}
-  COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_bozo_audio.py ${CMAKE_SOURCE_DIR} ${dc_audio_gen}
+  COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_bozo_audio.py ${CMAKE_SOURCE_DIR} ${dc_audio_gen} ${DC_GAME_DIR} ${BOZO_ENGINE_DIR}
   DEPENDS ${dc_audio_inputs} tools/dc_bozo_audio.py
-          BozoEngine/tools/native_irx/relocate.py BozoEngine/tools/native_irx/recompile.py
+          ${BOZO_ENGINE_DIR}/tools/native_irx/relocate.py ${BOZO_ENGINE_DIR}/tools/native_irx/recompile.py
   COMMENT "Statically recompiling the native sound libraries (strict mode)")
 add_custom_target(dc_native_audio DEPENDS ${dc_audio_outputs})
 add_library(dc_audio_code OBJECT ${dc_audio_gen}/libsd_iop.cpp ${dc_audio_gen}/sdrdrv_iop.cpp ${dc_audio_gen}/modmidi_iop.cpp ${dc_audio_gen}/modhsyn_iop.cpp ${dc_audio_gen}/ezmidi_iop.cpp)
@@ -123,7 +127,12 @@ if(DC_WINDOW)
   target_link_libraries(dc PRIVATE dc_game bozo_host bozo_app dc_cheats dc_ingame_cheats)
   if(WIN32)
     enable_language(RC)
-    target_sources(dc PRIVATE runtime/app/dc.rc)
+    string(REPLACE "." "," DC_FILEVERSION "${PROJECT_VERSION}.0")
+    configure_file(runtime/app/dc.rc.in "${CMAKE_CURRENT_BINARY_DIR}/dc.rc" @ONLY)
+    target_sources(dc PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/dc.rc")
+    if(DC_GUI_SUBSYSTEM)
+      set_target_properties(dc PROPERTIES WIN32_EXECUTABLE TRUE)
+    endif()
     target_include_directories(dc PRIVATE runtime/app)
   endif()
   target_include_directories(dc PRIVATE ${dc_audio_gen})
@@ -138,15 +147,15 @@ endif()
 set(dc_textures ${CMAKE_BINARY_DIR}/textures/dc_textures.bin)
 add_custom_command(OUTPUT ${dc_textures}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/textures
-  COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_texconv.py ${CMAKE_SOURCE_DIR}/game ${dc_textures}
-  DEPENDS tools/dc_texconv.py tools/gs_layout.py game/DATA.HD2 game/DATA.DAT
+  COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/dc_texconv.py ${DC_GAME_DIR} ${dc_textures}
+  DEPENDS tools/dc_texconv.py tools/gs_layout.py ${DC_GAME_DIR}/DATA.HD2 ${DC_GAME_DIR}/DATA.DAT
   COMMENT "Converting the user-owned disc textures offline")
 add_custom_target(dc_assets DEPENDS ${dc_textures})
 foreach(target dc-headless dc)
   if(TARGET ${target})
     add_dependencies(${target} dc_assets)
     target_compile_definitions(${target} PRIVATE
-      DC_DEFAULT_TEXTURES="${dc_textures}" DC_DEFAULT_ELF="${CMAKE_SOURCE_DIR}/game/SCUS_971.11"
+      DC_DEFAULT_TEXTURES="${dc_textures}" DC_DEFAULT_ELF="${DC_GAME_DIR}/SCUS_971.11"
       DC_DEFAULT_ISO="${DC_ISO}")
   endif()
 endforeach()
@@ -293,10 +302,10 @@ if(DC_ENGINE_TESTS)
                             ${dc_visibility_gen}/dcvis_functions.h)
   add_custom_command(OUTPUT ${dc_visibility_outputs}
     COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/make_visibility_fixture.py
-      ${CMAKE_SOURCE_DIR}/game/SCUS_971.11 ${dc_visibility_gen}/reference.elf
+      ${DC_GAME_DIR}/SCUS_971.11 ${dc_visibility_gen}/reference.elf
     COMMAND bozo-recomp ${dc_visibility_gen}/reference.elf ${dc_visibility_gen} --prefix dcvis
       --symbol-prefix dcvis_ --files 1 --no-comments --externals ${dc_visibility_gen}/reference.externals
-    DEPENDS bozo-recomp tests/make_visibility_fixture.py game/SCUS_971.11)
+    DEPENDS bozo-recomp tests/make_visibility_fixture.py ${DC_GAME_DIR}/SCUS_971.11)
   add_executable(dc-visibility-tests tests/dc_visibility_tests.cpp runtime/dc_native.cpp runtime/dc_port.cpp
     ${dc_visibility_outputs})
   target_link_libraries(dc-visibility-tests PRIVATE dc_game bozo_host)
@@ -315,14 +324,14 @@ if(DC_ENGINE_TESTS)
     endforeach()
     add_custom_command(OUTPUT ${outputs}
       COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/make_packet_wrapper_fixture.py ${kind}
-        ${CMAKE_SOURCE_DIR}/game/SCUS_971.11 ${CMAKE_SOURCE_DIR}/recomp/dc_native.patches ${fixture_dir}/reference.elf
+        ${DC_GAME_DIR}/SCUS_971.11 ${CMAKE_SOURCE_DIR}/recomp/dc_native.patches ${fixture_dir}/reference.elf
       COMMAND bozo-recomp ${fixture_dir}/reference.elf ${fixture_dir} --prefix ${kind}_ref
         --symbol-prefix ${kind}_ref_ --files 1 --no-comments --externals ${fixture_dir}/reference.externals
         --patches ${fixture_dir}/reference.baseline.patches
       COMMAND bozo-recomp ${fixture_dir}/reference.elf ${fixture_dir} --prefix ${kind}_native
         --symbol-prefix ${kind}_native_ --files 1 --no-comments --externals ${fixture_dir}/reference.native.externals
         --patches ${fixture_dir}/reference.patches
-      DEPENDS bozo-recomp tests/make_packet_wrapper_fixture.py game/SCUS_971.11 recomp/dc_native.patches)
+      DEPENDS bozo-recomp tests/make_packet_wrapper_fixture.py ${DC_GAME_DIR}/SCUS_971.11 recomp/dc_native.patches)
     set(wrapper_test tests/dc_${kind}_wrapper_tests.cpp)
     if(kind STREQUAL "texanim_state" OR kind STREQUAL "item_state")
       set(wrapper_test tests/dc_copy_state_wrapper_tests.cpp)
@@ -363,7 +372,7 @@ if(DC_ENGINE_TESTS)
       target_link_options(dc-${kind}-wrapper-tests PRIVATE -static)
     endif()
     if(kind MATCHES "^(packet_init|begin_frame|resident_chain|loading_init)$")
-      add_test(NAME dc_native_${kind}_wrapper COMMAND dc-${kind}-wrapper-tests ${CMAKE_SOURCE_DIR}/game/SCUS_971.11)
+      add_test(NAME dc_native_${kind}_wrapper COMMAND dc-${kind}-wrapper-tests ${DC_GAME_DIR}/SCUS_971.11)
     else()
       add_test(NAME dc_native_${kind}_wrapper COMMAND dc-${kind}-wrapper-tests)
     endif()
@@ -407,7 +416,7 @@ if(DC_ENGINE_TESTS)
     endforeach()
     add_custom_command(OUTPUT ${outputs}
       COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/make_overlay_packet_fixture.py ${kind}
-        ${dc_gen}/${image}.elf ${CMAKE_SOURCE_DIR}/game/${raw_image}.BIN
+        ${dc_gen}/${image}.elf ${DC_GAME_DIR}/${raw_image}.BIN
         ${CMAKE_SOURCE_DIR}/recomp/${image}_native.patches ${fixture_dir}/reference.elf
       COMMAND bozo-recomp ${fixture_dir}/reference.elf ${fixture_dir} --prefix ${kind}_ref
         --symbol-prefix ${kind}_ref_ --files 1 --no-comments --externals ${fixture_dir}/reference.externals
@@ -443,12 +452,12 @@ if(DC_ENGINE_TESTS)
       ${dun_dispatch_dir}/dun_dispatch_functions.h ${dun_dispatch_dir}/dispatch_cases.h)
   add_custom_command(OUTPUT ${dun_dispatch_outputs}
     COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/make_dun_dispatch_fixture.py
-      ${dc_gen}/dun.elf ${CMAKE_SOURCE_DIR}/game/DUN.BIN ${CMAKE_SOURCE_DIR}/recomp/dun_native.patches
+      ${dc_gen}/dun.elf ${DC_GAME_DIR}/DUN.BIN ${CMAKE_SOURCE_DIR}/recomp/dun_native.patches
       ${dc_gen}/dun.indirect.json ${dun_dispatch_dir}
     COMMAND bozo-recomp ${dun_dispatch_dir}/fixture.elf ${dun_dispatch_dir} --prefix dun_dispatch
       --symbol-prefix dun_dispatch_ --files 1 --no-comments --externals ${dun_dispatch_dir}/fixture.externals
     DEPENDS bozo-recomp tests/make_dun_dispatch_fixture.py tools/dc_packet_audit.py tools/dc_alias_audit.py tools/symtab_map.py
-      ${dc_gen}/dun.elf ${dc_gen}/dun.indirect.json game/DUN.BIN recomp/dun_native.patches)
+      ${dc_gen}/dun.elf ${dc_gen}/dun.indirect.json ${DC_GAME_DIR}/DUN.BIN recomp/dun_native.patches)
   add_executable(dc-dun-dispatch-tests tests/dc_dun_dispatch_tests.cpp ${dun_dispatch_outputs})
   target_link_libraries(dc-dun-dispatch-tests PRIVATE bozo_host)
   target_include_directories(dc-dun-dispatch-tests PRIVATE ${dun_dispatch_dir})
@@ -494,4 +503,8 @@ if(DC_ENGINE_TESTS)
   add_test(NAME dc_callee_effect_tools COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/test_callee_audit.py)
   add_test(NAME dc_loadchara_bounds_tools COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/test_loadchara_audit.py)
   add_test(NAME dc_readinfo_effect_tools COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tests/test_readinfo_audit.py)
+endif()
+
+if(BUILD_TESTING)
+  add_test(NAME dc_release_tools COMMAND ${Python3_EXECUTABLE} -I "${CMAKE_SOURCE_DIR}/tests/test_release_tools.py")
 endif()

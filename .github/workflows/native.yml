@@ -21,5 +21,7 @@ jobs:
           python3 -m py_compile tools/dc_callee_audit.py tests/test_callee_audit.py
           python3 -m py_compile tools/dc_loadchara_audit.py tools/dc_pack_inventory.py tests/test_loadchara_audit.py
           python3 -m py_compile tools/dc_readinfo_audit.py tests/test_readinfo_audit.py
+          python3 -I tests/test_release_tools.py
+          python3 -m py_compile tools/make_build_kit.py tools/make_release.py tools/dc_build.py
           python3 -I tests/test_externals.py
           for script in scripts/*.sh; do bash -n "$script"; done

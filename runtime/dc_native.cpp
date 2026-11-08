@@ -36,6 +36,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 #include <string>
 #include <memory>
 #include <mutex>
@@ -46,6 +47,8 @@
 
 namespace dc::native
 {
+    static std::string assetDirectory;
+    void setAssetDirectory(const std::string &path) { assetDirectory = path; }
     void publish(); // the game frame's end: below
     namespace
     {
@@ -757,7 +760,9 @@ namespace dc::native
         {
             g_storeLoaded = true;
             const char *path = std::getenv("DC_TEXTURES");
-            std::ifstream file(path && *path ? path : DC_DEFAULT_TEXTURES, std::ios::binary);
+            const auto fallback = assetDirectory.empty() ? std::filesystem::path(DC_DEFAULT_TEXTURES)
+                                                       : std::filesystem::path(assetDirectory) / "dc_textures.bin";
+            std::ifstream file(path && *path ? std::filesystem::path(path) : fallback, std::ios::binary);
             if (!file)
             {
                 std::fprintf(stderr, "[dc:native] no converted textures (run tools/dc_texconv.py game build/textures/dc_textures.bin): "

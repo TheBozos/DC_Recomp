@@ -4,8 +4,8 @@
 1 ICON "dc.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,0,0,0
-PRODUCTVERSION 1,0,0,0
+FILEVERSION @DC_FILEVERSION@
+PRODUCTVERSION @DC_FILEVERSION@
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -17,8 +17,8 @@ BEGIN
             VALUE "ProductName", "Dark Cloud (DC_Recomp, a native PC port)"
             VALUE "InternalName", "dc"
             VALUE "OriginalFilename", "dc.exe"
-            VALUE "FileVersion", "1.0.0.0"
-            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "FileVersion", "@PROJECT_VERSION@.0"
+            VALUE "ProductVersion", "@PROJECT_VERSION@.0"
         END
     END
     BLOCK "VarFileInfo"

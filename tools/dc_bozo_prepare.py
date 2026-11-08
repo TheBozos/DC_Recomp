@@ -26,17 +26,18 @@ def finish(blob, sections, names):
     out+=b''.join(SH.pack(*s) for s in sections)
     return out
 
-def main(root,out):
+def main(root,out,game=None):
     root=Path(root); out=Path(out); out.mkdir(parents=True,exist_ok=True)
+    game=Path(game) if game else root/"game"
     hashes = {
         'SCUS_971.11': 'd9965d6908a334a5dfc982f3384428ad42048d54',
         'TITLE.BIN': '8da27dd6a4f8d2090216b17d5d64a0c142cfd6d5',
         'DUN.BIN': 'ab7e56a4eeb69e178638088de6e57857d48f1d98',
     }
     for filename, expected in hashes.items():
-        if hashlib.sha1((root/'game'/filename).read_bytes()).hexdigest() != expected:
+        if hashlib.sha1((game/filename).read_bytes()).hexdigest() != expected:
             raise ValueError(f'{filename}: unsupported disc revision; expected NTSC-U version 1.02')
-    elf=(root/'game/SCUS_971.11').read_bytes()
+    elf=(game/'SCUS_971.11').read_bytes()
     sections=headers(elf)
     si=struct.unpack_from('<H',elf,0x32)[0]
     names=bytearray(elf[sections[si][4]:sections[si][4]+sections[si][5]])
@@ -49,7 +50,7 @@ def main(root,out):
     (out/'dc.elf').write_bytes(finish(elf,sections,names))
     flags=struct.unpack_from('<I',elf,0x24)[0]
     for module in ('title','dun'):
-        raw=(root/'game'/f'{module.upper()}.BIN').read_bytes()
+        raw=(game/f'{module.upper()}.BIN').read_bytes()
         image=bytearray(wrap(raw,flags)); sh=headers(image)
         si=struct.unpack_from('<H',image,0x32)[0]
         names=bytearray(image[sh[si][4]:sh[si][4]+sh[si][5]])

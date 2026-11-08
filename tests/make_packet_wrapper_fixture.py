@@ -91,7 +91,7 @@ target.with_suffix('.native.externals').write_text(target.with_suffix('.external
 selected = [line for line in patches.read_text().splitlines()
             if line.split('#')[0].strip() and span_start <= int(line.split()[0], 16) < end]
 expected = {'frame_close': 2, 'frame_draw': 0, 'frame_member': 0, 'mdt_draw': 2,
-            'message': 2, 'edit_state': 2, 'menu_state': 2, 'loading': 9, 'fire': 6, 'language': 2, 'fishing': 9,
+            'message': 3, 'edit_state': 2, 'menu_state': 2, 'loading': 9, 'fire': 6, 'language': 2, 'fishing': 9,
             'debug_font': 14, 'packet_init': 2, 'begin_frame': 5, 'resident_chain': 2, 'loading_init': 2,
             'packet_reserve': 2, 'buffer_clear': 4, 'packet_handle': 1, 'packet_get': 1}.get(kind, 4)
 handle_sites = {int(line.split()[0], 16) for line in selected

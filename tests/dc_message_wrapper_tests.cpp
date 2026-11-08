@@ -1,4 +1,4 @@
-// Original whole message-window function versus its two guarded adaptations.
+// Original whole message-window function versus its guarded adaptations.
 // Rendering/texture helpers are controlled boundaries; text/layout arithmetic
 // and message state transitions execute as statically compiled retail code.
 #include "dc_functions.h"
@@ -16,7 +16,7 @@ namespace
 {
     constexpr uint32_t message = 0x400000, texture = 0x430000, glyph = 0x440000,
                        packet = 0x500000, output = 0x510000, gp = 0x300000, stack = 0x700000;
-    int failures = 0, cases = 0, packetCalls = 0;
+    int failures = 0, cases = 0, packetCalls = 0, cursorCalls = 0;
     struct Call
     {
         uint32_t pc = 0;
@@ -152,7 +152,17 @@ int main()
                     auto original = context();
                     message_ref_function_table[0].function(ram, &original, rt.get());
                     check(original.pc == 0x123450 && !original.leaving, "original message draw returns normally");
-                    const auto expectedCalls = calls;
+                    auto expectedCalls = calls;
+                    for (auto &call : expectedCalls)
+                        if (call.pc == 0x15c310 && call.data[4] == 96 && call.data[5] == 96 &&
+                            call.data[2] == 32 && call.data[3] == 32)
+                        {
+                            ++cursorCalls;
+                            // Intentional choice-menu layout change only: the
+                            // original hand begins 12 pixels before the text.
+                            const int textX = static_cast<int32_t>(call.data[0]) + 12;
+                            call.data[0] = static_cast<uint32_t>(textX - static_cast<int>(call.data[2]) - 4);
+                        }
                     const int expectedPackets = mode == 6 || mode == 7 ? 0 : 6;
                     check(packetCalls == expectedPackets, "reference emits exactly the audited flush envelope when reached");
                     const std::vector<uint8_t> finalMessage(ram + message, ram + message + 0x1900);
@@ -168,7 +178,7 @@ int main()
                     calls.clear(); packetCalls = 0;
                     message_native_function_table[0].function(ram, &native, rt.get());
                     check(native.pc == 0x123450 && !native.leaving, "adapted message draw returns normally");
-                    check(calls == expectedCalls && packetCalls == 0, "same ordered texture/layout/glyph/native draw inputs without packet calls");
+                    check(calls == expectedCalls && packetCalls == 0, "ordered draw inputs preserved except the hand's horizontal gap; no packet calls");
                     for (int r : {16,17,18,19,20,21,22,23,28,29,30,31})
                         check(std::memcmp(&native.r[r], &before.r[r], sizeof(native.r[r])) == 0, "saved full registers/stack/return preserved");
                     check(native.fcr31 == original.fcr31, "retained float status matches original");
@@ -176,6 +186,7 @@ int main()
                           std::memcmp(ram + stack, expectedRam.data() + stack, expectedRam.size() - stack) == 0,
                           "message/glyph state matches; packet and all other non-stack RAM untouched");
                 }
-    std::printf("DC message wrapper: %d original/adapted cases, %d failures\n", cases, failures);
+    check(cursorCalls > 0,"choice-hand alignment exercised");
+    std::printf("DC message wrapper: %d original/adapted cases, %d hand draws, %d failures\n", cases, cursorCalls, failures);
     return failures ? 1 : 0;
 }

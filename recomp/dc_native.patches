@@ -1,5 +1,8 @@
 # Guarded build-time adaptations for SCUS-97111. No game files are modified.
 # address     expected    replacement
+# Choice menus: the 32-pixel hand at text_x - 12 overlaps the first
+# character. Leave four pixels between its right edge and the text origin.
+0x00153e80 0x24a3fff4 0x24a3ffdc # ClsMes::DrawMesWin: text_x - 36
 # Retire PS2 CPU/free-time diagnostics. Gameplay time uses the native frame clock.
 0x00141648 0xac220010 0x00000000 # Timer0 mode setup
 0x00141698 0xac200000 0x00000000 # per-frame diagnostic timer reset

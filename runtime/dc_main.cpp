@@ -4,6 +4,9 @@
 #include "bozo/host/free_host.h"
 #include "bozo/port.h"
 #include "dc_functions.h"
+#include "dc_cheats.h"
+#include "dc_ingame_cheats.h"
+#include "dc_native_api.h"
 #include "dun_functions.h"
 #include "title_functions.h"
 #ifdef DC_AUDIT_INDIRECT
@@ -66,6 +69,10 @@ int main(int argc, char **argv)
         else if (a == "--profile-io")
             options.profileIo = true;
 #ifdef DC_WITH_WINDOW
+        else if (a == "--no-vsync")
+            windowOptions.vsync = false;
+        else if (a == "--fullscreen")
+            windowOptions.fullscreen = true;
         else if (a == "--capture-dir" && i + 1 < argc)
             windowOptions.captureDir = argv[++i];
         else if (a == "--capture-frame" && i + 1 < argc)
@@ -75,7 +82,8 @@ int main(int argc, char **argv)
         {
             std::fprintf(stderr, "Usage: dc [--frames N] [--headless] [--elf FILE] [--iso FILE]\n"
                                  "          [--card-dir DIR] [--pad-script FILE | --live-pad FILE] [--wav FILE]\n"
-                                 "          [--out FILE] [--capture-dir DIR] [--capture-frame N] [--profile-io]\n");
+                                 "          [--out FILE] [--capture-dir DIR] [--capture-frame N] [--profile-io]\n"
+                                 "          [--fullscreen] [--no-vsync]\n");
             return a == "--help" ? 0 : 2;
         }
     }
@@ -93,6 +101,8 @@ int main(int argc, char **argv)
     d.setFunctions(dc_function_table, dc_function_count, dc_resume_table, dc_resume_count);
     bozo::port::Registry registry;
     dc::install(d.runtime(), registry);
+    dc::cheats::install(d.runtime(), registry);
+    dc::cheats::installIngameMenu(d.runtime(), registry, dc::native::finishSceneForMenu);
     std::string error;
     if (!host.setUp(d, dc_external_table, dc_external_count, &registry, error))
     {
@@ -113,6 +123,7 @@ int main(int argc, char **argv)
     pacer.setPaced(window);
     host.onFrame = [&](uint64_t f, const R5900Context *ctx)
     {
+        if (dc::cheats::takeIngameQuitRequest()) host.requestStop();
         pacer.frameEnd();
         if (f % 60 == 0)
             std::printf("[dc] frame=%llu pc=%x cycles=%llu\n", (unsigned long long)f, ctx->pc,
@@ -176,6 +187,7 @@ int main(int argc, char **argv)
 #ifdef DC_WITH_WINDOW
     if (window)
     {
+        dc::cheats::registerMenu();
         bozo::app::Game game;
         game.run = run;
         game.stop = [&] { host.requestStop(); };

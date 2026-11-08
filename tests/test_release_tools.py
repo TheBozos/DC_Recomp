@@ -193,4 +193,16 @@ class DiscBuildTests(unittest.TestCase):
             with zipfile.ZipFile(p,'a') as z: z.writestr('DC_Recomp_Bozo/source/DATA.HED',b'game')
             self.assertTrue(any('DATA.HED' in e for e in make_release.verify_zip(p)))
 
+class ResumeTests(unittest.TestCase):
+    def test_deleted_game_assets_force_staging_again(self):
+        with tempfile.TemporaryDirectory() as folder:
+            b = dc_build.Build.__new__(dc_build.Build)
+            b.game = b.cmake_build = b.disc_dir = folder
+            self.assertFalse(b.outputs_present('stage'))
+            for name in ('dc'+dc_build.EXE, dc_build.ELF_NAME, 'dc_textures.bin', 'native_images/title.identity', 'native_images/dun.identity'):
+                p = Path(folder)/name; p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(b'fixture')
+            self.assertTrue(b.outputs_present('stage'))
+            (Path(folder)/'native_images/dun.identity').unlink()
+            self.assertFalse(b.outputs_present('stage'))
+
 if __name__ == '__main__': unittest.main()

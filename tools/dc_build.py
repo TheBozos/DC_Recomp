@@ -47,10 +47,7 @@ ps2_disc = None  # BozoEngine's tools/native_pack/ps2_disc.py, imported by load_
 
 ELF_NAME = 'SCUS_971.11'
 ELF_SHA1 = 'd9965d6908a334a5dfc982f3384428ad42048d54'
-OTHER_RELEASES = {
-    
-    'SCUS_971.11': 'the USA release',
-}
+OTHER_RELEASES = {}
 # Disc inputs used by DC's offline conversion and native sound libraries.
 DISC_FILES = ('SCUS_971.11', 'SYSTEM.CNF', 'TITLE.BIN', 'DUN.BIN', 'DATA.DAT', 'DATA.HED', 'DATA.HD2',
               'MODULES/LIBSD.IRX', 'MODULES/SDRDRV.IRX', 'MODULES/MODMIDI.IRX', 'MODULES/MODHSYN.IRX', 'MODULES/EZMIDI.IRX')
@@ -101,7 +98,7 @@ def fingerprint(*items):
 def file_stamp(path):
     try:
         st = os.stat(path)
-        return [os.path.normcase(os.path.abspath(path)), st.st_size, int(st.st_mtime)]
+        return [os.path.normcase(os.path.abspath(path)), st.st_size, st.st_mtime_ns]
     except OSError:
         return [path, None]
 
@@ -116,7 +113,7 @@ def tree_stamp(folder, exts=None):
                 continue
             p = os.path.join(dirpath, name)
             st = os.stat(p)
-            out.append((os.path.relpath(p, folder), st.st_size, int(st.st_mtime)))
+            out.append((os.path.relpath(p, folder), st.st_size, st.st_mtime_ns))
     return fingerprint(out)
 
 
@@ -323,7 +320,10 @@ class Build:
     def key(self, step):
         a = self.args
         prev = lambda name: self.state.get(name, {}).get('key')
-        if step == 'verify': return fingerprint(file_stamp(self.disc_input()), DISC_HASHES)
+        if step == 'verify':
+            src = self.disc_input()
+            inputs = [file_stamp(os.path.join(src,n)) for n in DISC_FILES] if os.path.isdir(src) else file_stamp(src)
+            return fingerprint(inputs, DISC_HASHES)
         if step == 'extract': return fingerprint(prev('verify'), DISC_FILES, self.game)
         if step == 'configure':
             return fingerprint(self.find_toolchain(), a.build_type, a.debug_info, a.fetch_cache, self.ffmpeg_root,
@@ -652,6 +652,17 @@ class Build:
             f.write('# The DC_Recomp code this game folder was built from (tools/dc_build.py writes this file).\n')
             f.write('\n'.join(l for l in text.splitlines() if l and not l.startswith('#')) + '\n')
 
+    def outputs_present(self, step):
+        expected = {
+            'extract': [self.elf(), os.path.join(self.game,'disc.iso')],
+            'configure': [os.path.join(self.cmake_build,'CMakeCache.txt')],
+            'recompile': [os.path.join(self.cmake_build,'dc_gen',n) for n in ('dc_table.cpp','title_table.cpp','dun_table.cpp')],
+            'packs': [os.path.join(self.cmake_build,'textures','dc_textures.bin')],
+            'compile': [self.exe_path()],
+            'stage': [os.path.join(self.game,n) for n in ('dc'+EXE,ELF_NAME,'dc_textures.bin','native_images/title.identity','native_images/dun.identity')],
+        }
+        return all(os.path.isfile(p) for p in expected.get(step, []))
+
     # -- driver
 
     def main(self):
@@ -664,7 +675,7 @@ class Build:
             try:
                 key = self.key(step)
                 st = self.state.get(step, {})
-                if not dirty and i - 1 < redo_from and st.get('done') and st.get('key') == key:
+                if not dirty and i - 1 < redo_from and st.get('done') and st.get('key') == key and self.outputs_present(step):
                     emit('SKIP', step, '%d/%d' % (i, n))
                     if step == self.args.stop_after:
                         emit('INFO', 'stopped', 'after ' + step)

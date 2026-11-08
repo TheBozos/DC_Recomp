@@ -95,7 +95,8 @@ def convert(blob, picture):
 
 
 def main():
-    if len(sys.argv) != 3:
+    progress = len(sys.argv) == 4 and sys.argv[3] == '--progress'
+    if len(sys.argv) != 3 and not progress:
         print(__doc__)
         return 1
     game, out = sys.argv[1], sys.argv[2]
@@ -103,7 +104,12 @@ def main():
     files = struct.unpack_from('<I', index, 0)[0] // 32
     store, seen = [], set()
     with open(f'{game}/DATA.DAT', 'rb') as dat:
+        last_percent = -1
         for i in range(files):
+            percent = i * 100 // max(1, files)
+            if progress and percent != last_percent:
+                print(f"TEXTURE_PROGRESS {percent}", flush=True)
+                last_percent = percent
             _, _, _, _, offset, size, _, _ = struct.unpack_from('<8I', index, i * 32)
             if size == 0 or size > 64 * 1024 * 1024:
                 continue
@@ -133,6 +139,7 @@ def main():
         for _, _, _, _, _, palette, indices in store:
             f.write(palette)
             f.write(indices)
+    if progress: print('TEXTURE_PROGRESS 100', flush=True)
     print(f'{len(store)} 8-bit textures -> {out}')
     return 0
 

@@ -58,3 +58,7 @@ if(BUILD_TESTING)
   add_test(NAME dc_loadchara_bounds_tools COMMAND ${Python3_EXECUTABLE} -I "${DC_ROOT}/tests/test_loadchara_audit.py")
   add_test(NAME dc_readinfo_effect_tools COMMAND ${Python3_EXECUTABLE} -I "${DC_ROOT}/tests/test_readinfo_audit.py")
 endif()
+
+if(BUILD_TESTING)
+  add_test(NAME dc_release_tools COMMAND ${Python3_EXECUTABLE} -I "${DC_ROOT}/tests/test_release_tools.py")
+endif()

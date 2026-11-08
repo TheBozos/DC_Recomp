@@ -1,0 +1,2 @@
+// Windows command-line and file paths use UTF-8, including accented installation folders.
+1 24 "dc.manifest"

@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #ifdef DC_WITH_WINDOW
 #include "bozo/app/app.h"
 #include "bozo/app/audio_device.h"
@@ -44,7 +45,7 @@ int main(int argc, char **argv)
     options.iso = DC_DEFAULT_ISO;
     options.frames = window ? 0 : 120;
     options.printGameOutput = true;
-    std::string wav, livePad;
+    std::string wav, livePad, assetDir;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
@@ -60,6 +61,8 @@ int main(int argc, char **argv)
             options.out = argv[++i];
         else if (a == "--elf" && i + 1 < argc)
             options.elf = argv[++i];
+        else if (a == "--asset-dir" && i + 1 < argc)
+            assetDir = argv[++i];
         else if (a == "--iso" && i + 1 < argc)
             options.iso = argv[++i];
         else if (a == "--wav" && i + 1 < argc)
@@ -81,7 +84,7 @@ int main(int argc, char **argv)
         else
         {
             std::fprintf(stderr, "Usage: dc [--frames N] [--headless] [--elf FILE] [--iso FILE]\n"
-                                 "          [--card-dir DIR] [--pad-script FILE | --live-pad FILE] [--wav FILE]\n"
+                                 "          [--asset-dir DIR] [--card-dir DIR] [--pad-script FILE | --live-pad FILE] [--wav FILE]\n"
                                  "          [--out FILE] [--capture-dir DIR] [--capture-frame N] [--profile-io]\n"
                                  "          [--fullscreen] [--no-vsync]\n");
             return a == "--help" ? 0 : 2;
@@ -94,6 +97,12 @@ int main(int argc, char **argv)
         options.cardDir = bozo::app::userDirectory().string();
     }
 #endif
+    if (assetDir.empty())
+    {
+        const auto besideElf = std::filesystem::absolute(options.elf).parent_path();
+        if (std::filesystem::is_regular_file(besideElf / "dc_textures.bin")) assetDir = besideElf.string();
+    }
+    dc::native::setAssetDirectory(assetDir);
     options.realTime = window;
     bozo::host::FreeHost host(options);
     bozo::ee::Dispatcher d(host);
@@ -111,8 +120,10 @@ int main(int argc, char **argv)
     }
     auto module = [&](const char *name, auto *table, size_t count, auto *resume, size_t resumes)
     {
-        const std::string path = std::string(DC_IMAGE_DIR) + "/" + name + ".identity";
+        const auto path = (assetDir.empty() ? std::filesystem::path(DC_IMAGE_DIR)
+                                             : std::filesystem::path(assetDir) / "native_images") / (std::string(name) + ".identity");
         std::ifstream in(path, std::ios::binary);
+        if (!in) throw std::runtime_error("Missing native image identity: " + path.string());
         std::vector<uint8_t> id{std::istreambuf_iterator<char>(in), {}};
         d.runtime().functions.addModule(0x1dabd00, 0x1f00000, d.runtime().memory.ram() + 0x1dabd00, std::move(id),
                                         table, count, resume, resumes);

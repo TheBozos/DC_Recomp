@@ -117,7 +117,7 @@ def tree_stamp(folder, exts=None):
     return fingerprint(out)
 
 
-SOURCE_EXTS = ('.cpp', '.h', '.hpp', '.inl', '.c', '.txt', '.cmake', '.rc', '.ico', '.manifest', '.py')
+SOURCE_EXTS = ('.cpp', '.h', '.hpp', '.inl', '.c', '.txt', '.cmake', '.rc', '.ico', '.manifest', '.in', '.py')
 
 
 # ---- PE imports (the DLLs the game needs, found in the toolchain's bin) ----

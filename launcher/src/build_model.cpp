@@ -7,7 +7,7 @@
 namespace
 {
     // tools/dc_build.py's STEPS (the build on BozoEngine), with their usual seconds on a player's build with the kit
-    // (16 threads, SSD; a first build): SDL3's configure checks and the compile are most of it.
+    // (16 threads, SSD; a first build): offline texture conversion is the longest step.
     struct StepInfo
     {
         const char *id;
@@ -15,7 +15,7 @@ namespace
     };
     const StepInfo kSteps[] = {
         {"verify", 1},  {"extract", 2},   {"configure", 60}, {"tools", 7},
-        {"recompile", 2}, {"packs", 32}, {"compile", 55},   {"stage", 1},
+        {"recompile", 2}, {"packs", 280}, {"compile", 55},   {"stage", 1},
     };
 
     int indexOf(const std::vector<BuildStep> &steps, const std::string &id)

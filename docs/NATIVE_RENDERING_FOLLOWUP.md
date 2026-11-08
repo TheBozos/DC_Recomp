@@ -544,3 +544,27 @@ hashes verified. The original Save-2 Matataki checkpoint remains unchanged.
 The player subsequently reported "Everything seems good !" in the rebuilt
 fullscreen session. This is positive general playtest feedback for the current
 build; it does not extend the bounded coverage above to a full playthrough.
+
+
+## Main integration and retained engine pin (2026-11-08)
+
+The shared fixes were integrated onto current BozoEngine main in PR #77,
+retaining its newer texture functions, mipmap and image-processing paths.
+Current main already has sceCdBreak: that implementation was retained, with
+the sector-cancellation/reuse regression added. Two engine test-tool paths
+were corrected for embedded game builds. Linux and Windows engine CI pass.
+The integrated tree passes 124/124 local suites, including eight GPU checks
+(190.94 seconds), after aligning the trial port test with main's observable
+idle/active cancellation contract.
+
+That synthetic pass does not qualify a full DC upgrade to current engine main.
+The scripted Matataki route stops during initial loading at frame 76, waiting
+in check_now_loading_vsync_end (0x153f60; RA 0x153f94), with zero unknown/register
+accesses, native VU0 calls or GIF submissions. The later cheat replay was not
+run against that tree. Logs remain local under build/main-integration/.
+The cause of the newer-engine loading stall has not been established.
+
+DC therefore retains its published, player-accepted 2278ba0 engine pin while
+the shared fixes land upstream. Its original cancellation regression is kept
+with that pin's contract. The newer engine upgrade remains deferred; merging
+the gameplay fixes and refreshed README does not enable the trial upgrade.

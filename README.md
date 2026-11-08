@@ -55,6 +55,10 @@ Dran's house, still needs broader measurements. New-game/Georama routes, the ful
 visual parity need further checks. See [the rendering follow-up](docs/NATIVE_RENDERING_FOLLOWUP.md)
 for bounded reproductions and remaining questions.
 
+The game retains its gameplay-qualified BozoEngine pin (`2278ba0`). The shared fixes are also merged
+into [BozoEngine main](https://github.com/TheBozos/BozoEngine/pull/77). Updating DC to the newer engine
+main is deferred after a loading stall in that trial upgrade; details are in the follow-up notes.
+
 ## Requirements
 
 - Windows 10/11 with [MSYS2](https://www.msys2.org/) (UCRT64, see below); Linux is not qualified yet

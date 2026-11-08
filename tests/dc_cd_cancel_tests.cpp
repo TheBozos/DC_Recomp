@@ -47,7 +47,11 @@ int main(){
         auto &c=d.kernel().thread(1)->frames.front()->ctx;
         c.r[28].uw[0]=gp;c.r[31].uw[0]=done;
         try{d.run();}catch(const bozo::ee::EndRun &){}
-        if(!host.returned || host.libs.cd.readEnd!=0 || host.libs.cd.error!=1 ||
+        // Current engine main ends an active command at the current native
+        // time and leaves an idle drive's error unchanged. Assert observable
+        // completion, rather than the older implementation's zero sentinel.
+        bozo::libs::Guest after(d.runtime(),&c);
+        if(!host.returned || host.libs.now(after)<host.libs.cd.readEnd || host.libs.cd.error!=(busy?1:0) ||
            c.r[29].uw[0]!=stack || word(r,gp-0x72fc)!=0xffffffffu || word(r,gp-0x72f8)!=0)return 2;
         for(unsigned i=0;i<32;++i){
             if(word(r,queue+i*0x9c)!=0)return 3;

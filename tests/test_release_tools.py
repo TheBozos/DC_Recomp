@@ -219,4 +219,14 @@ class TextureProgressTests(unittest.TestCase):
             self.assertEqual([v for v in values if v is not None],[0,100])
             self.assertEqual(struct.unpack('<4sII',out.read_bytes()),(b'DCTX',3,0))
 
+class CleanEnvironmentTests(unittest.TestCase):
+    def test_windows_system_variables_survive_uppercase_keys(self):
+        import os
+        values = {'SYSTEMROOT':r'C:\Windows','WINDIR':r'C:\Windows','COMSPEC':r'C:\Windows\System32\cmd.exe',
+                  'PATH':r'C:\msys64\ucrt64\bin','MSYSTEM':'UCRT64'}
+        with patch.dict(os.environ,values,clear=True): env = make_release.clean_env()
+        for name in ('SYSTEMROOT','WINDIR','COMSPEC'): self.assertEqual(env[name],values[name])
+        self.assertNotIn('MSYSTEM',env)
+        self.assertNotIn('msys64',env['PATH'])
+
 if __name__ == '__main__': unittest.main()

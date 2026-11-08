@@ -28,36 +28,110 @@ BozoEngine replaces the PS2Recomp fork completely; there is no emulation fallbac
 
 ## Status
 
-**Playable Windows development build, under active gameplay testing.** Manual runs have reached Norune,
+**Playable Windows development build, under active gameplay testing.** Checked routes include Norune,
 Divine Beast Cave exploration and combat, the Dran encounter, and region travel to Matataki Village.
-Save/load, party and weapon menus, dialogue, native music and effects have been exercised.
-A complete story playthrough and visual parity have not been established.
+Movement, dialogue, party/weapon menus, save/load, native music and effects have been exercised.
+A complete story playthrough and full visual parity remain unverified.
 
-| Area | Current coverage |
-|---|---|
-| Boot, title and attract sequence | Checked on the native runtime |
-| Norune | Loaded saves, movement, interiors, menus, dialogue and saving |
-| Divine Beast Cave | Multiple floors, exploration, combat and Dran encounter |
-| Matataki | Arrival through “Go to Other Area”; sky/camera comparisons |
-| Rendering | Models, terrain, HUD, text, shadows, water and frame-copy effects draw natively |
-| Menus | Original options plus controller-operated Cheats and Quit Game pages |
-| Complete story, all companions, locations and effects | Still needs testing |
-| Linux and widescreen | Not qualified |
+| Milestone | |
+|---|:---:|
+| Map the main ELF and both overlays from the game's own symbol table | ✅ |
+| Recompile and link with BozoEngine; remove the PS2Recomp build dependency | ✅ |
+| Boot through native SDK services and reads from the owner's disc | ✅ |
+| Title screen, attract sequence and native 3D rendering | ✅ |
+| Norune: movement, interiors, dialogue, HUD and menus | ✅ |
+| Divine Beast Cave: multiple floors, exploration, combat and the Dran encounter | ✅ |
+| Travel to Matataki through “Go to Other Area” | ✅ |
+| Memory-card saving, loading and restart with saved progress | ✅ |
+| Native music and effects | ✅ |
+| Controller-operated Cheats and Quit Game inside Options; F2 settings remain available | ✅ |
+| New-game opening and Georama coverage on BozoEngine | 🔧 |
+| Complete story, all companions, locations and effects | 🔧 |
+| Linux build | ⏳ |
+| Widescreen | ⏳ |
 
-Recent fixes address texture bindings after weapon customization, menu seams, shadow alpha, water
-refraction, sky feedback and Matataki's sharp sky boundary. The player confirmed that boundary was gone
-in the rebuilt run. A model sampler correction also targets Dran's mirrored face seam; its pixel regression
-passed, but the full encounter still needs a player comparison.
+**Native port.** Models, textures, camera, lights and drawing routines feed native PC draws.
+BozoEngine supplies the runtime, native SDK services, renderer and mixer.
 
-The latest fullscreen build received positive player feedback after the cheat/menu additions.
-Fullscreen improved presentation in the player's comparison. Performance in heavier scenes, including
-Dran's house, still needs broader measurements. New-game/Georama routes, the full range of effects and
-visual parity need further checks. See [the rendering follow-up](docs/NATIVE_RENDERING_FOLLOWUP.md)
-for bounded reproductions and remaining questions.
+| Layer | |
+|---|:---:|
+| Main EE functions and both overlays statically recompiled to C++ | ✅ |
+| Five sound libraries relocated and recompiled offline, without a firmware bootstrap | ✅ |
+| Pad and memory-card calls answered through native SDK services | ✅ |
+| Compiled sound drivers and native libsd/mixer; no SPU2 emulator | ✅ |
+| Frame loop paced by the PC's clock | ✅ |
+| OpenGL renderer; no GS memory or GS renderer | ✅ |
+| Models, shadows and cloth drawn from game data; no VIF/VU1 execution | ✅ |
+| Disc textures converted offline into native images | ✅ |
+| HUD, menus, text, frame copies, water refraction and depth of field drawn natively | ✅ |
+| Full range of sprites, particles and scene effects checked against the original | 🔧 |
 
-The game retains its gameplay-qualified BozoEngine pin (`2278ba0`). The shared fixes are also merged
-into [BozoEngine main](https://github.com/TheBozos/BozoEngine/pull/77). Updating DC to the newer engine
-main is deferred after a loading stall in that trial upgrade; details are in the follow-up notes.
+✅ works · 🔧 in progress · ⏳ not reached yet
+
+Native thread/timer/file contracts and transfer-completion acknowledgements remain as SDK compatibility
+services. Some compiled routines still build unused console-format buffers; the renderer does not consume
+them. There is no runtime GIF packet renderer, IOP interpreter or emulation fallback.
+
+Still being checked: heavier-scene performance (including Dran's house), the full range of effects and
+menus, and broader story/Georama coverage. The Dran face sampler correction passes its pixel regression;
+the full encounter still needs a player comparison. Matataki's reported sharp sky boundary was corrected
+and confirmed in the player's comparison.
+
+[docs/NATIVE_RENDERING_FOLLOWUP.md](docs/NATIVE_RENDERING_FOLLOWUP.md) records recent fixes, playtest
+coverage and the retained engine pin. [docs/BOZO_MIGRATION.md](docs/BOZO_MIGRATION.md) retains the migration
+and conditional dispatch audit; [docs/RECOMP_NOTES.md](docs/RECOMP_NOTES.md) records earlier bring-up work.
+
+## Screenshots
+
+
+Historical bring-up captures from before the native renderer and BozoEngine migration. They show the earlier
+progress and are not evidence of the current build; current validation is in
+[docs/NATIVE_RENDERING_FOLLOWUP.md](docs/NATIVE_RENDERING_FOLLOWUP.md).
+
+| | | |
+|---|---|---|
+| ![The intro's castle](docs/screenshots/intro-castle.png) | ![The Dark Genie](docs/screenshots/genie.png) | ![The title menu](docs/screenshots/title-logo.png) |
+| ![The desk narration](docs/screenshots/opening-desk.png) | ![In a dungeon](docs/screenshots/dungeon-scene.png) | ![Toan and the Fairy King](docs/screenshots/fairy-king.png) |
+| ![Toan's house](docs/screenshots/toan-house.png) | ![The forest](docs/screenshots/forest-scene.png) | ![New game: the name entry](docs/screenshots/register-name.png) |
+| ![The Dark Shrine](docs/screenshots/shrine-soldiers.png) | ![Colonel Flag](docs/screenshots/colonel-flag.png) | ![The urn](docs/screenshots/shrine-urn.png) |
+| ![Opening dialogue](docs/screenshots/opening-dialogue.png) | ![The Dark Genie rises](docs/screenshots/genie-rises.png) | ![Norune at night](docs/screenshots/norune-night.png) |
+| ![Toan at home](docs/screenshots/norune-house.png) | ![Norune's festival](docs/screenshots/norune-festival.png) | ![A cutscene dialogue](docs/screenshots/cutscene-balloon.png) |
+
+## Goal
+
+A fully playable *Dark Cloud* as a native PC program, from the opening to the ending, drawing and playing
+sound directly from the game's data. Accuracy and complete gameplay coverage come first; Linux,
+widescreen and additional presentation options follow.
+
+## How it works
+
+```
+disc files (game/) ──► tools/dc_bozo_prepare.py ──► resident ELF + TITLE/DUN overlay ELFs
+                                           │
+                        BozoEngine's bozo-recomp ──► native C++ in build/bozo/dc_gen/
+   five sound IRX ──► offline relocation + strict native translation ──► build/bozo/dc_audio_gen/
+   disc textures ──► tools/dc_texconv.py ──► build/bozo/textures/dc_textures.bin
+                                           │
+                 CMakeLists.txt ──► BozoEngine + generated code + DC's own adapters
+                                           │
+   dc_native.cpp: models, lighting, shadows, cloth, menus and HUD ──► native OpenGL renderer ─┐
+   dc_audio.cpp: compiled drivers + native libsd ──► native mixer                           ├─► dc.exe
+   dc_port.cpp: native frame boundary; SDK files, cards and pads ──► native host services ───┘
+```
+
+- The retail executable keeps its CodeWarrior symbols. `tools/symtab_map.py` and the retained function maps define
+  the resident code and overlays; no Ghidra pass is needed. The offline preparation checks all three disc hashes.
+- `TITLE.BIN` and `DUN.BIN` are `MWo3` modules sharing `0x01DABD00`. Each has its own generated symbols and function
+  table; native dispatch checks the resident header before selecting it, including resume entries.
+- `runtime/dc_native.cpp` translates the game's MDT models, RenderInfo camera/lights, textures and drawing calls
+  into native draws. It does not read console graphics packets or run VU1 microcode.
+- `LIBSD`, `SDRDRV`, `MODMIDI`, `MODHSYN` and `EZMIDI` are relocated and compiled offline. Their SDK calls use
+  reusable native services; libsd uses the native mixer. Pad/card modules are replaced at their SDK interfaces.
+- The top-level build generates code and converts textures automatically, then links the windowed `dc` and
+  `dc-headless` runners. Game-derived output stays in the ignored build directory.
+
+[BozoEngine](https://github.com/TheBozos/BozoEngine) is the sole engine submodule. Game-specific addresses, formats,
+hook choices and module layouts stay in DC_Recomp; engine changes must be generic and reusable by other recompiles.
 
 ## Requirements
 
@@ -70,10 +144,7 @@ main is deferred after a loading stall in that trial upgrade; details are in the
 
 ## Build and run
 
-Use an MSYS2 **UCRT64** shell on Windows; MSVC is not supported for this port.
-
 ```bash
-pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,libarchive,python} git
 git clone --recurse-submodules https://github.com/TheBozos/DC_Recomp.git
 cd DC_Recomp
 scripts/extract_iso.sh "/path/to/Dark Cloud (USA).iso"
@@ -91,12 +162,29 @@ Code generation, sound compilation and texture conversion are included in the fu
 `DC_WINDOW=OFF` builds only the headless runner. The validated static build imports Windows system/UCRT
 DLLs; for dynamic builds, `scripts/stage_dlls.sh` stages required MSYS2 DLLs next to the executable.
 
-## Playing, cheats and quitting
+### Windows
 
-Open the game's main menu and choose **Options**. The entry page offers **Game Options** (the original
-settings), **Cheats**, and **Quit Game**. Up/Down selects rows and scrolls the cheat list; Cross confirms
-and Circle goes back. Quit Game asks for confirmation, with Cancel selected initially.
-Save through the game's normal save menu first if you want to retain progress; quitting does not autosave.
+Run the scripts in an MSYS2 **UCRT64** shell; MSVC is not supported for this port.
+
+```bash
+pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,libarchive,python} git
+```
+
+### Controls and settings
+
+**F2** opens native settings, including the same Cheats controls. **F11** toggles fullscreen.
+`--fullscreen` starts fullscreen; `--no-vsync` disables VSync for comparisons. The default is windowed
+with VSync enabled. **F8** captures a frame when a capture directory is configured.
+
+The game's **Options** entry page offers **Game Options** (the original settings), **Cheats**, and
+**Quit Game**. Up/Down selects rows, Cross confirms and Circle goes back. Quit Game asks for confirmation,
+with Cancel selected initially. Save through the game's normal save menu before quitting to keep progress;
+quitting does not autosave.
+
+### Cheats
+
+Open **Options → Cheats** in the game, or **F2 → Cheats** in native settings.
+The in-game list scrolls with Up/Down.
 
 | Cheat | Behaviour |
 |---|---|
@@ -119,11 +207,7 @@ Those edits apply when Options closes or gameplay resumes, and become part of a 
 afterward. Toggle/multiplier settings are session-only: each launch starts with toggles off,
 ABS at 1× and movement at 100%. See [the cheat reference](docs/CHEATS.md) for limits and validation.
 
-**F2** opens native settings, including the same Cheats options. **F11** toggles fullscreen.
-`--fullscreen` starts fullscreen; `--no-vsync` disables VSync for comparisons. The default is windowed
-with VSync enabled. **F8** captures a frame when a capture directory is configured.
-
-## Saves and data paths
+### Memory cards and data paths
 
 The windowed runner uses BozoEngine's per-user memory-card directory. Existing `game/mc0` saves migrate
 through its application-data service. `--card-dir <directory>` selects a separate root containing `mc0`;
@@ -134,7 +218,7 @@ The build retains configured asset paths. `--elf` and `--iso` override executabl
 `DC_TEXTURES` selects a relocated native texture pack. The executable still needs the owner's game files
 and converted assets.
 
-## Checks and captures
+### Checks and captures
 
 ```bash
 scripts/bench_run.sh --alone 20 "build regression suites" \
@@ -161,27 +245,31 @@ Recent results live in [NATIVE_RENDERING_FOLLOWUP.md](docs/NATIVE_RENDERING_FOLL
 [RECOMP_NOTES.md](docs/RECOMP_NOTES.md) the earlier bring-up history. Synthetic checks and short
 captures do not establish a full-game pass.
 
-## Native architecture
+## Disc facts
 
-The main R5900 executable and both code overlays are statically recompiled to C++. Native adapters
-build draws from the game's models, textures, camera, lights and drawing routines. BozoEngine supplies
-OpenGL rendering, native SDK services, input, cards, movie decoding and audio mixing.
 
-There is no GS memory/renderer, runtime GIF packet renderer, VIF/VU1 execution, IOP interpreter,
-SPU2/SIO2 device backend or emulation fallback. Some compiled routines still construct unused
-console-format buffers; the renderer does not consume them. Logical addresses, thread/timer contracts
-and completion acknowledgements remain as SDK compatibility services. Unsupported native calls/module
-code and retired device accesses fail explicitly.
+| | |
+|---|---|
+| Boot ELF | `SCUS_971.11`, entry `0x100008`, one segment at `0x100000` (1.6 MB of code and data, BSS up to `0x1DABD00`), symbols kept |
+| Code | `0x100000-0x2452B8` (EE code), `0x245300-0x24FB00` (VU microcode), `0x29FE80-0x2A1010` (static initializers) |
+| Overlays | `TITLE.BIN` (177 functions) and `DUN.BIN` (62 functions), CodeWarrior `MWo3`, both at `0x01DABD00` |
+| Video mode | NTSC |
+| IOP modules | `MODULES/*.IRX`: SIO2MAN, PADMAN, MCMAN, MCSERV, LIBSD, SDRDRV, MODMIDI, MODHSYN, EZMIDI (and the unused network stack: INET, AN986, LIBNET, NETCNF, MSIFRPC, USBD) |
+| IOP image | `MODULES/IOPRP211.IMG` |
+| Data | `DATA.DAT` (1.7 GB archive) with its indexes `DATA.HED` and `DATA.HD2` |
 
-`TITLE.BIN` and `DUN.BIN` share a load slot with separate generated function tables selected by resident
-image identity. Five sound IRX libraries are relocated and compiled offline; textures are converted
-offline. FFmpeg is required for movies. Game-specific formats and hook choices stay in DC_Recomp;
-reusable engine services belong in BozoEngine.
+## Sharing the machine with other ports
 
-The dispatch audit remains conditional: valid arena/cursor preconditions bound known pack copies,
-but mutable metadata, shared cursor/header writes and nested loader effects remain under investigation.
-Controlled tests do not prove immutable DUN dispatch tables or complete live dispatch coverage.
-See the migration notes for the `LoadPackData`/`ReadInfo` findings.
+The team's native ports share a local benchmark lock, now provided by BozoEngine's `tools/bench_lock.sh`. Its
+protocol remains compatible with the other ports: a game run takes one slot; a build or timed measurement takes
+the bench alone.
+
+```bash
+scripts/bench_run.sh 5 "boot test" scripts/run.sh
+scripts/bench_run.sh --alone 20 "runner build" scripts/build_runtime.sh
+```
+
+## Repository layout
 
 | Path | Contents |
 |---|---|
@@ -195,22 +283,6 @@ See the migration notes for the `LoadPackData`/`ReadInfo` findings.
 
 Game-derived code, disc files, generated assets, saves and validation captures stay local and ignored.
 No game executable, disc archives or generated game code are distributed.
-
-## Screenshots
-
-
-Historical bring-up captures from before the native renderer and BozoEngine migration. They show the earlier
-progress and are not evidence of the current build; current validation is in
-[the rendering follow-up](docs/NATIVE_RENDERING_FOLLOWUP.md).
-
-| | | |
-|---|---|---|
-| ![The intro's castle](docs/screenshots/intro-castle.png) | ![The Dark Genie](docs/screenshots/genie.png) | ![The title menu](docs/screenshots/title-logo.png) |
-| ![The desk narration](docs/screenshots/opening-desk.png) | ![In a dungeon](docs/screenshots/dungeon-scene.png) | ![Toan and the Fairy King](docs/screenshots/fairy-king.png) |
-| ![Toan's house](docs/screenshots/toan-house.png) | ![The forest](docs/screenshots/forest-scene.png) | ![New game: the name entry](docs/screenshots/register-name.png) |
-| ![The Dark Shrine](docs/screenshots/shrine-soldiers.png) | ![Colonel Flag](docs/screenshots/colonel-flag.png) | ![The urn](docs/screenshots/shrine-urn.png) |
-| ![Opening dialogue](docs/screenshots/opening-dialogue.png) | ![The Dark Genie rises](docs/screenshots/genie-rises.png) | ![Norune at night](docs/screenshots/norune-night.png) |
-| ![Toan at home](docs/screenshots/norune-house.png) | ![Norune's festival](docs/screenshots/norune-festival.png) | ![A cutscene dialogue](docs/screenshots/cutscene-balloon.png) |
 
 ## Credits
 

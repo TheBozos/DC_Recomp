@@ -713,6 +713,11 @@ namespace dc::native
             uint32_t decodes = 0, storeDecodes = 0, patches = 0, draws = 0;
             uint64_t decodedTexels = 0;
         } g_frameWork;
+        // DC_NATIVE_STATS=1: record texture lookups and the bytes their change checks hashed, over the last 300 frames.
+        struct LookupWork
+        {
+            uint64_t lookups = 0, hashedBytes = 0;
+        } g_lookupWork;
 
         // The 8-bit textures converted offline from the user's disc (tools/dc_texconv.py: the TIM2 pictures of DC's IMG
         // archives, plain on the disc, which EnterTexture keeps in GS order in the game), keyed by name and the FNV-1a 32
@@ -930,6 +935,7 @@ namespace dc::native
             {
                 const uint32_t count = std::min(bytes, ramBytes - at);
                 hash = bozo::hash::xxh64(rdram + at, count, hash);
+                g_lookupWork.hashedBytes += count;
                 bytes -= count;
                 at = 0;
             }
@@ -954,6 +960,7 @@ namespace dc::native
 
         std::shared_ptr<const bozo::render::Texture> recordTexture(const uint8_t *rdram, uint32_t record)
         {
+            ++g_lookupWork.lookups;
             if (const auto pinned = g_pinned.find(record); pinned != g_pinned.end())
             {
                 if (pinned->second.pixels == rd32(rdram, record + 0x38u) && pinned->second.tex0 == rd64(rdram, record + 0x28u))
@@ -1472,6 +1479,18 @@ namespace dc::native
             std::shared_ptr<const bozo::render::Texture> texture;
             bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
             std::vector<bozo::render::Vertex> vertices;
+            // Each record is looked up once per draw: no game code runs between this draw's primitives, so their
+            // textures cannot change in between, and a record's change check hashes its whole picture (many
+            // primitives of a model share one).
+            std::vector<std::pair<uint32_t, std::shared_ptr<const bozo::render::Texture>>> drawTextures;
+            auto drawTexture = [&](uint32_t record) {
+                for (const auto &[seen, image] : drawTextures)
+                    if (seen == record)
+                        return image;
+                auto image = recordTexture(rdram, record);
+                drawTextures.emplace_back(record, image);
+                return image;
+            };
 
             uint32_t at = list + 0x10u;
             for (uint32_t p = 0; p < primitives && p < 4096u; ++p)
@@ -1487,7 +1506,7 @@ namespace dc::native
                         lighting.material[c] = m.f(mat + static_cast<uint32_t>(c) * 4u);
                     const TextureBinding *binding = m.records && p < m.records->size() ? &(*m.records)[p] : nullptr;
                     const uint32_t record = binding ? resolveBinding(rdram,*binding) : modelMaterialRecord(rdram, m, mat);
-                    texture = record != 0u ? recordTexture(rdram, record) : binding ? binding->image : nullptr;
+                    texture = record != 0u ? drawTexture(record) : binding ? binding->image : nullptr;
                     if (binding && texture) binding->image = texture;
                     material.tex0 = binding ? binding->tex0() : record != 0u ? rd64(rdram, record + 0x28u) : 0u;
                     // A record without pixels of its own whose place holds a picture the game makes there (the towns'
@@ -4789,6 +4808,8 @@ namespace dc::native
         }();
         if (++s_frames % 300u == 0u)
         {
+            const LookupWork lookupWork = g_lookupWork;
+            g_lookupWork = LookupWork{};
             // Synchronous diagnostics run before publishing the picture. A
             // slow terminal/redirected output can otherwise stall play every
             // five seconds while the FPS overlay still reads sixty between.
@@ -4800,6 +4821,8 @@ namespace dc::native
                 std::fprintf(stderr, "[dc:native] fixed texture services cumulative: %llu fixed, %llu fixed Z\n",
                              static_cast<unsigned long long>(g_nativeFixedTextures), static_cast<unsigned long long>(g_nativeFixedZTextures));
                 std::fprintf(stderr, "[dc:native] packet-only state setters retired: %llu\n", static_cast<unsigned long long>(g_retiredStateCalls));
+                std::fprintf(stderr, "[dc:native] record textures per frame: %.1f lookups, %.2f MiB hashed\n",
+                             static_cast<double>(lookupWork.lookups) / 300.0, static_cast<double>(lookupWork.hashedBytes) / 300.0 / 1048576.0);
                 std::fprintf(stderr, "[dc:native] native window rectangles: %llu; packet envelopes retired: %llu\n",
                              static_cast<unsigned long long>(g_nativeWindowRects), static_cast<unsigned long long>(g_retiredEnvelopes));
                 std::fprintf(stderr, "[dc:native] model packet wrappers retired: %llu\n",

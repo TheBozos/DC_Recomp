@@ -105,7 +105,7 @@ def sha256_file(path):
 
 
 def find_git():
-    for c in (shutil.which('git'), r'C:\Program Files\Git\cmd\git.exe'):
+    for c in (r'C:\Program Files\Git\cmd\git.exe', shutil.which('git')):
         if c and os.path.isfile(c):
             return c
     raise ReleaseError('git is needed')

@@ -623,5 +623,5 @@ At the Matataki spot of the run's save: 480 lookups and 4.71 MiB hashed per fram
 the scripted Matataki route 1.84 MiB before, 1.01 after. The build passes 125/125 suites, and the seven scripted
 routes match the previous build (faces, HUD, menus, identical cards); the only differences are the known fade
 timing and the random dungeon floor. A 42-minute human fullscreen run on this build averaged 60 FPS every
-minute, its slowest two-second window 56.6 FPS, with up to 10.8 MiB hashed in a frame. Whether that run
-revisited the slow house is not established from the log.
+minute, its slowest two-second window 56.6 FPS, with up to 10.8 MiB hashed in a frame. The player revisited
+the slow house in that run and reported no frame drop there.

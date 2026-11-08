@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 import make_release
+import make_build_kit
 import dc_build
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -224,9 +225,10 @@ class CleanEnvironmentTests(unittest.TestCase):
         import os
         values = {'SYSTEMROOT':r'C:\Windows','WINDIR':r'C:\Windows','COMSPEC':r'C:\Windows\System32\cmd.exe',
                   'PATH':r'C:\msys64\ucrt64\bin','MSYSTEM':'UCRT64'}
-        with patch.dict(os.environ,values,clear=True): env = make_release.clean_env()
-        for name in ('SYSTEMROOT','WINDIR','COMSPEC'): self.assertEqual(env[name],values[name])
-        self.assertNotIn('MSYSTEM',env)
-        self.assertNotIn('msys64',env['PATH'])
+        for clean in (make_release.clean_env, make_build_kit.clean_env):
+            with patch.dict(os.environ,values,clear=True): env = clean()
+            for name in ('SYSTEMROOT','WINDIR','COMSPEC'): self.assertEqual(env[name],values[name])
+            self.assertNotIn('MSYSTEM',env)
+            self.assertNotIn('msys64',env['PATH'])
 
 if __name__ == '__main__': unittest.main()

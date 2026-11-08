@@ -221,7 +221,8 @@ def clean_env(extra_path=()):
             'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'ComSpec', 'PATHEXT',
             'HOMEDRIVE', 'HOMEPATH', 'USERNAME', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)',
             'CommonProgramFiles', 'OS')
-    env = {k: v for k, v in os.environ.items() if k in keep}
+    wanted = {k.upper() for k in keep}
+    env = {k: v for k, v in os.environ.items() if k.upper() in wanted}
     env['PATH'] = os.pathsep.join(path)
     return env
 

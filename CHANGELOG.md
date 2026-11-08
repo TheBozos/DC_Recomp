@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0] - 2026-11-08
+## [0.2.0] - 2026-11-09
 
 ### Changed
 - BozoEngine moves to its current main (296ac6d), with the other ports' engine work since 0.1.0.

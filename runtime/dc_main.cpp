@@ -5,6 +5,8 @@
 #include "bozo/port.h"
 #include "dc_functions.h"
 #include "dc_cheats.h"
+#include "dc_ingame_cheats.h"
+#include "dc_native_api.h"
 #include "dun_functions.h"
 #include "title_functions.h"
 #ifdef DC_AUDIT_INDIRECT
@@ -100,6 +102,7 @@ int main(int argc, char **argv)
     bozo::port::Registry registry;
     dc::install(d.runtime(), registry);
     dc::cheats::install(d.runtime(), registry);
+    dc::cheats::installIngameMenu(d.runtime(), registry, dc::native::finishSceneForMenu);
     std::string error;
     if (!host.setUp(d, dc_external_table, dc_external_count, &registry, error))
     {
@@ -120,6 +123,7 @@ int main(int argc, char **argv)
     pacer.setPaced(window);
     host.onFrame = [&](uint64_t f, const R5900Context *ctx)
     {
+        if (dc::cheats::takeIngameQuitRequest()) host.requestStop();
         pacer.frameEnd();
         if (f % 60 == 0)
             std::printf("[dc] frame=%llu pc=%x cycles=%llu\n", (unsigned long long)f, ctx->pc,

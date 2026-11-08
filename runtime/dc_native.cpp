@@ -22,6 +22,7 @@
 #include "dc_native_api.h"
 #include "dc_visibility.h"
 #include "bozo/render/renderer.h"
+#include "bozo/hash.h"
 #include "bozo/libs/guest.h"
 #include "bozo/runtime_api.h"
 
@@ -93,6 +94,8 @@ namespace dc::native
             uint64_t ownTextures = 0, noTexture = 0, gsOrderTextures = 0, cloths = 0, shadowTriangles = 0, waters = 0, staleModel = 0, mdtDiffers = 0, noZWrite = 0, copiedModel = 0, depthOfFields = 0, culled = 0, zPast24 = 0, zNegative = 0, guarded = 0, textureCopies = 0, textureCopiesMissed = 0, stretches = 0, stretchesMissed = 0, madeDraws[9] = {}, clears = 0, lastClear = 0;
             double maxZ = -1e30, minZ = 1e30;
         } g_stats;
+        bool g_inSky = false, g_sampleSkyDraws = false;
+        uint32_t g_skyDrawIndex = 0;
         std::atomic<uint64_t> g_gateSkipped{0};
 
         uint32_t rd32(const uint8_t *rdram, uint32_t address)
@@ -174,14 +177,45 @@ namespace dc::native
         // Remake refreshes the captured geometry at its original update boundary.
         // Its textures are bound there too: CreateVUdataFromMDT takes each primitive's material texture by name
         // (GetTextureHandle -> SearchTextureName, the newest record of that name; none: handle -1, which GetTexture
-        // takes as record 0) and writes that record's TEX0 into the VU data; Remake keeps it. The records are noted
-        // the same way when the game builds, per primitive: a draw looking the name up later found another model's
+        // takes as record 0) and writes that record's TEX0 into the VU data; Remake keeps it. Native image ownership
+        // captures successful named lookups only: the allocator fallback cannot grant a missing material ownership
+        // of a generated work image. Bindings are captured per primitive when the game builds: a later lookup found another model's
         // newer texture of the same name (the Colonel's face blank once Seth and the Genie were loaded).
+        struct TextureBinding
+        {
+            uint32_t record = 0;
+            mutable uint32_t resolvedRecord = 0;
+            std::array<uint8_t, 0x50> identity{};
+            mutable std::shared_ptr<const bozo::render::Texture> image;
+            uint32_t word(uint32_t offset) const { uint32_t v; std::memcpy(&v,identity.data()+offset,4); return v; }
+            uint64_t tex0() const { uint64_t v; std::memcpy(&v,identity.data()+0x28,8); return v; }
+        };
+        std::shared_ptr<const bozo::render::Texture> recordTexture(const uint8_t *, uint32_t);
+        uint32_t resolveBinding(const uint8_t *rdram, const TextureBinding &binding)
+        {
+            if (!binding.record) return 0;
+            const int32_t last = std::min(static_cast<int32_t>(rd32(rdram, kTextureManager)), 1023);
+            const uint32_t first = kTextureManager + 0x10F8u;
+            auto matches = [&](uint32_t record) {
+                return record >= first && (record-first)%0x50u == 0 &&
+                       static_cast<int32_t>((record-first)/0x50u) <= last &&
+                       std::memcmp(rdram+record,binding.identity.data(),0x28)==0 &&
+                       rd64(rdram,record+0x28)==binding.tex0() &&
+                       rd32(rdram,record+0x38)==binding.word(0x38) &&
+                       rd32(rdram,record+0x48)==binding.word(0x48);
+            };
+            if (matches(binding.resolvedRecord ? binding.resolvedRecord : binding.record))
+                return binding.resolvedRecord ? binding.resolvedRecord : binding.record;
+            for (int32_t i=last;i>=0;--i)
+                if (matches(first+static_cast<uint32_t>(i)*0x50u))
+                    return binding.resolvedRecord = first+static_cast<uint32_t>(i)*0x50u;
+            return 0;
+        }
         struct Model
         {
             const uint8_t *rdram = nullptr;
             std::shared_ptr<const std::vector<uint8_t>> copy;
-            std::shared_ptr<const std::vector<uint32_t>> records; // per primitive, as built (0: no material)
+            std::shared_ptr<const std::vector<TextureBinding>> records; // asset identities, not reusable table slots
             uint32_t mdt = 0;
             explicit operator bool() const { return mdt != 0u; }
             uint32_t u32(uint32_t address) const
@@ -215,9 +249,10 @@ namespace dc::native
         {
             uint32_t mdt = 0;
             std::shared_ptr<const std::vector<uint8_t>> copy;
-            std::shared_ptr<const std::vector<uint32_t>> records;
+            std::shared_ptr<const std::vector<TextureBinding>> records;
         };
         std::unordered_map<uint32_t, MdtCopy> g_mdtCopies; // VU data -> its MDT, a copy, its texture records
+        uint32_t textureRecord(const uint8_t *rdram, uint32_t name);
         uint32_t boundRecord(const uint8_t *rdram, uint32_t name); // GetTexture(GetTextureHandle(name))
         struct MdtPrimitive
         {
@@ -311,13 +346,26 @@ namespace dc::native
             auto copy = std::make_shared<std::vector<uint8_t>>(size);
             for (uint32_t i = 0; i < size; ++i)
                 (*copy)[i] = rdram[(mdt + i) & 0x1FFFFFFu];
-            std::shared_ptr<std::vector<uint32_t>> records;
+            std::shared_ptr<std::vector<TextureBinding>> records;
             if (bind)
             {
-                records = std::make_shared<std::vector<uint32_t>>();
+                records = std::make_shared<std::vector<TextureBinding>>();
                 for (const auto &primitive : model.primitives)
-                    records->push_back(primitive.material != -1 ? boundRecord(rdram, mdt + model.materials +
-                                       static_cast<uint32_t>(primitive.material) * 0x60u + 0x34u) : 0u);
+                {
+                    TextureBinding binding;
+                    if (primitive.material != -1)
+                    {
+                        // GetTexture(-1)'s record-zero fallback determines the original
+                        // allocation ABI, not ownership of a missing material's image.
+                        binding.record = textureRecord(rdram, mdt + model.materials + static_cast<uint32_t>(primitive.material)*0x60u+0x34u);
+                        if (binding.record)
+                        {
+                            std::memcpy(binding.identity.data(),rdram+binding.record,binding.identity.size());
+                            binding.image = recordTexture(rdram,binding.record);
+                        }
+                    }
+                    records->push_back(std::move(binding));
+                }
             }
             std::lock_guard<std::mutex> lock(g_mdtMutex);
             MdtCopy &entry = g_mdtCopies[data];
@@ -867,8 +915,19 @@ namespace dc::native
 
         uint64_t contentHash(const uint8_t *rdram, uint32_t address, uint32_t bytes, uint64_t hash)
         {
-            for (uint32_t i = 0; i + 4u <= bytes; i += 4u)
-                hash = (hash ^ rd32(rdram, address + i)) * 0x100000001B3ull;
+            // The cache must still observe live texel/palette writes on every
+            // lookup. A serial multiply per word dominated Dran's house; XXH64
+            // checks the same ranges with four independent lanes. This key is
+            // local to g_decoded, unrelated to the offline store's identities.
+            constexpr uint32_t ramBytes = 0x2000000u;
+            uint32_t at = address & (ramBytes - 1u);
+            while (bytes)
+            {
+                const uint32_t count = std::min(bytes, ramBytes - at);
+                hash = bozo::hash::xxh64(rdram + at, count, hash);
+                bytes -= count;
+                at = 0;
+            }
             return hash;
         }
 
@@ -1003,7 +1062,6 @@ namespace dc::native
 
         // A material (0x60 bytes): its first quadword is the colour the lights and ambient are scaled by, its texture
         // name is at + 0x34. Its record, found once per material.
-        std::unordered_map<uint32_t, uint32_t> g_materialRecord;
 
         // What DrawVu1 sets up for a piece, redone from RenderInfo: clip = RenderInfo 0x230 x 0x10 x the local-to-world
         // matrix (the microprogram's clip box), RenderInfo 0x270 from there to GS screen space, the lights in the
@@ -1127,7 +1185,7 @@ namespace dc::native
 
         void submit(const DrawSetup &setup, bozo::render::Material &material,
                     const std::shared_ptr<const bozo::render::Texture> &texture,
-                    std::vector<bozo::render::Vertex> &vertices)
+                    std::vector<bozo::render::Vertex> &vertices, bool screenRefraction = false)
         {
             probeSpikes(setup, vertices);
             if (setup.guard)
@@ -1267,7 +1325,42 @@ namespace dc::native
                 }
             }
             if (material.textured && material.fromFrame != 0u)
-                renderer.draw(material, setup.toScreen.m, vertices.data(), static_cast<uint32_t>(vertices.size()));
+            {
+                if (screenRefraction)
+                {
+                    // Water's program 15 samples the scene at the projected point,
+                    // displaced by its height differences. Project AFTER clipping;
+                    // its texture coordinates interpolate in screen space, without
+                    // the mesh's perspective dividing them a second time.
+                    const float *m = setup.toScreen.m;
+                    size_t kept = 0;
+                    for (size_t t = 0; t + 2u < vertices.size(); t += 3u)
+                    {
+                        bozo::render::Vertex projected[3];
+                        bool valid = true;
+                        for (int k = 0; k < 3; ++k)
+                        {
+                            auto &v = projected[k] = vertices[t + k];
+                            const float w = m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15];
+                            if (!(w > 0.0f)) { valid = false; break; }
+                            const float x = (m[0] * v.x + m[4] * v.y + m[8] * v.z + m[12]) / w;
+                            const float y = (m[1] * v.x + m[5] * v.y + m[9] * v.z + m[13]) / w;
+                            const float z = (m[2] * v.x + m[6] * v.y + m[10] * v.z + m[14]) / w;
+                            v.u = (x - 1728.0f + v.u) / material.frameWidth;
+                            v.v = (y - 1936.0f + v.v) / material.frameHeight;
+                            v.x = x; v.y = y; v.z = z; v.q = 1.0f;
+                            valid &= std::isfinite(x) && std::isfinite(y) && std::isfinite(z) && std::isfinite(v.u) && std::isfinite(v.v);
+                        }
+                        if (valid)
+                            for (const auto &v : projected) vertices[kept++] = v;
+                    }
+                    vertices.resize(kept);
+                    static constexpr float identity[16] = {1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+                    renderer.draw(material, identity, vertices.data(), static_cast<uint32_t>(vertices.size()));
+                }
+                else
+                    renderer.draw(material, setup.toScreen.m, vertices.data(), static_cast<uint32_t>(vertices.size()));
+            }
             else if (material.textured)
             {
                 ++g_stats.ownTextures;
@@ -1283,12 +1376,10 @@ namespace dc::native
         // A material's colour (its first quadword, VU 37 for the program) and its texture record.
         uint32_t materialRecord(const uint8_t *rdram, uint32_t mat)
         {
-            auto found = g_materialRecord.find(mat);
-            return found != g_materialRecord.end() ? found->second : (g_materialRecord[mat] = textureRecord(rdram, mat + 0x34u));
+            return textureRecord(rdram, mat + 0x34u);
         }
         // The same for a model's material (its name read through the model: a copy when the MDT is gone), keyed by
         // the name, as SearchTextureName finds a record by it.
-        std::unordered_map<std::string, uint32_t> g_namedRecord;
         uint32_t modelMaterialRecord(const uint8_t *rdram, const Model &m, uint32_t mat)
         {
             if (!m.copy)
@@ -1301,9 +1392,6 @@ namespace dc::native
                     break;
                 name.push_back(c);
             }
-            auto found = g_namedRecord.find(name);
-            if (found != g_namedRecord.end())
-                return found->second;
             const int32_t count = static_cast<int32_t>(rd32(rdram, kTextureManager));
             uint32_t record = 0;
             for (int32_t i = std::min(count, 1023); i >= 0 && record == 0u; --i)
@@ -1316,7 +1404,7 @@ namespace dc::native
                 if (!name.empty() && k == name.size() && rdram[(candidate + 8u + k) & 0x1FFFFFFu] == 0u)
                     record = candidate;
             }
-            return g_namedRecord[name] = record;
+            return record;
         }
 
         // One model piece, from its MDT: + 0x10 positions, + 0x18 normals, + 0x20 colours (none when <= 0), + 0x28
@@ -1366,6 +1454,9 @@ namespace dc::native
             bozo::render::Material material;
             material.textured = false;
             material.depthTest = true;
+            // SetEnv's original CLAMP_1=5 clamps both axes. Repeating here
+            // blends the far atlas edge into mirrored model joins at UV zero.
+            material.clampU = material.clampV = true;
             applyObjectState(g_objectState, material);
             if (g_toggles.opaqueModels)
                 material.blend = bozo::render::Material::Blend::Opaque;
@@ -1389,9 +1480,11 @@ namespace dc::native
                     const uint32_t mat = materials + static_cast<uint32_t>(materialIndex) * 0x60u;
                     for (int c = 0; c < 4; ++c)
                         lighting.material[c] = m.f(mat + static_cast<uint32_t>(c) * 4u);
-                    const uint32_t record = m.records && p < m.records->size() ? (*m.records)[p] : modelMaterialRecord(rdram, m, mat);
-                    texture = record != 0u ? recordTexture(rdram, record) : nullptr;
-                    material.tex0 = record != 0u ? rd64(rdram, record + 0x28u) : 0u;
+                    const TextureBinding *binding = m.records && p < m.records->size() ? &(*m.records)[p] : nullptr;
+                    const uint32_t record = binding ? resolveBinding(rdram,*binding) : modelMaterialRecord(rdram, m, mat);
+                    texture = record != 0u ? recordTexture(rdram, record) : binding ? binding->image : nullptr;
+                    if (binding && texture) binding->image = texture;
+                    material.tex0 = binding ? binding->tex0() : record != 0u ? rd64(rdram, record + 0x28u) : 0u;
                     // A record without pixels of its own whose place holds a picture the game makes there (the towns'
                     // "work": MainDraw copies the frame into it each frame, and a model piece under the ground samples it
                     // through its own texture coordinates): that picture, its texels the frame's (640 x rows of the
@@ -1403,7 +1496,7 @@ namespace dc::native
                     // Only an actual native producer establishes a work image.
                     // A matching legacy place is not provenance for the previous
                     // scene: that guess fed village geometry back into the sky.
-                    if (!s_noMadeModels && !texture && record != 0u && rd32(rdram, record + 0x38u) == 0u)
+                    if (!s_noMadeModels && !texture && (binding ? binding->record && binding->word(0x38)==0u : record && rd32(rdram,record+0x38)==0u))
                     {
                         bozo::render::Material made;
                         if (sampleMade(static_cast<uint32_t>(material.tex0 & 0x3FFFu), made) && made.source != 0u)
@@ -1415,6 +1508,14 @@ namespace dc::native
                             madeU = static_cast<float>(1u << ((material.tex0 >> 26) & 0xFu)) / static_cast<float>(made.frameWidth);
                             madeV = static_cast<float>(1u << ((material.tex0 >> 30) & 0xFu)) / static_cast<float>(made.frameHeight);
                         }
+                    }
+                    if (g_sampleSkyDraws && p == 0u && g_skyDrawIndex <= 8u)
+                    {
+                        std::fprintf(stderr,"[dc:sky-draw] part %u mdt %08x record %08x name %.32s tex %llx version %llu frame %u/%u ambient %g,%g,%g,%g material %g,%g,%g,%g\n",
+                            g_skyDrawIndex,mdt,record,record?reinterpret_cast<const char *>(rdram+record+8):"",
+                            static_cast<unsigned long long>(material.tex0),static_cast<unsigned long long>(texture?texture->version:0),
+                            material.fromFrame,material.source,lighting.ambient[0],lighting.ambient[1],lighting.ambient[2],lighting.ambient[3],
+                            lighting.material[0],lighting.material[1],lighting.material[2],lighting.material[3]);
                     }
                     // DC_PROBE_LEVELS=1 (diagnosis): each model record's TEX0, + 0x30 and level pointers, once.
                     static const bool s_probeLevels = std::getenv("DC_PROBE_LEVELS") != nullptr;
@@ -1517,6 +1618,9 @@ namespace dc::native
                         vertices.push_back(vertex(i + 1));
                         vertices.push_back(vertex(i + 2));
                     }
+                // The untextured model program emits display RGB, not texture
+                // modulation factors. Keep alpha's 0x80 unit and textured RGB.
+                material.directColour = !(setup.textureMapped && (texture != nullptr || material.fromFrame != 0u));
                 submit(setup, material, texture, vertices);
             }
         }
@@ -1530,8 +1634,9 @@ namespace dc::native
         // row x row step (no height step) and, per column, outputs the point and then sets its height to the column's
         // height x the scale (a column's vertex has the height of the column before it) and steps it along the row; one
         // strip per pair of rows. The game draws it with the screen-space program, textured with "work" (its copy of the
-        // frame) at coordinates perturbed by the height differences (+ 0xA0): a refraction the renderer cannot sample
-        // yet, so the water is drawn in its colour, alpha blended. CreateVUData is taken over to build nothing (the
+        // frame) at coordinates perturbed by the height differences (+ 0xA0). Sample only the native target produced
+        // by the game's actual copy into that place; an unproduced work texture keeps the colour-only fallback.
+        // CreateVUData is taken over to build nothing (the
         // visual's size 0: DrawVu1 sends no packet and VU1 runs nothing), and the water is drawn where DrawVu1 is
         // called for its visual, with the local-to-world matrix CWater::DrawVu1 hands it.
         constexpr uint32_t kWaterCreateVUData = 0x001607E0u;
@@ -1559,7 +1664,17 @@ namespace dc::native
                 return;
             ++g_stats.waters;
             DrawSetup setup = drawSetup(rdram, localToWorld, renderInfo);
-            setup.textureMapped = false;
+            bozo::render::Material material;
+            const uint32_t work = textureRecord(rdram, 0x0029A0B8u); // CreateVUData's "work" lookup
+            const uint32_t baseOfWork = work ? static_cast<uint32_t>(rd64(rdram, work + 0x28u) & 0x3FFFu) : ~0u;
+            // An explicit producer is required. In the dungeon MGMoveImage copies
+            // the current frame to "water", which shares "work"'s place. Never
+            // interpret an unbacked texture name/base as the previous frame.
+            const auto target = g_targetOfBase.find(baseOfWork);
+            const bool refracted = work && target != g_targetOfBase.end() && sampleMade(baseOfWork, material) &&
+                                   material.source == target->second;
+            setup.textureMapped = refracted;
+            material.clampU = material.clampV = true;
             float base[3], rowStep[3], columnStep[3];
             for (int i = 0; i < 3; ++i)
             {
@@ -1569,6 +1684,7 @@ namespace dc::native
             }
             rowStep[1] = columnStep[1] = 0.0f;
             const float scale = rdf(rdram, water + 0x9Cu);
+            const float perturbation = rdf(rdram, water + 0xA0u);
             const uint32_t colour = rd32(rdram, water + 0x90u);
             std::vector<bozo::render::Vertex> grid(static_cast<size_t>(rows) * columns);
             for (int32_t r = 0; r < rows; ++r)
@@ -1581,6 +1697,14 @@ namespace dc::native
                     v.y = point[1];
                     v.z = point[2];
                     v.rgba = colour;
+                    const uint32_t index = static_cast<uint32_t>(r * columns + c);
+                    const float height = rdf(rdram, heights + index * 4u);
+                    const float previousRow = rdf(rdram, heights + (r ? index - columns : index) * 4u);
+                    // The builder reads the following float even at a row end;
+                    // SetSize reserves an extra quadword after the height grid.
+                    const float nextColumn = rdf(rdram, heights + (index + 1u) * 4u);
+                    v.u = perturbation * (previousRow - height);
+                    v.v = perturbation * (height - nextColumn);
                     point[1] = rdf(rdram, heights + static_cast<uint32_t>(r * columns + c) * 4u) * scale;
                     point[0] += columnStep[0];
                     point[2] += columnStep[2];
@@ -1597,12 +1721,11 @@ namespace dc::native
                     const bozo::render::Vertex &e = grid[static_cast<size_t>(r + 1) * columns + c];
                     vertices.insert(vertices.end(), {a, b, d, b, e, d});
                 }
-            bozo::render::Material material;
-            material.textured = false;
+            material.textured = refracted;
             material.depthTest = true;
             material.depthWrite = false;
             material.blend = bozo::render::Material::Blend::Alpha;
-            submit(setup, material, nullptr, vertices);
+            submit(setup, material, nullptr, vertices, refracted);
         }
 
         uint64_t g_retiredModelEnvelopes = 0;
@@ -1651,6 +1774,10 @@ namespace dc::native
             {
                 ++g_stats.noModel;
                 return;
+            }
+            if (g_inSky)
+            {
+                ++g_skyDrawIndex;
             }
             g_objectState = state;
             std::snprintf(g_drawWhat, sizeof(g_drawWhat), "model visual %08x vtable %08x data %08x mdt %08x %s program %u flags %x",
@@ -2633,18 +2760,25 @@ namespace dc::native
             material.nearest = spritesNearest(rdram);
             seq('s');
             const float tw = texture ? static_cast<float>(texture->width) : 1.0f, th = texture ? static_cast<float>(texture->height) : 1.0f;
-            // Sampled as they are, a piece's edge falls exactly on the boundary between two texels of its sheet (the GS
-            // samples at pixel corners, the GPU at pixel centres): a rounding then took the next piece's column (thin dark
-            // lines beside the menus' labels and tabs). The texture coordinates are pulled 1/32 texel inside the piece.
-            const float uMid = (c[0].u + c[3].u) * 0.5f, vMid = (c[0].v + c[3].v) * 0.5f;
-            const float inset = material.nearest ? 1.0f / 32.0f : 0.0f;
+            // Keep the source interval's width: shrinking its endpoints moves
+            // interior separators in wide menu strips. A constant nearest-sample
+            // bias resolves exact texel-boundary rounding; fragment-stage bounds
+            // keep that bias inside the atlas piece without stretching its UVs.
+            const float bias = texture && material.nearest ? 1.0f / 32.0f : 0.0f;
+            if (bias != 0.0f)
+            {
+                const float loU = std::min({c[0].u,c[1].u,c[2].u,c[3].u}), hiU = std::max({c[0].u,c[1].u,c[2].u,c[3].u});
+                const float loV = std::min({c[0].v,c[1].v,c[2].v,c[3].v}), hiV = std::max({c[0].v,c[1].v,c[2].v,c[3].v});
+                material.uvBounds[0] = (loU + bias) / tw; material.uvBounds[2] = (hiU - bias) / tw;
+                material.uvBounds[1] = (loV + bias) / th; material.uvBounds[3] = (hiV - bias) / th;
+            }
             std::vector<bozo::render::Vertex> vertices;
             auto vertex = [&](const Corner &k) {
                 bozo::render::Vertex v;
                 v.x = k.x;
                 v.y = k.y;
-                v.u = (k.u + (k.u < uMid ? inset : k.u > uMid ? -inset : 0.0f)) / tw;
-                v.v = (k.v + (k.v < vMid ? inset : k.v > vMid ? -inset : 0.0f)) / th;
+                v.u = (k.u + bias) / tw;
+                v.v = (k.v + bias) / th;
                 v.rgba = flat ? flatColour(k.rgba, k.rgba >> 8, k.rgba >> 16, k.rgba >> 24) : k.rgba;
                 return v;
             };
@@ -2663,7 +2797,7 @@ namespace dc::native
         // Native triangles cover the destination's full half-open rectangle.
         // Carrying over the console's one-subpixel right-edge subtraction leaves
         // uncovered pixel centres between adjoining map/dialog pieces at scale.
-        // Atlas sampling is handled independently by drawStrip's UV inset.
+        // Atlas sampling bounds are applied after interpolation in drawStrip.
         void drawSprite(const uint8_t *rdram, uint32_t record, const Rect &d, float u0, float v0, float u1, float v1, uint32_t rgba)
         {
             const float x0 = kOriginX + static_cast<float>(d.x), x1 = kOriginX + static_cast<float>(d.x + d.w);
@@ -3044,6 +3178,44 @@ namespace dc::native
         constexpr uint64_t kTexturePlace = 0x3FFFull | 0x3Full << 20; // TBP0, PSM
         std::unordered_map<uint64_t, uint32_t> g_resident;
         std::unordered_set<uint32_t> g_patchedRecords;
+        RecompiledFunction g_cleanupTextureList = nullptr;
+        void cleanupTextureListHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        {
+            // The original CPU routine compacts 196 CTexture records, copying
+            // each complete 0x50-byte asset descriptor into the first hole.
+            // Native images/copies must move with those assets, not stay at the
+            // table addresses that menu loads are about to reuse.
+            constexpr uint32_t count = 196, stride = 0x50;
+            const uint32_t first = getRegU32(ctx,4)+0x10F8u, link = getRegU32(ctx,31);
+            std::array<std::array<uint8_t,stride>,count> before;
+            std::memcpy(before.data(),rdram+first,sizeof(before));
+            g_cleanupTextureList(rdram,ctx,runtime);
+            if (ctx->pc != link || ctx->leaving) return;
+            std::unordered_map<uint32_t,uint32_t> moved;
+            std::array<bool,count> used{};
+            for (uint32_t old=0;old<count;++old)
+                if (before[old][8])
+                    for (uint32_t now=0;now<count;++now)
+                        if (!used[now] && std::memcmp(before[old].data(),rdram+first+now*stride,stride)==0)
+                        { moved[first+old*stride]=first+now*stride; used[now]=true; break; }
+            auto destination = [&](uint32_t at) {
+                if (at<first || at>=first+count*stride || (at-first)%stride) return at;
+                const auto found=moved.find(at);return found==moved.end()?0u:found->second;
+            };
+            auto migrate = [&](auto &cache) {
+                auto previous=std::move(cache);cache.clear();
+                for (auto &[at,value]:previous)
+                    if (const uint32_t to=destination(at)) cache[to]=std::move(value);
+            };
+            migrate(g_pinned);migrate(g_decoded);
+            std::unordered_set<uint32_t> patched;
+            for (uint32_t at:g_patchedRecords)
+                if (const uint32_t to=destination(at)) patched.insert(to);
+            g_patchedRecords=std::move(patched);
+            for (auto it=g_resident.begin();it!=g_resident.end();)
+                if (const uint32_t to=destination(it->second)) { it->second=to; ++it; }
+                else it=g_resident.erase(it);
+        }
         // ReloadTexture (0x133070: a0 the texture manager, a2 the group): sends the group's records (their first half-word,
         // the group) to GS memory when the group is not the current one or not loaded yet.
         uint64_t g_nativeTextureReloads = 0, g_nativeTextureSelections = 0, g_nativeTextureTm2 = 0, g_nativeTextureFiles = 0;
@@ -3609,6 +3781,31 @@ namespace dc::native
             g_alpha2D = (g_alpha2D & ~0xFFull) | 0x48u;
             g_drawFire(rdram, ctx, runtime);
             g_alpha2D = saved;
+        }
+
+        // Optional, bounded sky observation. No frame dumps or RAM hashing:
+        // record the actual sky clock and camera basis to distinguish the
+        // time-of-day fade from camera-dependent changes during a play run.
+        RecompiledFunction g_drawSky = nullptr;
+        void skyProbeHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        {
+            static uint32_t calls = 0, samples = 0;
+            static const float fixedTime = [] { const char *v=std::getenv("DC_SKY_TIME");return v?std::strtof(v,nullptr):-1.0f; }();
+            if (fixedTime >= 0 && fixedTime <= 12) ctx->fu[12]=std::bit_cast<uint32_t>(fixedTime);
+            g_inSky = true;g_skyDrawIndex = 0;
+            g_sampleSkyDraws = calls++ % 120u == 0u && samples < 64u;
+            if (g_sampleSkyDraws)
+            {
+                ++samples;
+                constexpr uint32_t cameraMatrix = 0x01C75520u + 0x10u;
+                std::fprintf(stderr, "[dc:sky] frame %llu time %.6f camera %08x basis (%g %g %g) (%g %g %g) (%g %g %g)\n",
+                             static_cast<unsigned long long>(g_publishedFrames), std::bit_cast<float>(ctx->fu[12]), getRegU32(ctx, 7),
+                             rdf(rdram,cameraMatrix), rdf(rdram,cameraMatrix+4), rdf(rdram,cameraMatrix+8),
+                             rdf(rdram,cameraMatrix+16), rdf(rdram,cameraMatrix+20), rdf(rdram,cameraMatrix+24),
+                             rdf(rdram,cameraMatrix+32), rdf(rdram,cameraMatrix+36), rdf(rdram,cameraMatrix+40));
+            }
+            g_drawSky(rdram, ctx, runtime);
+            g_inSky = false;g_sampleSkyDraws = false;
         }
 
         // MGGetFBuffTex / MGGetFBuffBackTex (0x12F130 / 0x12F1A0, a0 the sceGsTex0 they fill): where the game's frame
@@ -4489,6 +4686,8 @@ namespace dc::native
                 if ((g_animeCalls[k] = runtime.functions.generated(kAnimeCallAddress[k])))
                     registry.registerFunction(kAnimeCallAddress[k], animeHooks[k]);
             registry.registerFunction(0x00133070u, &reloadTextureHook);
+            if ((g_cleanupTextureList = runtime.functions.generated(0x00133A60u)))
+                registry.registerFunction(0x00133A60u, &cleanupTextureListHook);
             registry.registerFunction(0x00151AD0u, &balloonHook);
             registry.registerFunction(0x00140660u, &moveImageTestHook);
             if ((g_getFrameTex = runtime.functions.generated(0x0012F130u)) && (g_getBackTex = runtime.functions.generated(0x0012F1A0u)))
@@ -4496,6 +4695,9 @@ namespace dc::native
                 registry.registerFunction(0x0012F130u, &getFrameTexHook);
                 registry.registerFunction(0x0012F1A0u, &getBackTexHook);
             }
+            if ((std::getenv("DC_PROBE_SKY") || std::getenv("DC_SKY_TIME")) &&
+                (g_drawSky = runtime.functions.generated(0x00187F90u)))
+                registry.registerFunction(0x00187F90u, &skyProbeHook);
             registry.registerFunction(0x0012F430u, &stretchMoveHook);
             registry.registerFunction(0x00162580u, &blendTextureHook);
             registry.registerFunction(0x00162D80u, &blendTextureTestHook);
@@ -4715,6 +4917,8 @@ namespace dc::native
                 std::fprintf(stderr, "[dc:dump] frame start\n");
             }
     }
+
+    void finishSceneForMenu() { flushShadows(); }
 
     // DC_PROBE_TEX=1 (diagnosis): the texture manager's (0x1C75870) records, every 600 frames: count at + 0, records
     // of 0x50 bytes from + 0x10F8, each with its name at + 8 and TEX0 at + 0x28.

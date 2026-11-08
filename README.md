@@ -11,7 +11,7 @@ BozoEngine replaces the PS2Recomp fork completely; there is no emulation fallbac
 ![Platform](https://img.shields.io/badge/platform-Windows-1b8cff)
 ![Compiler](https://img.shields.io/badge/compiler-GCC%20%7C%20Clang-1b8cff)
 ![Based on](https://img.shields.io/badge/based%20on-BozoEngine-17a35b)
-![Status](https://img.shields.io/badge/status-bring--up-d01f3c)
+![Status](https://img.shields.io/badge/status-gameplay%20testing-e6a700)
 
 </div>
 
@@ -28,126 +28,32 @@ BozoEngine replaces the PS2Recomp fork completely; there is no emulation fallbac
 
 ## Status
 
-**Bring-up, not playable yet.** The BozoEngine build boots, shows the title screen and its attract sequence, loads
-an existing memory-card save into Norune, and draws Toan, the village and its HUD. Movement, pause/unpause and the
-main game menu have been checked, with native music and effects. A 4,100-frame window run held approximately 60
-updates and presents per second on the development PC.
+**Playable Windows development build, under active gameplay testing.** Manual runs have reached Norune,
+Divine Beast Cave exploration and combat, the Dran encounter, and region travel to Matataki Village.
+Save/load, party and weapon menus, dialogue, native music and effects have been exercised.
+A complete story playthrough and visual parity have not been established.
 
-The earlier build also reached New game's opening and Georama. Those paths, dungeons, combat and a complete
-playthrough still need checking on BozoEngine. The migration restores the tested Norune baseline; it does not
-clear the earlier rendering defects.
+| Area | Current coverage |
+|---|---|
+| Boot, title and attract sequence | Checked on the native runtime |
+| Norune | Loaded saves, movement, interiors, menus, dialogue and saving |
+| Divine Beast Cave | Multiple floors, exploration, combat and Dran encounter |
+| Matataki | Arrival through “Go to Other Area”; sky/camera comparisons |
+| Rendering | Models, terrain, HUD, text, shadows, water and frame-copy effects draw natively |
+| Menus | Original options plus controller-operated Cheats and Quit Game pages |
+| Complete story, all companions, locations and effects | Still needs testing |
+| Linux and widescreen | Not qualified |
 
-| Milestone | |
-|---|:---:|
-| Function map from the ELF's own symbol table (main program and both overlays, no Ghidra) | ✅ |
-| Recompile the main ELF and link it with BozoEngine; remove the PS2Recomp dependency | ✅ |
-| Code overlays `TITLE.BIN` and `DUN.BIN` (one load slot, selected by resident identity) | ✅ |
-| Boot: native SDK services, reads from the owner's disc, memory card detected | ✅ |
-| Title screen, attract sequence and native 3D rendering | ✅ |
-| Norune: load an existing save, Toan/HUD, movement, pause and main menu | ✅ |
-| Native music and effects | ✅ |
-| New game: opening scenes and Georama rechecked on BozoEngine | 🔧 |
-| First dungeon (Divine Beast Cave), combat and full story | ⏳ |
-| Memory card: existing save loading; game-side saving rechecked on BozoEngine | 🔧 |
-| Linux build | ⏳ |
-| Widescreen, higher internal resolution | ⏳ |
+Recent fixes address texture bindings after weapon customization, menu seams, shadow alpha, water
+refraction, sky feedback and Matataki's sharp sky boundary. The player confirmed that boundary was gone
+in the rebuilt run. A model sampler correction also targets Dran's mirrored face seam; its pixel regression
+passed, but the full encounter still needs a player comparison.
 
-**Native port.** The game's draws are built straight from its own models, textures, camera, lights and drawing
-routines. BozoEngine supplies the native SDK services, renderer and mixer. There is no GS memory, GIF packet
-renderer, VIF/VU1 execution, IOP interpreter, SPU2/SIO2 device backend or emulation fallback.
-
-| Layer | |
-|---|:---:|
-| Main EE functions and both overlays statically recompiled to C++ | ✅ |
-| Five sound libraries relocated and recompiled offline, without a firmware bootstrap | ✅ |
-| Pad and memory-card libraries answered through native SDK services | ✅ |
-| Compiled sound drivers and native libsd/mixer; no SPU2 emulator | ✅ |
-| Native frame loop on the PC's clock (60 fps) | ✅ |
-| OpenGL renderer on the GPU; no paraLLEl-GS or GS renderer | ✅ |
-| 3D models, shadows and cloth drawn from the game's data; VU1 runs no microcode | ✅ |
-| Disc textures converted offline; no console texture layout decoded during play | ✅ |
-| Menus, text, HUD, frame copies and depth of field drawn natively | 🔧 |
-| Remaining screen-space sprites, particles and other effects translated | 🔧 |
-
-✅ works · 🔧 in progress · ⏳ not reached yet
-
-Native thread/timer/file contracts, logical addresses and transfer-completion acknowledgements remain as SDK
-compatibility services. Unknown native calls, unsupported module code and device-address accesses fail explicitly.
-Movies use FFmpeg; configuring this port without the native decoder fails.
-
-The native graphics boundary retains no GS register bank or transfer history. Environment submissions and graphics
-completion never inspect GIF packets. Visibility queries read the native GPU depth cache directly from the game's
-query coordinates. Some recompiled routines and SDK output builders still construct unused console-format buffers;
-the renderer does not consume them. Material and texture formats in game structures are translated to native draws.
-The model draw, material setter, and three environment/blend setters now produce native output only. Packet-only
-TEST/ZBUF setters return without reading their arguments or constructing console output. BozoEngine
-answers the graphics DMA send/sync APIs directly, including completion handlers, without packet reads or busy polling.
-The tested native route now reaches **zero device-register accesses**: vblank fields use the native frame counter,
-display submission and DMA configuration use SDK services, and console CPU/free-time diagnostics and channel tag-bit
-updates are retired during guarded code generation. Native mode rejects access to retired graphics registers.
-See [the cleanup and validation notes](docs/BOZO_MIGRATION.md#native-graphics-cleanup) for the remaining compatibility work.
-
-Static models now retain their captured geometry after loading buffers are reused. This fixes a source-lifetime
-failure that could remove Norune's terrain; the controlled before/after reproduction is recorded in the migration notes.
-The fishing-line drawing loop now hands its projected points directly to native segments, retaining its visibility
-and pole/model work without constructing graphics packets. Fishing gameplay and console line rasterization remain unchecked.
-
-Known defects, including issues carried over from the earlier build:
-
-- the sky band above Norune's hills is bluer than on a PS2;
-- a green wedge sometimes shows in Norune;
-- a Georama menu picture ("stayframe") sometimes fails to decode;
-- the characters' shadow plane still needs tracing through the original shading logic;
-- some frame-copy surfaces, effects and in-game menus remain unchecked.
-
-[docs/BOZO_MIGRATION.md](docs/BOZO_MIGRATION.md) records the current migration and validation.
-[docs/RECOMP_NOTES.md](docs/RECOMP_NOTES.md) retains the port's bring-up history, fixes and open investigations.
-
-## Screenshots
-
-
-Historical bring-up captures from before the native renderer and BozoEngine migration. They show the earlier
-progress and are not evidence of the current build; current validation is in
-[docs/BOZO_MIGRATION.md](docs/BOZO_MIGRATION.md).
-
-| | | |
-|---|---|---|
-| ![The intro's castle](docs/screenshots/intro-castle.png) | ![The Dark Genie](docs/screenshots/genie.png) | ![The title menu](docs/screenshots/title-logo.png) |
-| ![The desk narration](docs/screenshots/opening-desk.png) | ![In a dungeon](docs/screenshots/dungeon-scene.png) | ![Toan and the Fairy King](docs/screenshots/fairy-king.png) |
-| ![Toan's house](docs/screenshots/toan-house.png) | ![The forest](docs/screenshots/forest-scene.png) | ![New game: the name entry](docs/screenshots/register-name.png) |
-| ![The Dark Shrine](docs/screenshots/shrine-soldiers.png) | ![Colonel Flag](docs/screenshots/colonel-flag.png) | ![The urn](docs/screenshots/shrine-urn.png) |
-| ![Opening dialogue](docs/screenshots/opening-dialogue.png) | ![The Dark Genie rises](docs/screenshots/genie-rises.png) | ![Norune at night](docs/screenshots/norune-night.png) |
-| ![Toan at home](docs/screenshots/norune-house.png) | ![Norune's festival](docs/screenshots/norune-festival.png) | ![A cutscene dialogue](docs/screenshots/cutscene-balloon.png) |
-
-## How it works
-
-```
-disc files (game/) ──► tools/dc_bozo_prepare.py ──► resident ELF + TITLE/DUN overlay ELFs
-                                           │
-                        BozoEngine's bozo-recomp ──► native C++ in build/bozo/dc_gen/
-   five sound IRX ──► offline relocation + strict native translation ──► build/bozo/dc_audio_gen/
-   disc textures ──► tools/dc_texconv.py ──► build/bozo/textures/dc_textures.bin
-                                           │
-                 CMakeLists.txt ──► BozoEngine + generated code + DC's own adapters
-                                           │
-   dc_native.cpp: models, lighting, shadows, cloth, menus and HUD ──► native OpenGL renderer ─┐
-   dc_audio.cpp: compiled drivers + native libsd ──► native mixer                           ├─► dc.exe
-   dc_port.cpp: native frame boundary; SDK files, cards and pads ──► native host services ───┘
-```
-
-- The retail executable keeps its CodeWarrior symbols. `tools/symtab_map.py` and the retained function maps define
-  the resident code and overlays; no Ghidra pass is needed. The offline preparation checks all three disc hashes.
-- `TITLE.BIN` and `DUN.BIN` are `MWo3` modules sharing `0x01DABD00`. Each has its own generated symbols and function
-  table; native dispatch checks the resident header before selecting it, including resume entries.
-- `runtime/dc_native.cpp` translates the game's MDT models, RenderInfo camera/lights, textures and drawing calls
-  into native draws. It does not read console graphics packets or run VU1 microcode.
-- `LIBSD`, `SDRDRV`, `MODMIDI`, `MODHSYN` and `EZMIDI` are relocated and compiled offline. Their SDK calls use
-  reusable native services; libsd uses the native mixer. Pad/card modules are replaced at their SDK interfaces.
-- The top-level build generates code and converts textures automatically, then links the windowed `dc` and
-  `dc-headless` runners. Game-derived output stays in the ignored build directory.
-
-[BozoEngine](https://github.com/TheBozos/BozoEngine) is the sole engine submodule. Game-specific addresses, formats,
-hook choices and module layouts stay in DC_Recomp; engine changes must be generic and reusable by other recompiles.
+The latest fullscreen build received positive player feedback after the cheat/menu additions.
+Fullscreen improved presentation in the player's comparison. Performance in heavier scenes, including
+Dran's house, still needs broader measurements. New-game/Georama routes, the full range of effects and
+visual parity need further checks. See [the rendering follow-up](docs/NATIVE_RENDERING_FOLLOWUP.md)
+for bounded reproductions and remaining questions.
 
 ## Requirements
 
@@ -160,137 +66,147 @@ hook choices and module layouts stay in DC_Recomp; engine changes must be generi
 
 ## Build and run
 
-```bash
-git clone --recurse-submodules https://github.com/TheBozos/DC_Recomp.git
-cd DC_Recomp
-scripts/extract_iso.sh "/path/to/Dark Cloud (USA).iso"   # disc files -> game/
-scripts/build_runtime.sh Release \
-    -DDC_ISO="D:/path/to/Dark Cloud (USA).iso"           # native code, sound and textures -> build/bozo/
-scripts/run.sh                                         # build/bozo/dc.exe
-```
-
-With a separate FFmpeg build, add `-DBOZO_FFMPEG_ROOT="D:/path/to/ffmpeg"` (containing `include/` and `lib/`) to the
-build command. `scripts/recomp.sh`, `scripts/overlays.sh` and `scripts/iop_recomp.sh` are optional generation
-shortcuts; the full build already includes those stages. `DC_WINDOW=OFF` builds only `dc-headless`.
-
-The binaries retain the configured data paths. `--elf` and `--iso` override the disc locations; `DC_TEXTURES` selects
-a relocated native texture pack. The window uses BozoEngine's keyboard/gamepad input and per-user card directory.
-Existing `game/mc0` saves migrate through its application-data service. `--card-dir` selects an isolated directory
-containing `mc0`; headless runs use an in-memory card unless a directory is supplied.
-
-### Windows
-
-Run the scripts in an MSYS2 **UCRT64** shell (MSVC is not supported for this port):
+Use an MSYS2 **UCRT64** shell on Windows; MSVC is not supported for this port.
 
 ```bash
 pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,libarchive,python} git
+git clone --recurse-submodules https://github.com/TheBozos/DC_Recomp.git
+cd DC_Recomp
+scripts/extract_iso.sh "/path/to/Dark Cloud (USA).iso"
+scripts/bench_run.sh --alone 20 "native build" scripts/build_runtime.sh Release \
+    -DDC_ISO="D:/path/to/Dark Cloud (USA).iso"
+scripts/bench_run.sh 120 "play" scripts/run.sh --fullscreen
 ```
 
-The validated static build imports only Windows system/UCRT DLLs. For a build using dynamic dependencies,
-`scripts/stage_dlls.sh` stages its MSYS2 DLLs next to `dc.exe` for launching outside the shell.
+Game runs take one shared benchmark slot; builds and timed measurements take the bench alone.
+Use `scripts/bench_run.sh` when sharing the machine with other recomp projects. Close the game before
+replacing its executable. A separate FFmpeg build can be selected with
+`-DBOZO_FFMPEG_ROOT="D:/path/to/ffmpeg"` (containing `include/` and `lib/`).
 
-### Checks and captures
+Code generation, sound compilation and texture conversion are included in the full build.
+`DC_WINDOW=OFF` builds only the headless runner. The validated static build imports Windows system/UCRT
+DLLs; for dynamic builds, `scripts/stage_dlls.sh` stages required MSYS2 DLLs next to the executable.
 
-```bash
-cmake -S . -B build/bozo -DDC_ENGINE_TESTS=ON
-cmake --build build/bozo --parallel 6
-ctest --test-dir build/bozo --output-on-failure
-build/bozo/dc-headless.exe --frames 1400 --wav build/boot.wav
-scripts/boot_test.sh title 30 5
-```
+## Playing, cheats and quitting
 
-The local suites cover instructions, runtime, ELF decoding, native libraries/kernel/audio, strict compiled-library
-execution and GPU render-target readback. GPU checks require OpenGL 3.3. `scripts/engine_tests.sh` runs the standalone
-headless engine suites; `scripts/fork_tests.sh` remains an alias for existing contributors. CI checks the pinned
-engine with game-free fixtures and validates the offline tools/scripts; retail gameplay checks use the owner's disc.
+Open the game's main menu and choose **Options**. The entry page offers **Game Options** (the original
+settings), **Cheats**, and **Quit Game**. Up/Down selects rows and scrolls the cheat list; Cross confirms
+and Circle goes back. Quit Game asks for confirmation, with Cancel selected initially.
+Save through the game's normal save menu first if you want to retain progress; quitting does not autosave.
 
-`--pad-script <file>` accepts entries such as `1200:START/6,1500:CROSS/6`; `--live-pad <file>` reloads changed script
-text starting at the current game frame. `--frames 0` runs until the window closes (the window's default).
-`--capture-dir`, `--capture-frame` and `--wav` provide native captures. There is no fallback switch.
-`--fullscreen` starts fullscreen (F11 toggles it); `--no-vsync` disables VSync for presentation comparisons.
-The default remains windowed with VSync enabled.
-Open **F2 → Cheats** for independent **Infinite health**, **Infinite weapon durability** and **Infinite thirst**
-toggles. They keep party HP, equipped-weapon WHP and thirst gauges full. All start disabled on each launch;
-turning a toggle off restores normal depletion.
-`--profile-io` prints remaining register accesses by guest PC/address after a bounded run; the validated Norune route
-prints a zero total. The guarded adaptations in `recomp/dc_native.patches` are applied automatically by CMake.
-MDT creation/remaking, shadow-model and cloth preparation now retain native asset bookkeeping without serializing
-console buffers. Their old arena extents remain for caller compatibility; 1,064 synthetic cases check those sizes
-against the original compiled builders. See [migration validation](docs/BOZO_MIGRATION.md) for scope and limitations.
-Texture-group reload also uses native bookkeeping, and texture-load wrappers retain asset parsing while skipping
-upload packet work; 666 manager-state and 60 texture-record comparisons cover those boundaries.
-Fixed and fixed-Z texture insertion uses native records and bindings without image/cache/DMA builders; another
-224 comparisons check the original allocation and metadata contracts. The latest 5,800-frame headless and windowed
-routes also report zero GIF SDK submissions.
-The model packet overload and GIF envelope/TEXA wrappers also skip obsolete output. Window setters retain the
-logical rectangle directly. Visibility reduces native depth tiles into query results without an SDK readback
-packet or scratch tile; 144 original-loop comparisons check depth patterns, boundaries and arena bookkeeping.
-Water and running-effect wrappers also bypass their packet-only state envelopes while keeping native draws and
-game bookkeeping. Another 96 water and 384 effect comparisons check their retained callbacks, data and ABI.
-Frame-end completion also runs without packet closing or packet-header reads; the native SDK completion and its
-masked callback queue remain intact, checked in 32 reference/adapted cases.
-The three shadow wrappers also bypass their unused TEST/ZBUF setup and static VIF/VU1 chains. Another 384
-original/adapted cases check their retained vectors, shadow modes, model calls and matrix restoration; the known
-shadow rendering defect remains open.
-`CDebugFont::Draw` now composes its 8-by-16 glyphs into an owned native picture, retaining the original text loop
-and final sprite. Another 192 comparisons check every composed texel against the original copy rectangles.
-The global packet reset and admitted direct handle/base loads are retired. The audit accounts for 287 residual
-handle loads in replaced bodies or guarded skipped spans, including compiler-known interior entries. Another
-74 controlled cases exercise the ten DUN dispatch sites absent from the manual trace; live DUN coverage remains
-33/43 sites. Mutable target writers, pointer aliases and model/cloth allocation migration remain open.
-The follow-up alias audit records recognized register/stack aliases and DUN root/table-pointer writes.
-Complete compiled assignments pass 24 synthetic cases preserving their own type's vptr. Unknown-address
-stores and callee effects remain explicit; these checks do not establish immutable dispatch tables.
-Bulk/callee follow-up includes the DUN file/BSS loading writes and 45 embedded effect vptrs; four raw
-copies carry 36 of those vptrs. Unknown pack-derived extents and bounded callee exploration remain open.
-The three `LoadChara2` copies now have guarded size/cursor contracts and a read-only pack inventory.
-Current artifact sizes cannot directly reach dispatch data under valid arena/cursor preconditions;
-post-copy allocation checks, stale sizes and possible corruption of later allocator state remain open.
-The intervening `LoadPackData` / `ReadInfo` audit preserves those conditions: parser-state resets
-do not reset the shared arena cursor, CFG comment removal can write one byte beyond its declared
-payload, and aliased IMG destinations can change pack headers or DUN dispatch bytes. The eight
-initial CFG snapshots have no preprocessing header hits; nested loaders and mutable callbacks
-still prevent a complete header-preservation or dispatch-disjointness proof.
-
-## Disc facts
-
-
-| | |
+| Cheat | Behaviour |
 |---|---|
-| Boot ELF | `SCUS_971.11`, entry `0x100008`, one segment at `0x100000` (1.6 MB of code and data, BSS up to `0x1DABD00`), symbols kept |
-| Code | `0x100000-0x2452B8` (EE code), `0x245300-0x24FB00` (VU microcode), `0x29FE80-0x2A1010` (static initializers) |
-| Overlays | `TITLE.BIN` (177 functions) and `DUN.BIN` (62 functions), CodeWarrior `MWo3`, both at `0x01DABD00` |
-| Video mode | NTSC |
-| IOP modules | `MODULES/*.IRX`: SIO2MAN, PADMAN, MCMAN, MCSERV, LIBSD, SDRDRV, MODMIDI, MODHSYN, EZMIDI (and the unused network stack: INET, AN986, LIBNET, NETCNF, MSIFRPC, USBD) |
-| IOP image | `MODULES/IOPRP211.IMG` |
-| Data | `DATA.DAT` (1.7 GB archive) with its indexes `DATA.HED` and `DATA.HD2` |
+| Infinite health | Keeps party HP full |
+| Infinite weapon durability | Keeps equipped weapons at full WHP and prevents wear/breakage |
+| Infinite thirst | Keeps party thirst full and prevents dehydration |
+| Combo stamina | Keeps the bottom-left dungeon attack/combo gauge full |
+| Equipped weapon ATK | One-time edit, 0–999; select Apply weapon ATK |
+| Weapon ABS multiplier | 1–16× positive combat rewards; normal full-ABS cap remains |
+| Gilda | Set 0–65,535; select Apply Gilda |
+| Consumable quantity | Set a quantity for one of the three active HUD slots; limited by bag capacity |
+| Movement speed | 50–200% horizontal movement, retaining wall collision |
+| Freeze time of day | Holds sky and outdoor lighting; gameplay/story timers continue |
+| Inventory size | Set 1–100 slots; occupied entries cannot be hidden or discarded |
 
-## Sharing the machine with other ports
+Cross toggles on/off rows. Numeric rows use Left/Right for one, L1/R1 for ten and L2/R2 for one hundred,
+unless the row's hint says otherwise. Gilda uses 1/100/1000 steps; movement uses 5% steps.
+Select the corresponding **Apply** row for ATK, Gilda, consumable quantity or inventory size.
+Those edits apply when Options closes or gameplay resumes, and become part of a game save if you save
+afterward. Toggle/multiplier settings are session-only: each launch starts with toggles off,
+ABS at 1× and movement at 100%. See [the cheat reference](docs/CHEATS.md) for limits and validation.
 
-The team's native ports share a local benchmark lock, now provided by BozoEngine's `tools/bench_lock.sh`. Its
-protocol remains compatible with the other ports: a game run takes one slot; a build or timed measurement takes
-the bench alone.
+**F2** opens native settings, including the same Cheats options. **F11** toggles fullscreen.
+`--fullscreen` starts fullscreen; `--no-vsync` disables VSync for comparisons. The default is windowed
+with VSync enabled. **F8** captures a frame when a capture directory is configured.
+
+## Saves and data paths
+
+The windowed runner uses BozoEngine's per-user memory-card directory. Existing `game/mc0` saves migrate
+through its application-data service. `--card-dir <directory>` selects a separate root containing `mc0`;
+copy the card directory before experiments. Headless runs use an in-memory card unless `--card-dir` is
+supplied. Inventory edits reach the active card only when the game performs a save.
+
+The build retains configured asset paths. `--elf` and `--iso` override executable/disc locations;
+`DC_TEXTURES` selects a relocated native texture pack. The executable still needs the owner's game files
+and converted assets.
+
+## Checks and captures
 
 ```bash
-scripts/bench_run.sh 5 "boot test" scripts/run.sh
-scripts/bench_run.sh --alone 20 "runner build" scripts/build_runtime.sh
+scripts/bench_run.sh --alone 20 "build regression suites" \
+    scripts/build_runtime.sh Release -DDC_ENGINE_TESTS=ON
+scripts/bench_run.sh --alone 10 "regression suites" \
+    ctest --test-dir build/bozo --output-on-failure
+scripts/bench_run.sh --alone 5 "bounded native capture" \
+    scripts/run.sh --frames 1400 --capture-dir build/captures --capture-frame 1200 --profile-io
 ```
 
-## Repository layout
+Suites cover instructions, runtime/kernel services, ELF/overlay decoding, native libraries/audio,
+compiled game boundaries, cheats, menu lifecycle and GPU readback. GPU checks require OpenGL 3.3.
+CI uses game-free engine fixtures and offline-tool checks; retail-route tests require the owner's disc.
+`scripts/engine_tests.sh` runs standalone headless engine checks.
+
+`--frames 0` runs until shutdown; `--frames N` bounds a run. `--wav <file>` records sound.
+`--pad-script <file>` accepts entries such as `1200:START/6,1500:CROSS/6`; `--live-pad <file>` reloads
+changed input text relative to the current frame. `--capture-dir` and repeatable `--capture-frame`
+select native captures. `--profile-io` reports device-register accesses after a bounded run.
+Normal play leaves expensive diagnostic recording disabled.
+
+Recent results live in [NATIVE_RENDERING_FOLLOWUP.md](docs/NATIVE_RENDERING_FOLLOWUP.md).
+[BOZO_MIGRATION.md](docs/BOZO_MIGRATION.md) retains migration/qualification details and
+[RECOMP_NOTES.md](docs/RECOMP_NOTES.md) the earlier bring-up history. Synthetic checks and short
+captures do not establish a full-game pass.
+
+## Native architecture
+
+The main R5900 executable and both code overlays are statically recompiled to C++. Native adapters
+build draws from the game's models, textures, camera, lights and drawing routines. BozoEngine supplies
+OpenGL rendering, native SDK services, input, cards, movie decoding and audio mixing.
+
+There is no GS memory/renderer, runtime GIF packet renderer, VIF/VU1 execution, IOP interpreter,
+SPU2/SIO2 device backend or emulation fallback. Some compiled routines still construct unused
+console-format buffers; the renderer does not consume them. Logical addresses, thread/timer contracts
+and completion acknowledgements remain as SDK compatibility services. Unsupported native calls/module
+code and retired device accesses fail explicitly.
+
+`TITLE.BIN` and `DUN.BIN` share a load slot with separate generated function tables selected by resident
+image identity. Five sound IRX libraries are relocated and compiled offline; textures are converted
+offline. FFmpeg is required for movies. Game-specific formats and hook choices stay in DC_Recomp;
+reusable engine services belong in BozoEngine.
+
+The dispatch audit remains conditional: valid arena/cursor preconditions bound known pack copies,
+but mutable metadata, shared cursor/header writes and nested loader effects remain under investigation.
+Controlled tests do not prove immutable DUN dispatch tables or complete live dispatch coverage.
+See the migration notes for the `LoadPackData`/`ReadInfo` findings.
 
 | Path | Contents |
 |---|---|
-| `BozoEngine/` | Native recompiler/runtime submodule (MIT) |
-| `recomp/` | Retained function maps and historical recompiler declarations |
-| `runtime/` | DC's runner, native frame/render/audio adapters, and Windows icon/version resources |
-| `scripts/` | Extract, generate, build, run, capture, engine tests and shared benchmark lock |
-| `tools/` | Offline ELF/overlay preparation, native sound generation, texture conversion and analysis helpers |
-| `docs/` | Migration/bring-up notes, historical screenshots and the team's DC branding |
-| `.github/workflows/native.yml` | Game-free checks for the pinned native engine and port tools |
+| `BozoEngine/` | Sole engine submodule: native recompiler/runtime |
+| `runtime/` | DC render, audio, frame, menu and cheat adapters |
+| `recomp/` | Function maps and guarded native adaptations |
+| `scripts/` | Extraction, generation, builds, runs, tests and bench lock |
+| `tools/` | Offline preparation/conversion and analysis helpers |
+| `tests/` | Game-free fixtures and owner-disc compiled-boundary regressions |
+| `docs/` | Follow-ups, historical notes, screenshots and branding |
 
-Everything derived from the game (disc folders/images, generated C++, build output and validation captures) stays
-local and git-ignored. No game executable, disc data or generated game code is distributed. The screenshots above
-are the repository's retained historical documentation.
+Game-derived code, disc files, generated assets, saves and validation captures stay local and ignored.
+No game executable, disc archives or generated game code are distributed.
+
+## Screenshots
+
+
+Historical bring-up captures from before the native renderer and BozoEngine migration. They show the earlier
+progress and are not evidence of the current build; current validation is in
+[the rendering follow-up](docs/NATIVE_RENDERING_FOLLOWUP.md).
+
+| | | |
+|---|---|---|
+| ![The intro's castle](docs/screenshots/intro-castle.png) | ![The Dark Genie](docs/screenshots/genie.png) | ![The title menu](docs/screenshots/title-logo.png) |
+| ![The desk narration](docs/screenshots/opening-desk.png) | ![In a dungeon](docs/screenshots/dungeon-scene.png) | ![Toan and the Fairy King](docs/screenshots/fairy-king.png) |
+| ![Toan's house](docs/screenshots/toan-house.png) | ![The forest](docs/screenshots/forest-scene.png) | ![New game: the name entry](docs/screenshots/register-name.png) |
+| ![The Dark Shrine](docs/screenshots/shrine-soldiers.png) | ![Colonel Flag](docs/screenshots/colonel-flag.png) | ![The urn](docs/screenshots/shrine-urn.png) |
+| ![Opening dialogue](docs/screenshots/opening-dialogue.png) | ![The Dark Genie rises](docs/screenshots/genie-rises.png) | ![Norune at night](docs/screenshots/norune-night.png) |
+| ![Toan at home](docs/screenshots/norune-house.png) | ![Norune's festival](docs/screenshots/norune-festival.png) | ![A cutscene dialogue](docs/screenshots/cutscene-balloon.png) |
 
 ## Credits
 

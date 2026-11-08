@@ -88,6 +88,38 @@ int main(int argc,char **argv)
             bozo::app::writePng(argv[1],flipped.data(),1920,height);
         }
     }
+    // The door-menu atlas has narrow opaque separators inside a wide strip.
+    // Pulling only its UV endpoints inward moves those interior separators:
+    // at 1080 high, logical x=374 is exactly a covered pixel centre.
+    word(ram,record,256u<<16);word(ram,record+4,(4u<<16)|16u);
+    const uint64_t wideTex=0x2000u|(uint64_t(8)<<26)|(uint64_t(4)<<30);
+    std::memcpy(ram+record+0x28,&wideTex,8);
+    for(unsigned y=0;y<16;++y)for(unsigned x=0;x<256;++x)
+        word(ram,pixels+(y*256+x)*4,(x==194 || x==195)?0x80808080:0x00800080);
+    rect(ram,source,28,0,210,16);rect(ram,dest,208,100,210,16);
+    for(int height:{448,720,1017,1080}){
+        renderer.beginFrame({1728,1936,640,224});
+        R5900Context c;c.r[5].uw[0]=record;c.r[6].uw[0]=dest;c.r[7].uw[0]=source;c.r[8].uw[0]=128;
+        call(*rt,registry,0x15c310,c);renderer.endFrame();
+        // Keep this analytic texel-boundary check on an integer viewport:
+        // a fractional letterbox adds a separate final resampling step. The
+        // adjacent-tile cases above continue to cover fractional letterboxing.
+        const float width=float(std::lround(height*4.0/3.0)),left=std::floor((1920-width)*.5f);
+        gl.Viewport(0,0,1920,height);if(!renderer.present(left,0,width,height))return 1;
+        std::vector<uint8_t> row(1920*4);const int y=int(height*54.0f/224.0f);
+        gl.ReadPixels(0,height-1-y,1920,1,bozo::render::gl::kRgba,bozo::render::gl::kUnsignedByte,row.data());
+        int bad=0;
+        for(int x=int(std::floor(left+373*width/640));x<left+377*width/640;++x){
+            const float logical=(x+.5f-left)*640/width;
+            const bool opaque=logical>=374 && logical<376;
+            const int expected=opaque?128:0;
+            if(std::abs(int(row[x*4])-expected)>3 || std::abs(int(row[x*4+1])-expected)>3){
+                if(bad<4)std::printf("  separator pixel %d logical %.8f RGB %u,%u,%u expected %d\n",x,logical,row[x*4],row[x*4+1],row[x*4+2],expected);
+                ++bad;
+            }
+        }
+        if(bad){++failures;std::printf("FAIL wide door-menu strip height %d: %d shifted separator samples\n",height,bad);}
+    }
     renderer.releaseGpu();SDL_GL_DestroyContext(context);SDL_DestroyWindow(window);SDL_Quit();
     std::printf("Native sprite seams: %d failures\n",failures);return failures?1:0;
 }

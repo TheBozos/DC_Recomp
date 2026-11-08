@@ -4715,6 +4715,13 @@ namespace dc::native
                 registry.registerFunction(0x00154770u, &loadTextureHook);
             if ((g_vsyncLoad = runtime.functions.generated(0x00154320u)))
                 registry.registerFunction(0x00154320u, &vsyncLoadHook);
+            // sceGsSyncVCallback (0x113DE8) stays the game's own libgraph code: AddIntcHandler(2, VSyncCallBack) and
+            // EnableIntc(2), so VSyncCallBack runs at every vblank start of the kernel's field clock. The engine's
+            // native sceGsSyncVCallback runs the callback only where a game frame ends, and DC's loading waits for it
+            // without ending one (wait_now_loading_vsync spins on the flag VSyncCallBack_Load sets): the boot stopped
+            // there at frame 76.
+            if (const RecompiledFunction syncVCallback = runtime.functions.generated(0x00113DE8u))
+                registry.registerFunction(0x00113DE8u, syncVCallback);
             if ((g_drawFire = runtime.functions.generated(0x00161AC0u)))
                 registry.registerFunction(0x00161AC0u, &drawFireHook);
             registry.registerFunction(0x0015BC20u, &setAlphaFlagHook);

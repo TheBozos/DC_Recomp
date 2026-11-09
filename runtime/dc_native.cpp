@@ -3448,6 +3448,8 @@ namespace dc::native
             if (sampleMade(static_cast<uint32_t>(srcTex0 & 0x3FFFu), made) && dstBase != g_frameBase && dstBase != g_backBase)
             {
                 made.target = targetFor(dstBase);
+                // The place now holds a picture with the source's rows (MGMoveFrameBuffImage's 448 does not outlive it).
+                g_targetRows[made.target] = static_cast<float>(made.frameHeight);
                 made.blend = bozo::render::Material::Blend::Opaque;
                 made.depthTest = false;
                 made.depthWrite = false;
@@ -3913,6 +3915,9 @@ namespace dc::native
             // frame each frame before copying the frame into it again, a feedback loop whose blur is that of a 640 x
             // 224 picture filtered each frame (at the window's resolution it blurred several times less).
             bozo::render::Renderer::instance().setTargetSize(material.target, 640, 224);
+            // A 640 x 224 picture from now on: a place the menu's MGMoveFrameBuffImage filled with both fields (448 rows)
+            // and the town copies its frame into again each frame (the water's "work") is sampled as 224 rows again.
+            g_targetRows[material.target] = 224.0f;
             material.blend = bozo::render::Material::Blend::Opaque;
             material.depthTest = false;
             material.depthWrite = false;

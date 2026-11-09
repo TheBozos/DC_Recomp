@@ -22,12 +22,36 @@
 #include "bozo/app/audio_device.h"
 #include "bozo/app/device_pad.h"
 #include "bozo/app/window.h"
+#include <SDL3/SDL.h>
 #endif
 namespace dc
 {
     void installAudio(bozo::libs::Libraries &);
     void install(Runtime &, bozo::port::Registry &);
 } // namespace dc
+#ifdef DC_WITH_WINDOW
+namespace
+{
+    // The fast-forward hold: the ` key (by position, below Esc), or a gamepad's touchpad / Share (MISC1) button. None
+    // of them is in the default PS2 bindings. SDL releases the keys when the window loses the keyboard.
+    bool fastForwardHeld()
+    {
+        bool held = false;
+        if (const bool *keys = SDL_GetKeyboardState(nullptr))
+            held = keys[SDL_SCANCODE_GRAVE];
+        int count = 0;
+        if (SDL_JoystickID *ids = SDL_GetGamepads(&count))
+        {
+            for (int i = 0; i < count && !held; ++i)
+                if (SDL_Gamepad *pad = SDL_GetGamepadFromID(ids[i]))
+                    held = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_TOUCHPAD) ||
+                           SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_MISC1);
+            SDL_free(ids);
+        }
+        return held;
+    }
+}
+#endif
 int main(int argc, char **argv)
 {
     bozo::host::FreeOptions options;
@@ -132,9 +156,17 @@ int main(int argc, char **argv)
     module("dun", dun_function_table, dun_function_count, dun_resume_table, dun_resume_count);
     bozo::app::FramePacer pacer;
     pacer.setPaced(window);
+    const uint32_t normalCap = pacer.cap(); // 60, or PS2X_FRAME_CAP (0: unlimited, left alone)
     host.onFrame = [&](uint64_t f, const R5900Context *ctx)
     {
         if (dc::cheats::takeIngameQuitRequest()) host.requestStop();
+#ifdef DC_WITH_WINDOW
+        if (window)
+            dc::cheats::setFastForwardHeld(fastForwardHeld());
+#endif
+        // Fast-forward raises the cap: the game's logic and clock advance per frame, so it simply runs more of them.
+        if (normalCap)
+            pacer.setCap(normalCap * static_cast<uint32_t>(dc::cheats::gameSpeedPercent()) / 100u);
         pacer.frameEnd();
         if (f % 60 == 0)
             std::printf("[dc] frame=%llu pc=%x cycles=%llu\n", (unsigned long long)f, ctx->pc,
@@ -160,7 +192,9 @@ int main(int argc, char **argv)
         if (recording.isOpen())
             recording.write(pcm, count);
 #ifdef DC_WITH_WINDOW
-        if (window)
+        // Muted while fast-forwarding: sound made faster than real time would overflow the device's queue and be
+        // dropped in bursts. A WAV recording keeps every sample.
+        if (window && dc::cheats::gameSpeedPercent() == 100)
             audio.push(pcm, count);
 #endif
     };

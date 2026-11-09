@@ -32,6 +32,10 @@ namespace dc::cheats
             ImGui::TextWrapped("Applies when gameplay resumes. The edited ATK is included when you save your game.");
             ImGui::Separator();
             int abs=absMultiplier();if(ImGui::SliderInt("Weapon ABS multiplier",&abs,1,16,"%dx"))setAbsMultiplier(abs);
+            int damage=damageMultiplier();if(ImGui::SliderInt("Damage multiplier",&damage,1,16,"%dx"))setDamageMultiplier(damage);
+            toggle("One-hit kills", Cheat::OneHitKills, "Any hit that deals damage defeats the monster; immunities still apply.");
+            toggle("No damage taken", Cheat::NoDamageTaken, "Monster attacks never land: no damage, knock-down or theft.");
+            toggle("Key finder", Cheat::KeyFinder, "The monster carrying the floor's key blinks gold on the map.");
             int speed=movementPercent();if(ImGui::SliderInt("Movement speed",&speed,50,200,"%d%%"))setMovementPercent(speed);
             toggle("Freeze time of day",Cheat::FreezeTimeOfDay,"Holds sky and lighting; game timers continue.");
             static int gold=1000;
@@ -50,7 +54,34 @@ namespace dc::cheats
             ImGui::BeginDisabled(inventorySize()<0);if(ImGui::Button("Apply inventory size"))requestInventorySize(capacity);ImGui::EndDisabled();
             ImGui::TextWrapped("Inventory edits apply when gameplay resumes and are included in game saves. Existing items are never discarded by resizing.");
             ImGui::Separator();
-            ImGui::TextWrapped("Cheats reset each launch: toggles off, ABS 1x, movement 100%.");
+            ImGui::BeginDisabled(current < 0);
+            if (ImGui::Button("Level up equipped weapon")) requestWeaponLevelUp();
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("Fills its ABS; choose Level up in the weapon menu. Not for default weapons.");
+            toggle("Reveal floor map", Cheat::RevealFloorMap, "Shows the whole dungeon floor on the map, chests and Atla included.");
+            toggle("Fish always bite", Cheat::FishingHelper, "Fish near the bait take it and stay hooked until you reel in.");
+            static int spawn = 0, spawnCount = 1;
+            const int items = spawnItemCount();
+            if (items)
+            {
+                spawn = std::clamp(spawn, 0, items - 1);
+                if (ImGui::BeginCombo("Spawn item", spawnItem(spawn).name))
+                {
+                    for (int i = 0; i < items; ++i)
+                        if (ImGui::Selectable(spawnItem(i).name, i == spawn)) spawn = i;
+                    ImGui::EndCombo();
+                }
+                ImGui::SliderInt("Spawn count", &spawnCount, 1, 10);
+                if (ImGui::Button("Give item")) requestSpawn(spawnItem(spawn).id, spawnCount);
+                ImGui::TextDisabled("Given when gameplay resumes, while there is room. Story and key items are excluded.");
+            }
+            else ImGui::TextDisabled("Item names appear once the game has loaded its messages.");
+            ImGui::Separator();
+            int fast = fastForwardPercent();
+            if (ImGui::SliderInt("Fast-forward speed", &fast, 150, 400, "%d%%")) setFastForwardPercent(fast / 50 * 50);
+            toggle("Fast-forward always on", Cheat::FastForwardLock, "Or hold ` (below Esc) or the gamepad's touchpad. Sound is muted.");
+            ImGui::Separator();
+            ImGui::TextWrapped("Cheats reset each launch: toggles off, ABS 1x, movement 100%, fast-forward 300%.");
         });
     }
 }

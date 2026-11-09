@@ -1754,3 +1754,23 @@ The rest follow the same reasoning:
 ends, identical cards and zero register/unknown accesses and VU0 calls. A loading transition finishes slightly earlier
 (the Matataki route's frame 6,000 arrives where the previous build is still fading); later captures show the same views
 within about 3 mean levels.
+
+### Per-frame display-buffer swap (2026-11-09)
+
+`MGEndFrame` no longer calls `sceGsSetHalfOffset` (`0x12d5e8`), `FlushCache` (`0x12d5f4`) or `sceGsSwapDBuff`
+(`0x12d608`) every frame. `sceGsSetHalfOffset` only rewrites the draw record's XYOFFSET image, which the native
+renderer never reads; `sceGsSwapDBuff` writes nothing and only hands the records to `sceGsPutDispEnv` /
+`sceGsPutDrawEnv`, both no-ops in BozoEngine. The per-frame `sceDmaGetChan(1)` (`0x12d64c`) and its store
+(`0x12d654`) go too: `MGInit` already stored that VIF1 handle, and without the call the store would have written the
+frame counter left in `v0`. The buffer index toggle stays.
+
+- The `frame_submit` span now starts at `0x12d5c0` (24 cases): the reference sets the half offset, swaps, waits,
+  flushes twice, looks the channel up and sends; the adapted span does none of these, and all guest RAM matches, the
+  channel handle included.
+- 126/126 suites; seven routes with the same ends, identical cards, and zero transfers or syncs. Matataki frames differ
+  only by cloud drift after the earlier load (up to 3.8 mean levels).
+- A temporary per-name library-call count on the 9,000-frame Matataki route (not committed) shows
+  `sceGsPutDispEnv` / `sceGsPutDrawEnv` going from 7,869 / 7,868 calls to none, and `sceDmaGetChan` from 7,874 to 6.
+  The PS2 library calls left every frame are the controller (`scePad*`) and the sound driver's SIF commands. The
+  GS-library calls left run at startup or mode changes: `sceGsSyncV` (86, in `CGamePad::Init`), `sceGsSyncPath` (9)
+  and the `sceGsSetDef*` record setup.

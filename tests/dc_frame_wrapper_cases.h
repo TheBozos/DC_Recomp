@@ -51,7 +51,7 @@ namespace
         NativePort port{libs, this};
         Observer observer{libs};
         RecompiledFunction end = nullptr, terminate = nullptr, channel = nullptr;
-        int packetCalls = 0, syncCalls = 0, flushCalls = 0, sendCalls = 0, dmaSyncCalls = 0;
+        int packetCalls = 0, syncCalls = 0, flushCalls = 0, sendCalls = 0, dmaSyncCalls = 0, gsCalls = 0, channelCalls = 0;
         uint32_t sentChannel = 0, sentSource = 0;
         Machine()
         {
@@ -60,7 +60,7 @@ namespace
             end = rt.functions.generated(0x120de0); terminate = rt.functions.generated(0x120c28);
             channel = rt.functions.generated(0x10c3a8);
             if (!end || !terminate || !channel) throw std::runtime_error("missing original SDK helper");
-            for (uint32_t pc : {0x120de0u,0x120c28u,0x112f98u,0x104698u,0x113f40u,0x10c3a8u,0x1145a0u,0x10c6f8u,0x10cc58u})
+            for (uint32_t pc : {0x120de0u,0x120c28u,0x112f98u,0x104698u,0x113f40u,0x10c3a8u,0x1145a0u,0x10c6f8u,0x10cc58u,0x113e48u,0x112ea0u})
                 rt.functions.setOverride(pc, sdk);
             libs.attach(dispatcher); rt.port = &port; dispatcher.kernel().setObserver(&observer);
             auto &old = libs.io.channels[1];
@@ -82,7 +82,8 @@ namespace
                 ++m.syncCalls;
                 m.libs.find("sceGsSyncPath")->handler(m.libs, guest);
             }
-            else if (pc == 0x10c3a8) m.channel(ram, ctx, rt);
+            else if (pc == 0x10c3a8) { ++m.channelCalls; m.channel(ram, ctx, rt); }
+            else if (pc == 0x113e48 || pc == 0x112ea0) ++m.gsCalls; // sceGsSetHalfOffset / sceGsSwapDBuff
             else if (pc == 0x10cc58)
             {
                 ++m.dmaSyncCalls;
@@ -158,7 +159,8 @@ int main()
                 {
                     auto *r = m->dispatcher.runtime().memory.ram();
                     r[gp - 0x73a8] = first ? 0 : 1;
-                    word(r, gp - 0x7434, 0x1000a000); // the GIF channel handle MGInit stored
+                    word(r, gp - 0x7434, 0x1000a000); // the GIF and VIF1 channel handles MGInit stored
+                    word(r, gp - 0x7438, 0x10009000);
                 }
                 reference.run(DC_FRAME_REFERENCE[0].function);
                 auto *ram = native.dispatcher.runtime().memory.ram();
@@ -167,9 +169,11 @@ int main()
                 for (uint32_t address : {gp - 0x73ac, gp - 0x7438, gp - 0x7440}) word(expected.data(), address, word(ref, address));
                 expected[gp - 0x73a8] = ref[gp - 0x73a8];
                 native.run(DC_FRAME_NATIVE[0].function);
-                check(reference.dmaSyncCalls == 1 && reference.flushCalls == 1 && reference.sendCalls == 1,
-                      "published reference waits, flushes and sends once");
-                check(native.dmaSyncCalls == 0 && native.flushCalls == 0 && native.sendCalls == 0 &&
+                check(reference.gsCalls == 2 && reference.dmaSyncCalls == 1 && reference.flushCalls == 2 &&
+                      reference.channelCalls == 1 && reference.sendCalls == 1,
+                      "published reference sets the half offset, swaps, waits, flushes twice, looks the channel up and sends");
+                check(word(ref, gp - 0x7438) == 0x10009000, "the reference's lookup returns the handle MGInit stored");
+                check(native.gsCalls == 0 && native.channelCalls == 0 && native.dmaSyncCalls == 0 && native.flushCalls == 0 && native.sendCalls == 0 &&
                       native.libs.io.nativeSubmissions[1] == 0 && native.libs.io.nativeSynchronizations == 0,
                       "adapted tail makes no transfer, flush or wait");
                 check(reference.sentChannel == 0x10009000 && reference.sentSource == output,

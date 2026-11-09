@@ -1788,3 +1788,22 @@ on. Restoring only `CGamePad::Init`'s waits put frame 0 back, but the attract de
 previous build is inside `main`'s wait-for-odd-field loop (`0x141140`), which really does spin during boot until the
 loading screen's vsync callback ends a frame. Removing these calls would change behaviour for a few dozen free calls at
 startup, so they stay; the one-time `sceGsResetGraph` (field rate) and `sceGsSetDef*` record setup stay too.
+
+## Model extents: who writes the VU data buffers (2026-11-09)
+
+The model, remake and shadow builders still return the old VIF packet size (`modelAllocationQwords`), and the game
+reserves that much arena for a buffer nothing fills. Before replacing it with a native size, `DC_PROBE_EXTENTS=1`
+checks whether anything else uses those buffers. Each buffer is filled with a pattern when built (native builders write
+nothing there), and every 60 frames the buffers built in the last 600 frames are compared. A change is classified as
+**live** when the building visual still has its vtable, still points at this buffer and still has this size.
+
+- The six gameplay routes (Matataki travel, Cheats + Quit, water, dungeon menu, save, reload) report 13–82 changed
+  buffers each, and **none while their visual owned them**: every change is reuse after the scene or asset changed.
+- The attract-demo route reports 352 changed buffers, 8 classified live. Their new bytes are float vectors ending in
+  1.0 and colour bytes: model data loaded at the demo's scene switches (frames 4,980, 6,120, 6,480, 7,020, 7,440),
+  over buffers whose old visual records simply were not overwritten yet. No VIF command words appear.
+
+No game code was found writing into a built VU data buffer that is still in use. `SetVuData`, the only original
+routine that wrote into one, is called only from the replaced `CreateVUdataFromMDT`. Cloth builds return a size before
+their buffer exists, so the probe does not cover cloth. Next: replace the legacy formula with a native extent, keeping
+each build's data address distinct (it keys the retained MDT copy), and verify routes, saves and captures.

@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Cheats: weapon level-up, reveal floor map, fish always bite, item spawner, fast-forward (hold ` or the touchpad, or lock it on), damage multiplier, one-hit kills, no damage taken and a key finder on the dungeon map.
+
 ## [0.2.0] - 2026-11-09
 
 ### Changed

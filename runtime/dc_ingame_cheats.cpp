@@ -27,14 +27,30 @@ enum class Page { Root, Game, Cheats, Quit };
 struct Menu {
     bool active=false,queued=false;
     Page page=Page::Root;
-    int root=0,row=0,attack=0,quitChoice=0,gold=0,slot=0,quantity=1,capacity=50;
+    int root=0,row=0,attack=0,quitChoice=0,gold=0,slot=0,quantity=1,capacity=50,spawn=0,spawnCount=1;
     uint32_t held=0,ticks=0;
     std::shared_ptr<const bozo::render::Texture> font;
 } menu;
 RecompiledFunction originalInit=nullptr,originalExit=nullptr,originalKey=nullptr,originalDraw=nullptr;
 RecompiledFunction originalHelp=nullptr,originalMessage=nullptr;
 constexpr uint32_t kHelp=0x217A60,kMessage=0x153310;
-constexpr int rowCount=16;
+// Rows 0..15 as before; then the level-up, map, fishing, spawner and fast-forward rows.
+enum Row { LevelUp=16, RevealMap, FishBite, SpawnItem, SpawnCount, GiveItem, FastSpeed, FastLock, DamageRate, OneHit,
+           NoDamage, KeyFinder, RowEnd };
+constexpr int rowCount=RowEnd;
+// The toggle rows and the cheat each switches.
+bool toggleRow(int row,Cheat &cheat)
+{
+    if(row<4){cheat=static_cast<Cheat>(row);return true;}
+    if(row==13){cheat=Cheat::FreezeTimeOfDay;return true;}
+    if(row==RevealMap){cheat=Cheat::RevealFloorMap;return true;}
+    if(row==FishBite){cheat=Cheat::FishingHelper;return true;}
+    if(row==FastLock){cheat=Cheat::FastForwardLock;return true;}
+    if(row==OneHit){cheat=Cheat::OneHitKills;return true;}
+    if(row==NoDamage){cheat=Cheat::NoDamageTaken;return true;}
+    if(row==KeyFinder){cheat=Cheat::KeyFinder;return true;}
+    return false;
+}
 void (*prepareScene)()=nullptr;
 uint64_t fontVersion=0;
 std::atomic<bool> quitRequested{false};
@@ -117,33 +133,49 @@ void drawPage(int alpha)
         const char *labels[]={"Infinite health","Weapon durability","Infinite thirst","Combo stamina",
             "Equipped weapon ATK","Apply weapon ATK","Weapon ABS multiplier","Gilda","Apply Gilda",
             "Active consumable slot","Consumable quantity","Apply quantity","Movement speed","Freeze time of day",
-            "Inventory size","Apply inventory size"};
+            "Inventory size","Apply inventory size","Level up equipped weapon","Reveal floor map","Fish always bite",
+            "Spawn item","Spawn count","Give item","Fast-forward speed","Fast-forward always on","Damage multiplier",
+            "One-hit kills","No damage taken","Key finder"};
         const int first=std::max(0,menu.row-5);
         for(int i=first;i<std::min(first+6,rowCount);++i){
             const float y=126.f+(i-first)*34;const auto c=i==menu.row?gold:white;
             text(v,labels[i],128,y,1.25f,c);if(i==menu.row)text(v,">",108,y,1.25f,c);
             std::string value;
-            if(i<4)value=enabled(static_cast<Cheat>(i))?"ON":"OFF";
+            if(Cheat cheat;toggleRow(i,cheat))value=enabled(cheat)?"ON":"OFF";
             if(i==4)value=equippedWeaponAttack()<0?"---":std::to_string(menu.attack);
             if(i==6)value=std::to_string(absMultiplier())+"x";
             if(i==7)value=gilda()<0?"---":std::to_string(menu.gold);
             if(i==9)value=std::to_string(menu.slot+1);
             if(i==10)value=activeConsumable(menu.slot).id<0?"---":std::to_string(menu.quantity);
             if(i==12)value=std::to_string(movementPercent())+"%";
-            if(i==13)value=enabled(Cheat::FreezeTimeOfDay)?"ON":"OFF";
             if(i==14)value=inventorySize()<0?"---":std::to_string(menu.capacity);
+            if(i==SpawnItem)value=spawnItemCount()?spawnItem(menu.spawn).name:"---";
+            if(i==SpawnCount)value=std::to_string(menu.spawnCount);
+            if(i==FastSpeed)value=std::to_string(fastForwardPercent())+"%";
+            if(i==DamageRate)value=std::to_string(damageMultiplier())+"x";
             text(v,value,526-float(value.size())*10,y,1.25f,c);
         }
         char count[32];std::snprintf(count,sizeof(count),"%d/%d",menu.row+1,rowCount);text(v,count,470,88,1,dim);
         const char *help="L/R: 1  L1/R1: 10  L2/R2: 100  O: Back";
-        if(menu.row<4 || menu.row==13)help="X: Toggle   Left/Right: Set   O: Back";
+        if(Cheat cheat;toggleRow(menu.row,cheat))
+            help=menu.row==RevealMap?"X: Toggle   Whole floor shown on the map":menu.row==FishBite?"X: Toggle   Fish bite and stay hooked":
+                 menu.row==FastLock?"X: Toggle   Sound is muted while fast":
+                 menu.row==OneHit?"X: Toggle   Any hit that deals damage kills":
+                 menu.row==NoDamage?"X: Toggle   Monster attacks never land":
+                 menu.row==KeyFinder?"X: Toggle   Key holder blinks gold on the map":"X: Toggle   Left/Right: Set   O: Back";
         else if(menu.row==6)help="L/R: 1x   Positive combat ABS   O: Back";
         else if(menu.row==7)help="L/R: 1  L1/R1: 100  L2/R2: 1000";
         else if(menu.row==9)help="L/R: Choose one of the three HUD slots";
         else if(menu.row==12)help="L/R: 5%   Collision stays enabled";
         else if(menu.row==14)help="1-100 slots; occupied items are protected";
         else if(menu.row==5 || menu.row==8 || menu.row==11 || menu.row==15)help="X: Apply when play resumes   O: Back";
-        if((menu.row==4 || menu.row==5) && equippedWeaponAttack()<0)help="No weapon equipped   O: Back";
+        else if(menu.row==LevelUp)help="X: Fill ABS; level up in the weapon menu";
+        else if(menu.row==SpawnItem)help=spawnItemCount()?"L/R: 1  L1/R1: 10   Story items excluded":"Item names load with the game";
+        else if(menu.row==SpawnCount)help="L/R: 1   Each one takes a bag slot";
+        else if(menu.row==GiveItem)help="X: Give when play resumes   O: Back";
+        else if(menu.row==FastSpeed)help="L/R: 50%   Hold ` or the touchpad";
+        else if(menu.row==DamageRate)help="L/R: 1x   Damage you deal to monsters";
+        if((menu.row==4 || menu.row==5 || menu.row==LevelUp) && equippedWeaponAttack()<0)help="No weapon equipped   O: Back";
         if((menu.row==10 || menu.row==11) && activeConsumable(menu.slot).id<0)help="Equip a consumable in this HUD slot first";
         if(menu.queued)help="Edit queued; close Options to apply";
         text(v,help,112,354,1,white);
@@ -196,8 +228,7 @@ void key(uint8_t *r,R5900Context *c,Runtime *rt)
         int delta=0;if(pressed&kLeft)--delta;if(pressed&kRight)++delta;
         if(pressed&kL1)delta-=10;if(pressed&kR1)delta+=10;if(pressed&kL2)delta-=100;if(pressed&kR2)delta+=100;
         if(delta)menu.queued=false;
-        if(menu.row<4 || menu.row==13){
-            const auto cheat=menu.row==13?Cheat::FreezeTimeOfDay:static_cast<Cheat>(menu.row);
+        if(Cheat cheat;toggleRow(menu.row,cheat)){
             if(pressed&kCross)setEnabled(cheat,!enabled(cheat));else if(pressed&kLeft)setEnabled(cheat,false);else if(pressed&kRight)setEnabled(cheat,true);
         }else if(menu.row==4 && equippedWeaponAttack()>=0)menu.attack=std::clamp(menu.attack+delta,0,999);
         else if(menu.row==5 && equippedWeaponAttack()>=0 && (pressed&kCross)){requestWeaponAttack(menu.attack);menu.queued=true;}
@@ -212,6 +243,14 @@ void key(uint8_t *r,R5900Context *c,Runtime *rt)
         else if(menu.row==12 && delta)setMovementPercent(movementPercent()+(delta>0?5:-5));
         else if(menu.row==14 && inventorySize()>=0)menu.capacity=std::clamp(menu.capacity+delta,std::min(100,minimumInventorySize()),100);
         else if(menu.row==15 && inventorySize()>=0 && (pressed&kCross)){requestInventorySize(menu.capacity);menu.queued=true;}
+        else if(menu.row==LevelUp && equippedWeaponAttack()>=0 && (pressed&kCross)){requestWeaponLevelUp();menu.queued=true;}
+        else if(menu.row==SpawnItem && delta && spawnItemCount()){
+            const int n=spawnItemCount(),step=std::clamp(delta,-10,10);menu.spawn=((menu.spawn+step)%n+n)%n;
+        }
+        else if(menu.row==SpawnCount && delta)menu.spawnCount=std::clamp(menu.spawnCount+(delta>0?1:-1),1,10);
+        else if(menu.row==GiveItem && spawnItemCount() && (pressed&kCross)){requestSpawn(spawnItem(menu.spawn).id,menu.spawnCount);menu.queued=true;}
+        else if(menu.row==FastSpeed && delta)setFastForwardPercent(fastForwardPercent()+(delta>0?50:-50));
+        else if(menu.row==DamageRate && delta)setDamageMultiplier(damageMultiplier()+delta);
 
     }
     done(c);

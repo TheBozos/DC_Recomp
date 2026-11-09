@@ -184,6 +184,11 @@ namespace dc::native
             return value;
         }
 
+        void wr64(uint8_t *rdram, uint32_t address, uint64_t value)
+        {
+            std::memcpy(rdram + (address & 0x1FFFFFFu), &value, sizeof(value));
+        }
+
         bozo::render::Screen screen()
         {
             // DC's drawing environment: 640 x 224 fields, XYOFFSET (1728, 1936) (0x6C00, 0x7900 in 12.4).
@@ -3865,21 +3870,27 @@ namespace dc::native
         }
 
         // MGGetFBuffTex / MGGetFBuffBackTex (0x12F130 / 0x12F1A0, a0 the sceGsTex0 they fill): where the game's frame
-        // and the frame before are, as the game itself works them out.
-        RecompiledFunction g_getFrameTex = nullptr, g_getBackTex = nullptr;
-        void getFrameTexHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        // and the frame before are. The originals read the FRAME images sceGsSetDefDBuff left in MGInit's record (no longer
+        // made); the two frames are fixed: 640 wide, PSMCT32, at FBP 0x46 and 0, the half DBuffID (gp-0x7440) names being
+        // drawn. Only their identity matters (the game's own texture calls compare these TEX0 words): the same words.
+        uint64_t frameTex0(uint32_t fbp) { return 0x228000000ull | (10ull << 14) | (static_cast<uint64_t>(fbp & 0x1FFu) << 5); }
+        constexpr uint32_t kFrameFbp[2] = {0x46u, 0x00u};
+        uint32_t dbuffId(const uint8_t *rdram, R5900Context *ctx) { return rd32(rdram, getRegU32(ctx, 28) - 0x7440u); }
+        void getFrameTexHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
-            const uint32_t out = getRegU32(ctx, 4);
-            g_getFrameTex(rdram, ctx, runtime);
-            g_frameBase = static_cast<uint32_t>(rd64(rdram, out) & 0x3FFFu);
+            const uint64_t tex0 = frameTex0(kFrameFbp[dbuffId(rdram, ctx) == 0u ? 0 : 1]);
+            wr64(rdram, getRegU32(ctx, 4), tex0);
+            g_frameBase = static_cast<uint32_t>(tex0 & 0x3FFFu);
             g_backAsked = false;
+            ctx->pc = getRegU32(ctx, 31);
         }
-        void getBackTexHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        void getBackTexHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
-            const uint32_t out = getRegU32(ctx, 4);
-            g_getBackTex(rdram, ctx, runtime);
-            g_backBase = static_cast<uint32_t>(rd64(rdram, out) & 0x3FFFu);
+            const uint64_t tex0 = frameTex0(kFrameFbp[dbuffId(rdram, ctx) == 0u ? 1 : 0]);
+            wr64(rdram, getRegU32(ctx, 4), tex0);
+            g_backBase = static_cast<uint32_t>(tex0 & 0x3FFFu);
             g_backAsked = true;
+            ctx->pc = getRegU32(ctx, 31);
         }
         // MGStretchMoveImage (0x12F430: a0 / a1 the source's TEX0 and rectangle, a2 / a3 the destination's; rectangles in
         // 1/16 pixels): the game stretching its frame (or the frame before, or a work texture) into a work texture. Here
@@ -4746,11 +4757,8 @@ namespace dc::native
                 registry.registerFunction(0x00133A60u, &cleanupTextureListHook);
             registry.registerFunction(0x00151AD0u, &balloonHook);
             registry.registerFunction(0x00140660u, &moveImageTestHook);
-            if ((g_getFrameTex = runtime.functions.generated(0x0012F130u)) && (g_getBackTex = runtime.functions.generated(0x0012F1A0u)))
-            {
-                registry.registerFunction(0x0012F130u, &getFrameTexHook);
-                registry.registerFunction(0x0012F1A0u, &getBackTexHook);
-            }
+            registry.registerFunction(0x0012F130u, &getFrameTexHook);
+            registry.registerFunction(0x0012F1A0u, &getBackTexHook);
             if ((std::getenv("DC_PROBE_SKY") || std::getenv("DC_SKY_TIME")) &&
                 (g_drawSky = runtime.functions.generated(0x00187F90u)))
                 registry.registerFunction(0x00187F90u, &skyProbeHook);

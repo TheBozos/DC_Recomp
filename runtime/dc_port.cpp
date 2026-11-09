@@ -19,6 +19,19 @@ namespace dc
     {
         if (dc::sound::nativeSite(ram, ctx, rt, pc))
             return true;
+        // MGInit's material defaults, once read from the draw record sceGsSetDefDBuff made (no longer made): draw 0's
+        // TEST (Z test on, GEQUAL; MGInit then sets the alpha test itself) and ZBUF (Z written). setGsReg3Hook reads only
+        // their alpha-test and Z-mask fields.
+        if (pc == 0x0012C510u) // ld a2,0(a2)
+        {
+            ctx->r[6].ud[0] = 0x50000u;
+            return true;
+        }
+        if (pc == 0x0012C57Cu) // ld a0,0(a0)
+        {
+            ctx->r[4].ud[0] = 0x100008Cu;
+            return true;
+        }
         if (pc == 0x0013DFA8u || pc == 0x0013DFF0u || pc == 0x0013E314u || pc == 0x0013E420u)
         {
             dc::native::debugFontBoundary(ram, ctx, rt, pc);

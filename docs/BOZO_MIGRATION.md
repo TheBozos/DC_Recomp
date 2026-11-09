@@ -1981,3 +1981,27 @@ ordered effects without `sceGsSetDefDBuff`'s event, record write or marker step.
   and zero register/unknown accesses, VU0 calls, transfers and syncs; the attract-demo route is frame-exact; captures
   match within 1.38 mean levels outside the known fade frames. The GS / DMA library calls left across the seven routes
   are exactly the kept ones: `sceGsSyncV` 535, `sceGsSetDefDrawEnv` 14, `sceGsResetGraph` 7.
+
+## MGInit's draw environment: no GS register images read
+
+`MGInit`'s `sceGsSetDefDBuff` built a double-buffer record of GS register images (display, draw and clear environments)
+at `0x1C752D0`. With its display halves and swap gone, its draw halves were the last GS register images DC read, at two
+places:
+
+- `MGGetFBuffTex` / `MGGetFBuffBackTex` built the frame's and the previous frame's `TEX0` from draw 0 / draw 1 `FRAME`
+  (picked by `DBuffID`, `gp-0x7440`); the native hooks took the frame bases from them. The two frames are fixed: 640
+  wide, PSMCT32, `FBP` `0x46` and 0 (the values the record held, read at run time). The hooks now build the same `TEX0`
+  words themselves (`0x228028000 | FBP << 5`); the game's texture calls compare these words, so only their identity
+  matters.
+- `MGInit` loaded draw 0's `TEST` (`0x50000`: Z test on, GEQUAL) and `ZBUF` (`0x100008C`) into `mgTest` / `mgZbuf`,
+  which `CFrameVu1::DrawVu1` hands to `setGsReg3Hook` (it reads only the alpha-test fields and the Z mask). The two
+  loads are native sites giving those values; `MGInit`'s own alpha-test edit of `mgTest` runs as before.
+
+`MGInit`'s `sceGsSetDefDBuff` call is retired, so no `sceGsSetDefDrawEnv` runs. `MGInit` still writes the record's
+clear-colour bytes, which `MGBeginFrame` reads for the native screen clear. The GS library calls left are
+`sceGsSyncV` (the boot and loading timeline) and `sceGsResetGraph` (it sets the kernel's field rate, NTSC or PAL).
+
+- 128/128 suites; CI's build 59/59. All seven routes end as before with identical cards and zero register/unknown
+  accesses, VU0 calls, transfers and syncs; the attract-demo route is frame-exact; captures match within 2.35 mean levels
+  outside the known fade frames (Matataki 7400 has measured up to 3.8 between earlier builds). GS library calls left
+  across the routes: `sceGsSyncV` 535, `sceGsResetGraph` 7.

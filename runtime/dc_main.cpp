@@ -221,6 +221,8 @@ int main(int argc, char **argv)
         std::printf("[dc] compatibility: %llu register accesses, %llu unknown; %llu native VU0 calls\n",
                     (unsigned long long)stats.ioAccesses, (unsigned long long)stats.ioUnknown,
                     (unsigned long long)stats.vu0Calls);
+        std::printf("[dc] calls: %llu kernel, %llu library, %llu port overrides\n", (unsigned long long)stats.kernelCalls,
+                    (unsigned long long)stats.libraryCalls, (unsigned long long)stats.overrideCalls);
         const auto &io = host.libraries().io;
         for (const auto &[site, counts] : stats.ioSites)
             std::printf("[dc:io] pc=%08x address=%08x reads=%llu writes=%llu %s\n", site.first, site.second,

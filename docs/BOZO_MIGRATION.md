@@ -1774,3 +1774,17 @@ frame counter left in `v0`. The buffer index toggle stays.
   The PS2 library calls left every frame are the controller (`scePad*`) and the sound driver's SIF commands. The
   GS-library calls left run at startup or mode changes: `sceGsSyncV` (86, in `CGamePad::Init`), `sceGsSyncPath` (9)
   and the `sceGsSetDef*` record setup.
+
+### Startup GS calls: sceGsSyncPath retired, sceGsSyncV kept (2026-11-09)
+
+`main`'s mode change no longer calls `sceGsSyncPath` (`0x141334`); it always answers "idle", and `v0` is reloaded
+right after. With it alone, the EE clock of the companion route (the title attract demo) matches the previous build at
+every logged frame and its captures are identical. 126/126 suites; all seven routes end as before with identical cards.
+
+The 22 `sceGsSyncV` calls (`CGamePad::Init`, `main`, `SndBgmFadeOutStop`, `EditLoop`) are **kept**. BozoEngine's
+handler neither waits nor ends a frame, but these calls are still part of the boot timeline. Replacing them all with
+`v0 = 1` reached frame 0 about 36 fields later in EE time, and shifted the attract demo by one field from frame 120
+on. Restoring only `CGamePad::Init`'s waits put frame 0 back, but the attract demo still diverged: at frame 60 the
+previous build is inside `main`'s wait-for-odd-field loop (`0x141140`), which really does spin during boot until the
+loading screen's vsync callback ends a frame. Removing these calls would change behaviour for a few dozen free calls at
+startup, so they stay; the one-time `sceGsResetGraph` (field rate) and `sceGsSetDef*` record setup stay too.

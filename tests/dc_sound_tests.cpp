@@ -81,5 +81,25 @@ int main(){
     check(!(libs.io.stat & (1u<<5)),"no DMAC channel 5 interrupt is raised");
     check(site(*rt,dc::sound::kDmaStatSite,{static_cast<uint32_t>(id)})==-1,"sceSifDmaStat: finished");
 
+    // libsdr: each site first does its delay slot's instruction.
+    R5900Context c;c.r[17].ud[0]=0x1234;
+    check(dc::sound::nativeSite(r,&c,rt.get(),dc::sound::kSdInitRpcSite) && c.r[17].ud[0]==0x2a0000u && c.r[2].ud[0]==0,
+          "sceSdRemoteInit: lui s1, then sceSifInitRpc");
+    const uint32_t sdClient=0x250aa0;libs.sif.servers[0x80000701u]=libs.sif.servers[0x12346];
+    c=R5900Context{};c.r[4].ud[0]=sdClient;c.r[5].ud[0]=0x80000701u;c.r[6].ud[0]=7;
+    check(dc::sound::nativeSite(r,&c,rt.get(),dc::sound::kSdBindRpcSite) && c.r[6].ud[0]==0 &&
+          rd32(r,sdClient+0x24)==(0x80000701u|0x80000000u),"sceSdRemoteInit: daddu a2, then the binding");
+    const size_t before=requests.size();
+    c=R5900Context{};c.r[4].ud[0]=sdClient;c.r[5].ud[0]=0x8000;c.r[7].ud[0]=0x500000;c.r[8].ud[0]=64;c.r[9].ud[0]=sbuff;c.r[10].ud[0]=3;
+    check(dc::sound::nativeSite(r,&c,rt.get(),dc::sound::kSdCallRpcSite) && c.r[10].ud[0]==64 && requests.size()==before+1 &&
+          requests.back().receiveBytes==64 && requests.back().sendBytes==64,"sceSdRemote: addiu t2,64 before the RPC reads it");
+    wr32(r,0x2a9f80,0x600000);wr32(r,0x2a9f84,0xa000);wr32(r,0x2a9f88,16);wr32(r,0x2a9f8c,0xdead);
+    c=R5900Context{};c.r[2].ud[0]=0x2a9f80;c.r[4].ud[0]=0x2a9f80;c.r[5].ud[0]=1;
+    check(dc::sound::nativeSite(r,&c,rt.get(),dc::sound::kSdSetDmaSite) && rd32(r,0x2a9f8c)==0 && gotDest==0xa000 && gotBytes==16 &&
+          c.r[2].ud[0]==1,"sceSdTransToIOP: the record's last word cleared through v0, then the transfer");
+    c=R5900Context{};c.r[17].ud[0]=1;c.r[4].ud[0]=99;
+    check(dc::sound::nativeSite(r,&c,rt.get(),dc::sound::kSdDmaStatSite) && c.r[4].ud[0]==1 && static_cast<int64_t>(c.r[2].ud[0])==-1,
+          "sceSdTransToIOP: daddu a0,s1, then finished");
+
     std::printf("Native sound transport: %d failures\n",failures);return failures?1:0;
 }

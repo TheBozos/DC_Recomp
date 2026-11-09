@@ -11,6 +11,9 @@
 // RPC goes straight to the compiled module's handler (registered when the module called sceSifRegisterRpc), the bytes
 // straight into its memory, with no SIF RPC, SIF DMA, DMA id, DMAC interrupt or cache flush. Each site charges the 8 EE
 // cycles the call's checkpoint did; the spins stay, so the game's timeline is the original's.
+// libsdr (sceSdRemoteInit, sceSdTransToIOP, sceSdRemote, the SDK's EE side of the sound-hardware driver, called by
+// set_spu and CSound::SetReverb) is compiled with work in its delay slots: there each jal is a nop and the native site
+// is the delay slot's instruction, which the handler does first, so the order is the original's.
 #include "dc_sound.h"
 #include "bozo/libs/guest.h"
 #include "bozo/libs/libraries.h"
@@ -58,8 +61,25 @@ void transfer(R5900Context *c,Runtime *rt,bozo::libs::Libraries &l)
 }
 }
 
+// libsdr: the delay slot's own instruction, then the call it followed.
+bool libsdrSite(uint8_t *ram,R5900Context *c,Runtime *rt,uint32_t pc)
+{
+    if(pc!=kSdInitRpcSite && pc!=kSdBindRpcSite && pc!=kSdSetDmaSite && pc!=kSdDmaStatSite && pc!=kSdCallRpcSite &&
+       pc!=kSdCallRpcSite2)return false;
+    chargeCall(c);
+    auto &l=rt->port->libraries();
+    auto set=[c](int r,uint64_t v){c->r[r].ud[0]=v;};
+    if(pc==kSdInitRpcSite){set(17,0x2a0000u);setV0(c,0);}                         // lui s1,0x2a; sceSifInitRpc
+    else if(pc==kSdBindRpcSite){set(6,0);bind(ram,c,l);setV0(c,0);}                // daddu a2,zero,zero; sceSifBindRpc
+    else if(pc==kSdSetDmaSite){wr32(ram,reg(c,2)+12,0);transfer(c,rt,l);setV0(c,1);} // sw zero,12(v0); sceSifSetDma
+    else if(pc==kSdDmaStatSite){set(4,c->r[17].ud[0]);setV0(c,-1);}               // daddu a0,s1,zero; sceSifDmaStat
+    else{if(pc==kSdCallRpcSite)set(10,64);call(ram,c,rt,l);setV0(c,0);}             // addiu t2,zero,64 / nop; sceSifCallRpc
+    return true;
+}
+
 bool nativeSite(uint8_t *ram,R5900Context *c,Runtime *rt,uint32_t pc)
 {
+    if(libsdrSite(ram,c,rt,pc))return true;
     if(pc!=kInitRpcSite && pc!=kBindRpcSite && pc!=kCallRpcSite && pc!=kCallRpcSite2 && pc!=kFlushSite &&
        pc!=kSetDmaSite && pc!=kDmaStatSite)return false;
     chargeCall(c);

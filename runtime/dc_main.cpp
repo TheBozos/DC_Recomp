@@ -7,6 +7,10 @@
 #include "dc_cheats.h"
 #include "dc_ingame_cheats.h"
 #include "dc_pad.h"
+#include <string>
+#include <cstdlib>
+#include <vector>
+#include <algorithm>
 #include "dc_native_api.h"
 #include "dun_functions.h"
 #include "title_functions.h"
@@ -223,6 +227,16 @@ int main(int argc, char **argv)
                     (unsigned long long)stats.vu0Calls);
         std::printf("[dc] calls: %llu kernel, %llu library, %llu port overrides\n", (unsigned long long)stats.kernelCalls,
                     (unsigned long long)stats.libraryCalls, (unsigned long long)stats.overrideCalls);
+        // DC_CALL_STATS=1: the native library calls by function, most first.
+        if (std::getenv("DC_CALL_STATS"))
+        {
+            std::vector<std::pair<uint64_t, std::string>> byName;
+            for (const auto &[name, count] : stats.libraryByName)
+                byName.emplace_back(count, name);
+            std::sort(byName.rbegin(), byName.rend());
+            for (const auto &[count, name] : byName)
+                std::printf("[dc:lib] %10llu %s\n", (unsigned long long)count, name.c_str());
+        }
         const auto &io = host.libraries().io;
         for (const auto &[site, counts] : stats.ioSites)
             std::printf("[dc:io] pc=%08x address=%08x reads=%llu writes=%llu %s\n", site.first, site.second,

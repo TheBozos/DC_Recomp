@@ -1,11 +1,17 @@
 # Cheats and in-game options
 
 Open the game's main menu, choose **Options**, then **Cheats**. The entry page also offers
-**Game Options** (the original settings) and **Quit Game**. Circle goes back; Circle on the entry page
+**Game Options** (the original settings), **Graphics** and **Quit Game**. Circle goes back; Circle on the entry page
 closes Options through the original fade/exit lifecycle. Quit Game defaults to Cancel and requires
 an explicit confirmation. It uses normal application shutdown and does not autosave.
 
 The same cheat controls remain available in **F2 → Cheats**. Both interfaces share session settings.
+
+**Graphics** sets the window from the controller: **Display** (windowed, fullscreen or borderless),
+**Resolution** (the window's or full-screen size; borderless uses the monitor's), **Render scale** (50% to 200% of
+the window's resolution for the 3D) and **Frame rate** (60 fps, or the monitor's refresh with the frames between the
+game's interpolated). Left/Right changes a row; **Apply and save** applies the choices at once and writes them to
+`video.ini`, the same file as the launcher's Settings and **F2 → Video**. Nothing is stored in the game's save.
 
 | Control | Effect and limits |
 |---|---|

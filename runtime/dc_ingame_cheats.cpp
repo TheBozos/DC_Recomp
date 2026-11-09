@@ -4,12 +4,15 @@
 #include "dc_cheats.h"
 #include "bozo/port.h"
 #include "bozo/runtime.h"
+#include "bozo/app/video_settings.h"
 #include "bozo/render/renderer.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -23,14 +26,22 @@ constexpr uint32_t kPhase=0x1da8a50,kFade=0x1da8a54,kLoaded=0x1da8ac4,kPad=0x1cb
 constexpr uint32_t kUp=0x1000,kDown=0x4000,kLeft=0x8000,kRight=0x2000,kCross=0x40,kCircle=0x20;
 constexpr uint32_t kL1=4,kR1=8,kL2=1,kR2=2;
 constexpr float identity[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
-enum class Page { Root, Game, Cheats, Quit };
+enum class Page { Root, Game, Graphics, Cheats, Quit };
 struct Menu {
     bool active=false,queued=false;
     Page page=Page::Root;
     int root=0,row=0,attack=0,quitChoice=0,gold=0,slot=0,quantity=1,capacity=50,spawn=0,spawnCount=1;
     uint32_t held=0,ticks=0;
     std::shared_ptr<const bozo::render::Texture> font;
+    // Graphics: the window's settings as edited on the page, posted to the window's thread by its Apply row.
+    int graphicsRow=0;
+    bozo::app::video::Settings graphics;
+    const char *graphicsStatus="";
 } menu;
+constexpr int rootCount=4;
+const char *const rootLabels[rootCount]={"Game Options","Graphics","Cheats","Quit Game"};
+enum GraphicsRow { Display, Resolution, RenderScale, FrameRate, ApplyGraphics, GraphicsRowEnd };
+constexpr float renderScales[]={0.5f,0.75f,1.f,1.5f,2.f};
 RecompiledFunction originalInit=nullptr,originalExit=nullptr,originalKey=nullptr,originalDraw=nullptr;
 RecompiledFunction originalHelp=nullptr,originalMessage=nullptr;
 constexpr uint32_t kHelp=0x217A60,kMessage=0x153310;
@@ -54,6 +65,9 @@ bool toggleRow(int row,Cheat &cheat)
 void (*prepareScene)()=nullptr;
 uint64_t fontVersion=0;
 std::atomic<bool> quitRequested{false};
+std::atomic<bozo::app::video::Shared (*)()> videoShared{nullptr};
+std::atomic<void (*)(const bozo::app::video::Settings &,bool)> videoPost{nullptr};
+bozo::app::video::Shared windowSettings(){const auto f=videoShared.load(std::memory_order_acquire);return f?f():bozo::app::video::Shared{};}
 template<class T> T read(const uint8_t *r,uint32_t at){T v;std::memcpy(&v,r+at,sizeof(v));return v;}
 template<class T> void write(uint8_t *r,uint32_t at,T v){std::memcpy(r+at,&v,sizeof(v));}
 void done(R5900Context *c){setReturnS32(c,0);c->pc=getRegU32(c,31);}
@@ -112,16 +126,92 @@ void text(std::vector<bozo::render::Vertex> &v,std::string_view s,float x,float 
         x+=8*scale;
     }
 }
+namespace video=bozo::app::video;
+bool sameGraphics(const video::Settings &a,const video::Settings &b)
+{
+    return a.mode==b.mode && a.width==b.width && a.height==b.height && std::abs(a.renderScale-b.renderScale)<0.01f &&
+           a.frameRate==b.frameRate;
+}
+int renderScaleIndex(float scale)
+{
+    int best=2;
+    for(int i=0;i<int(std::size(renderScales));++i)if(std::abs(renderScales[i]-scale)<std::abs(renderScales[best]-scale))best=i;
+    return best;
+}
+std::string graphicsValue(int row,const video::Settings &g,const video::Shared &shared)
+{
+    char text[64]="";
+    if(row==Display)return g.mode==video::WindowMode::Fullscreen?"Fullscreen":g.mode==video::WindowMode::Borderless?"Borderless":"Windowed";
+    if(row==Resolution){
+        if(g.mode==video::WindowMode::Borderless)std::snprintf(text,sizeof(text),"%dx%d monitor",shared.monitor.first,shared.monitor.second);
+        else std::snprintf(text,sizeof(text),"%dx%d",g.width,g.height);
+    }
+    if(row==RenderScale)std::snprintf(text,sizeof(text),"%d%%",int(std::lround(g.renderScale*100)));
+    if(row==FrameRate){
+        // DC's font has no parentheses (they draw as braces).
+        if(g.frameRate==0)return "60 fps";
+        if(g.frameRate<0)std::snprintf(text,sizeof(text),"Monitor %d Hz",shared.monitorRefresh);
+        else std::snprintf(text,sizeof(text),"%d fps",g.frameRate);
+    }
+    return text;
+}
+// Left/Right on a graphics row: the next choice that way.
+void stepGraphics(int row,int way,const video::Shared &shared)
+{
+    auto &g=menu.graphics;
+    if(row==Display)g.mode=static_cast<video::WindowMode>((int(g.mode)+3+way)%3);
+    else if(row==Resolution && g.mode!=video::WindowMode::Borderless && !shared.resolutions.empty()){
+        const auto &sizes=shared.resolutions;const int n=int(sizes.size());
+        int at=-1;for(int i=0;i<n;++i)if(sizes[i]==std::pair{g.width,g.height})at=i;
+        at=at<0?(way>0?0:n-1):std::clamp(at+way,0,n-1);
+        g.width=sizes[at].first;g.height=sizes[at].second;
+    }else if(row==RenderScale)g.renderScale=renderScales[std::clamp(renderScaleIndex(g.renderScale)+way,0,int(std::size(renderScales))-1)];
+    else if(row==FrameRate){
+        std::vector<int> rates={0,-1};
+        if(shared.applied.frameRate>0)rates.push_back(shared.applied.frameRate);
+        int at=0;for(int i=0;i<int(rates.size());++i)if(rates[i]==g.frameRate)at=i;
+        g.frameRate=rates[(at+int(rates.size())+way)%int(rates.size())];
+    }
+    menu.graphicsStatus="";
+}
+void drawGraphics(std::vector<bozo::render::Vertex> &v,uint32_t white,uint32_t gold,uint32_t dim)
+{
+    const video::Shared shared=windowSettings();
+    if(!shared.open){
+        text(v,"Window settings are not",156,170,1.25f,white);text(v,"available in this run.",156,200,1.25f,white);
+        text(v,"O: Back",292,352,1,white);return;
+    }
+    const char *labels[]={"Display","Resolution","Render scale","Frame rate","Apply and save"};
+    for(int i=0;i<GraphicsRowEnd;++i){
+        const float y=120.f+i*34+(i==ApplyGraphics?12:0);
+        const bool locked=i==Resolution && menu.graphics.mode==video::WindowMode::Borderless;
+        const auto c=i==menu.graphicsRow?gold:locked?dim:white;
+        text(v,labels[i],140,y,1.25f,c);if(i==menu.graphicsRow)text(v,">",120,y,1.25f,c);
+        if(i==ApplyGraphics)continue;
+        std::string value=graphicsValue(i,menu.graphics,shared);
+        if(i==menu.graphicsRow && !locked)value="< "+value+" >";
+        text(v,value,526-float(value.size())*10,y,1.25f,c);
+    }
+    const std::string now="Now: "+graphicsValue(Display,shared.applied,shared)+", "+graphicsValue(Resolution,shared.applied,shared)+
+                          ", "+graphicsValue(RenderScale,shared.applied,shared)+", "+graphicsValue(FrameRate,shared.applied,shared);
+    text(v,now,320-float(now.size())*3.6f,312,0.9f,dim);
+    const char *help=menu.graphicsRow==Display?"L/R: Window, full screen or borderless":
+                     menu.graphicsRow==Resolution?(menu.graphics.mode==video::WindowMode::Borderless?"Borderless uses the monitor size":"L/R: Window or full-screen size"):
+                     menu.graphicsRow==RenderScale?"L/R: 3D resolution against the window":
+                     menu.graphicsRow==FrameRate?"L/R: Monitor smooths between frames":"X: Apply now and keep for next launch";
+    if(*menu.graphicsStatus)help=menu.graphicsStatus;
+    else if(!sameGraphics(menu.graphics,shared.applied) && menu.graphicsRow!=ApplyGraphics)help="Not applied yet: choose Apply and save";
+    text(v,help,320-float(std::strlen(help))*4,354,1,white);
+}
 void drawPage(int alpha)
 {
     if(prepareScene)prepareScene();panel(alpha);
     std::vector<bozo::render::Vertex> v;
     const uint32_t white=colour(0x808080,alpha),gold=colour(0x207080,alpha),dim=colour(0x484848,alpha);
-    const auto heading=menu.page==Page::Root?"OPTIONS":menu.page==Page::Quit?"QUIT GAME?":"CHEATS";
-    text(v,heading,menu.page==Page::Root?264.f:menu.page==Page::Quit?240.f:272.f,76,2,gold);
+    const auto heading=menu.page==Page::Root?"OPTIONS":menu.page==Page::Quit?"QUIT GAME?":menu.page==Page::Graphics?"GRAPHICS":"CHEATS";
+    text(v,heading,320-float(std::strlen(heading))*8,76,2,gold);
     if(menu.page==Page::Root){
-        const char *labels[]={"Game Options","Cheats","Quit Game"};
-        for(int i=0;i<3;++i){const float y=150.f+i*44;const auto c=i==menu.root?gold:white;text(v,labels[i],164,y,1.5f,c);if(i==menu.root)text(v,">",132,y,1.5f,c);}
+        for(int i=0;i<rootCount;++i){const float y=136.f+i*44;const auto c=i==menu.root?gold:white;text(v,rootLabels[i],164,y,1.5f,c);if(i==menu.root)text(v,">",132,y,1.5f,c);}
         text(v,"D-pad: Select   X: Open   O: Back",120,352,1,white);
     }else if(menu.page==Page::Quit){
         text(v,"Close the game?",200,150,1.5f,white);
@@ -129,6 +219,8 @@ void drawPage(int alpha)
         const char *labels[]={"Cancel","Quit Game"};
         for(int i=0;i<2;++i){const float y=240.f+i*38;const auto c=i==menu.quitChoice?gold:white;text(v,labels[i],204,y,1.5f,c);if(i==menu.quitChoice)text(v,">",172,y,1.5f,c);}
         text(v,"X: Confirm   O: Cancel",164,352,1,white);
+    }else if(menu.page==Page::Graphics){
+        drawGraphics(v,white,gold,dim);
     }else{
         const char *labels[]={"Infinite health","Weapon durability","Infinite thirst","Combo stamina",
             "Equipped weapon ATK","Apply weapon ATK","Weapon ABS multiplier","Gilda","Apply Gilda",
@@ -209,7 +301,7 @@ void key(uint8_t *r,R5900Context *c,Runtime *rt)
         return;
     }
     if(pressed&kCircle){
-        if(menu.page==Page::Cheats || menu.page==Page::Quit){menu.page=Page::Root;menu.held=menu.ticks=0;done(c);}
+        if(menu.page==Page::Cheats || menu.page==Page::Graphics || menu.page==Page::Quit){menu.page=Page::Root;menu.held=menu.ticks=0;done(c);}
         else {
             // The original Circle boundary starts this fade. Do not also run
             // hidden Game Options navigation if Circle and a direction coincide.
@@ -218,8 +310,22 @@ void key(uint8_t *r,R5900Context *c,Runtime *rt)
         return;
     }
     if(menu.page==Page::Root){
-        if(pressed&kUp)menu.root=(menu.root+2)%3;else if(pressed&kDown)menu.root=(menu.root+1)%3;
-        if(pressed&kCross){menu.page=menu.root==0?Page::Game:menu.root==1?Page::Cheats:Page::Quit;menu.quitChoice=0;menu.held=menu.ticks=0;menu.attack=std::max(0,equippedWeaponAttack());menu.gold=std::max(0,gilda());menu.capacity=std::clamp(inventorySize(),1,100);menu.quantity=std::max(1,activeConsumable(menu.slot).quantity);menu.queued=false;}
+        if(pressed&kUp)menu.root=(menu.root+rootCount-1)%rootCount;else if(pressed&kDown)menu.root=(menu.root+1)%rootCount;
+        if(pressed&kCross){menu.page=menu.root==0?Page::Game:menu.root==1?Page::Graphics:menu.root==2?Page::Cheats:Page::Quit;
+            menu.graphics=windowSettings().applied;menu.graphicsRow=0;menu.graphicsStatus="";menu.quitChoice=0;menu.held=menu.ticks=0;menu.attack=std::max(0,equippedWeaponAttack());menu.gold=std::max(0,gilda());menu.capacity=std::clamp(inventorySize(),1,100);menu.quantity=std::max(1,activeConsumable(menu.slot).quantity);menu.queued=false;}
+    }else if(menu.page==Page::Graphics){
+        const video::Shared shared=windowSettings();
+        if(shared.open){
+            if(pressed&kUp)menu.graphicsRow=(menu.graphicsRow+GraphicsRowEnd-1)%GraphicsRowEnd;
+            else if(pressed&kDown)menu.graphicsRow=(menu.graphicsRow+1)%GraphicsRowEnd;
+            if(menu.graphicsRow!=ApplyGraphics && (pressed&(kLeft|kRight)))stepGraphics(menu.graphicsRow,(pressed&kRight)?1:-1,shared);
+            if(menu.graphicsRow==ApplyGraphics && (pressed&kCross)){
+                // Borderless keeps the window size it returns to.
+                video::Settings next=menu.graphics;
+                if(next.mode==video::WindowMode::Borderless){next.width=shared.applied.width;next.height=shared.applied.height;}
+                if(const auto post=videoPost.load(std::memory_order_acquire))post(next,true);menu.graphics=next;menu.graphicsStatus="Applied and saved";
+            }
+        }
     }else if(menu.page==Page::Quit){
         if(pressed&(kUp|kDown|kLeft|kRight))menu.quitChoice^=1;
         if(pressed&kCross){if(menu.quitChoice)quitRequested.store(true,std::memory_order_relaxed);else menu.page=Page::Root;}
@@ -289,4 +395,6 @@ void installIngameMenu(Runtime &rt,bozo::port::Registry &registry,void (*prepare
     registry.registerFunction(kInit,init);registry.registerFunction(kExit,exit);registry.registerFunction(kKey,key);registry.registerFunction(kDraw,draw);
 }
 bool takeIngameQuitRequest(){return quitRequested.exchange(false,std::memory_order_relaxed);}
+void setGraphicsAccess(bozo::app::video::Shared (*shared)(),void (*post)(const bozo::app::video::Settings &,bool))
+{videoPost.store(post,std::memory_order_release);videoShared.store(shared,std::memory_order_release);}
 }

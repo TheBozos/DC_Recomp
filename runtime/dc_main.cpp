@@ -233,6 +233,13 @@ int main(int argc, char **argv)
     if (window)
     {
         dc::cheats::registerMenu();
+        // video.ini (the launcher's Settings, the F2 Video tab and the in-game Graphics page) over the defaults, and the
+        // environment over the file; --fullscreen keeps its meaning, the monitor as it is.
+        bozo::app::video::loadAtStartup(windowOptions.width, windowOptions.height);
+        if (windowOptions.fullscreen)
+            bozo::app::video::edited().mode = bozo::app::video::WindowMode::Borderless;
+        windowOptions.videoSettings = true;
+        dc::cheats::setGraphicsAccess(&bozo::app::video::shared, &bozo::app::video::post);
         bozo::app::Game game;
         game.run = run;
         game.stop = [&] { host.requestStop(); };

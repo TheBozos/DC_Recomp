@@ -200,23 +200,22 @@ int main()
                     check(ref->packetCalls == (submitted ? 4 : 0) && native->packetCalls == 0,
                           "only reference resets/ends/terminates, including End's now-visible nested terminate");
                     check(ref->consoleCalls == (p.ended ? 0 : 3) && native->consoleCalls == 0, "adapted callback skips console half-offset/cache/swap setup");
+                    // The published reference still waits, flushes and sends; the adapted callback makes no transfer (the
+                    // game installs no DMA-completion handler). Its fade sprites must be the same calls, in order.
+                    auto sprites = [](const std::vector<Event> &all) {
+                        std::vector<Event> only;
+                        for (const auto &e : all) if (e.pc == 0x15c310) only.push_back(e);
+                        return only;
+                    };
                     const int expectedSyncs = p.ended ? 0 : p.countdown == 0 ? 2 : 1;
-                    check(ref->events == native->events && ref->syncCalls == expectedSyncs && ref->syncCalls == native->syncCalls,
-                          "fade/sprite inputs, completion/cache/sync arguments and ordering match");
-                    check(ref->sendCalls == submitted && native->sendCalls == submitted &&
-                          (!submitted || (ref->sentChannel == native->sentChannel && ref->sentSource == output && native->sentSource == 0)),
-                          "same native completion count/channel without a packet source");
-                    check(ref->libs.io.nativeSubmissions[1] == submitted && native->libs.io.nativeSubmissions[1] == submitted &&
-                          ref->libs.io.nativeCompleted[1] == submitted && native->libs.io.nativeCompleted[1] == submitted,
-                          "native completion ownership matches");
-                    const bool queued = submitted && !masked;
-                    check(ref->dispatcher.kernel().handlerQueued() == queued && native->dispatcher.kernel().handlerQueued() == queued,
-                          "completion IRQ respects callback mask");
-                    if (submitted && masked)
-                    {
-                        ref->dispatcher.kernel().causeEnable(true, 1, true); native->dispatcher.kernel().causeEnable(true, 1, true);
-                        check(ref->dispatcher.kernel().handlerQueued() && native->dispatcher.kernel().handlerQueued(), "masked completion survives until enabled");
-                    }
+                    check(sprites(ref->events) == sprites(native->events), "fade/sprite inputs and ordering match");
+                    check(ref->syncCalls == expectedSyncs && native->syncCalls == 0, "only the reference waits on a channel");
+                    check(ref->sendCalls == submitted && (!submitted || ref->sentSource == output) && native->sendCalls == 0,
+                          "only the reference sends");
+                    check(native->events.size() == sprites(native->events).size(), "adapted callback makes no cache or transfer call");
+                    check(ref->libs.io.nativeSubmissions[1] == submitted && native->libs.io.nativeSubmissions[1] == 0,
+                          "no native submission from the adapted callback");
+                    check(!native->dispatcher.kernel().handlerQueued(), "no completion callback queued");
                     check(adapted.fcr31 == original.fcr31, "fade float status matches published reference");
                     check(std::memcmp(ram, expectedRam.data(), stack - 0x1000) == 0 &&
                           std::memcmp(ram + stack, expectedRam.data() + stack, expectedRam.size() - stack) == 0,

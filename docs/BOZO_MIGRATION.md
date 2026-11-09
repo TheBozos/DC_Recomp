@@ -1736,3 +1736,21 @@ transfer in this port. Three guarded patches retire `sceDmaSync` (`0x12d61c`), `
 Remaining transfer calls, about 1,190 per run, sit in the boot and loading paths: `main`'s four sends at mode changes
 (two upload VU1 microcode from `0x24f960`/`0x296680`, which nothing executes), `VSyncCallBack_Load`'s send and syncs,
 `EnterFixTexture`/`EnterFixTextureZ` and `StoreImage`.
+
+### Boot and loading transfers (2026-11-09)
+
+The rest follow the same reasoning:
+
+- `VSyncCallBack_Load`, every vblank while loading: `sceDmaSync` of VIF1 (`0x154380`), `iFlushCache` (`0x15468c`),
+  the empty VIF1 `sceDmaSend` (`0x1546a0`) and `sceDmaSync` of GIF (`0x15474c`) are retired. The `loading`
+  reference/adapted span (96 cases) now requires the adapted callback to make no cache or transfer call and queue no
+  completion, while its fade sprites match the reference's calls in order and all non-stack RAM matches.
+- `main`, at mode changes: four `FlushCache` / `sceDmaSend` / `sceGsSyncPath` triples (`0x141388`..`0x141638`) are
+  retired, two of them the VU1 microcode uploads. `v0` is reloaded after each removed call.
+- `EnterFixTexture` / `EnterFixTextureZ` are replaced whole by native hooks, so their sends never run. `StoreImage` is
+  reached only from `MGEndFrame`'s screenshot branch (`0x12d4e4`).
+
+**126/126** suites. All seven routes now report **0 VIF0, 0 VIF1, 0 GIF submissions and 0 sync calls**, with the same
+ends, identical cards and zero register/unknown accesses and VU0 calls. A loading transition finishes slightly earlier
+(the Matataki route's frame 6,000 arrives where the previous build is still fading); later captures show the same views
+within about 3 mean levels.

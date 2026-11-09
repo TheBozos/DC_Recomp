@@ -16,6 +16,20 @@
 0x0012d574 0x0c0411a6 0x00000000 # retire console free-time percentage print
 # Native SDK submissions do not use the console channel's tag-transfer bit.
 # Remove those byte read/modify/write operations at their original callers.
+# main, at mode changes: four flush / sceDmaSend / sceGsSyncPath triples. Two upload VU1 microcode (0x296680,
+# 0x24f960) that nothing executes; the others send nothing a native consumer reads. v0 is reloaded after each.
+0x00141388 0x0c045168 0x00000000 # main: no FlushCache
+0x0014139c 0x0c0431be 0x00000000 # main: no sceDmaSend
+0x001413ac 0x0c044be6 0x00000000 # main: no sceGsSyncPath wait
+0x001413b8 0x0c045168 0x00000000 # main: no FlushCache
+0x001413cc 0x0c0431be 0x00000000 # main: no sceDmaSend
+0x001413dc 0x0c044be6 0x00000000 # main: no sceGsSyncPath wait
+0x001415e4 0x0c045168 0x00000000 # main: no FlushCache
+0x001415f8 0x0c0431be 0x00000000 # main: no VU1 microcode upload (0x296680)
+0x00141608 0x0c044be6 0x00000000 # main: no sceGsSyncPath wait
+0x00141614 0x0c045168 0x00000000 # main: no FlushCache
+0x00141628 0x0c0431be 0x00000000 # main: no VU1 microcode upload (0x24f960)
+0x00141638 0x0c044be6 0x00000000 # main: no sceGsSyncPath wait
 0x0014165c 0x90a40000 0x24040000 # main: channel byte read
 0x00141670 0xa0a20000 0x00000000 # main: channel byte store
 0x0012d43c 0x90a40000 0x24040000 # MGEndFrame: channel byte read
@@ -85,6 +99,12 @@
 0x00154664 0x3c0201d0 0x080551a2 # skip packet End/Terminate to cache call 0x154688
 0x00154668 0x2444b370 0x00000000 # no unused packet pointer in delay slot
 0x0015469c 0x8c25b374 0x24050000 # completion has no packet source
+# Loading callback, every vblank while loading: the same transfer tail as MGEndFrame. No DMA-completion handler
+# exists and no transfer is ever outstanding, so nothing waits, flushes or sends.
+0x00154380 0x0c043316 0x00000000 # no sceDmaSync of VIF1
+0x0015468c 0x0c045174 0x00000000 # no iFlushCache before a transfer
+0x001546a0 0x0c0431be 0x00000000 # no sceDmaSend of VIF1
+0x0015474c 0x0c043316 0x00000000 # no sceDmaSync of GIF
 0x001546c4 0x8f828bc0 0x080551cb # skip half-offset/display/cache setup to buffer toggle 0x15472c
 0x001546c8 0x10400005 0x00000000 # discard obsolete environment-selection branch
 # TexAnime: native texture copies require no leading/trailing TEXFLUSH packets.

@@ -41,7 +41,7 @@ The unsigned launcher may trigger Windows SmartScreen. Game files and generated 
 Use the launcher's **Settings** for display options, logs, maintenance and updates. **F2** opens the game's
 settings. Saves, controls, video settings and cheats are stored in `%APPDATA%\DC_Recomp` and survive launcher
 updates. Existing development saves are kept separately; copy only the desired card files into that directory.
-The in-game pause menu includes **Cheats** and **Quit Game**. Updates offer a rebuild when the source changes.
+The in-game pause menu includes **Graphics**, **Cheats** and **Quit Game**. Updates offer a rebuild when the source changes.
 See [CHANGELOG.md](CHANGELOG.md) for release changes and the checked routes above for current coverage.
 
 ## Status
@@ -62,7 +62,7 @@ A complete story playthrough and full visual parity remain unverified.
 | Travel to Matataki through “Go to Other Area” | ✅ |
 | Memory-card saving, loading and restart with saved progress | ✅ |
 | Native music and effects | ✅ |
-| Controller-operated Cheats and Quit Game inside Options; F2 settings remain available | ✅ |
+| Controller-operated Graphics, Cheats and Quit Game inside Options; F2 settings remain available | ✅ |
 | Georama and dungeon play on the current engine | ✅ |
 | New-game opening on the current engine | 🔧 |
 | Complete story, all companions, locations and effects | 🔧 |
@@ -211,8 +211,10 @@ pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,libarch
 `--fullscreen` starts fullscreen; `--no-vsync` disables VSync for comparisons. The default is windowed
 with VSync enabled. **F8** captures a frame when a capture directory is configured.
 
-The game's **Options** entry page offers **Game Options** (the original settings), **Cheats**, and
-**Quit Game**. Up/Down selects rows, Cross confirms and Circle goes back. Quit Game asks for confirmation,
+The game's **Options** entry page offers **Game Options** (the original settings), **Graphics**, **Cheats**, and
+**Quit Game**. Up/Down selects rows, Cross confirms and Circle goes back. **Graphics** sets the display mode,
+resolution, render scale and frame rate; **Apply and save** writes them to `video.ini` (shared with the launcher's
+Settings and **F2 → Video**). Quit Game asks for confirmation,
 with Cancel selected initially. Save through the game's normal save menu before quitting to keep progress;
 quitting does not autosave.
 

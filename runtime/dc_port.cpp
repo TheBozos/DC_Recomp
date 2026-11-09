@@ -3,6 +3,7 @@
 #include "bozo/libs/guest.h"
 #include "bozo/libs/libraries.h"
 #include "bozo/port.h"
+#include "dc_sound.h"
 #include "dc_visibility.h"
 #include <cstring>
 namespace dc::native
@@ -16,6 +17,8 @@ namespace dc
 {
     bool nativeInstruction(uint8_t *ram, R5900Context *ctx, Runtime *rt, uint32_t pc)
     {
+        if (dc::sound::nativeSite(ram, ctx, rt, pc))
+            return true;
         if (pc == 0x0013DFA8u || pc == 0x0013DFF0u || pc == 0x0013E314u || pc == 0x0013E420u)
         {
             dc::native::debugFontBoundary(ram, ctx, rt, pc);

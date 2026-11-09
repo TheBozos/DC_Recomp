@@ -4,6 +4,7 @@
 
 ### Changed
 - The controller is read natively: the game's pad code takes the PC controller's state directly and sends rumble back to it, with no PS2 pad library in between.
+- Sound commands and sample uploads go straight to the game's natively compiled sound driver, with no PS2 SIF (EE-to-IOP) transfer layer in between.
 
 ## [0.3.0] - 2026-11-09
 

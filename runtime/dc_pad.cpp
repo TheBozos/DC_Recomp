@@ -2,7 +2,7 @@
 // +0x50: buttons, ly, lx, ry, rx, then the libpad handshake's phase, state, mode and mode IDs, and the vibration bytes
 // at +0x28 (the levels Step sends) and +0x2E (the actuator alignment). The original read_pad (0x12A900) walked the
 // libpad handshake (scePadGetState, scePadInfoMode, scePadSetMainMode, scePadInfoAct, scePadSetActAlign) before its
-// pad_button_read (0x12A830) called scePadRead; Step (0x12B140) sent the levels with scePadSetActDirect. Here the
+// pad_button_read called scePadRead; Step (0x12B140) sent the levels with scePadSetActDirect. Here the
 // controller in each port is what it always is on the PC, a DualShock 2 in analog mode: its state comes from the
 // engine's PadInput (the window's devices, or a script in checks) and its rumble goes back to it. CGamePad::Init's
 // scePadInit and scePadPortOpen calls are retired by guarded patches (recomp/dc_native.patches).

@@ -390,3 +390,12 @@
 0x0012a648 0x0c047d4c 0x00000000 # CGamePad::Init: no scePadInit
 0x0012a750 0x0c047de4 0x24020001 # CGamePad::Init: port 0 open, no scePadPortOpen
 0x0012a7b8 0x0c047de4 0x24020001 # CGamePad::Init: port 1 open, no scePadPortOpen
+# The sound transport is native (runtime/dc_sound.cpp): ezMidiInit's, ezMidi's and ezTransToIOP's library calls are
+# native sites that reach the compiled sound module directly. Every delay slot is a nop; the sites set v0.
+0x0014797c 0x0c045b12 0x00000000 # ezMidiInit: sceSifInitRpc
+0x00147998 0x0c045cb6 0x00000000 # ezMidiInit: sceSifBindRpc
+0x00147a70 0x0c045d2a 0x00000000 # ezMidi: sceSifCallRpc (64 bytes from the argument)
+0x00147ab4 0x0c045d2a 0x00000000 # ezMidi: sceSifCallRpc (16 bytes from sbuff)
+0x00147b10 0x0c045168 0x00000000 # ezTransToIOP: FlushCache
+0x00147b24 0x0c0451b8 0x00000000 # ezTransToIOP: sceSifSetDma
+0x00147b48 0x0c0451b0 0x00000000 # ezTransToIOP: sceSifDmaStat

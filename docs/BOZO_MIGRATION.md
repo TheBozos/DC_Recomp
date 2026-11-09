@@ -2005,3 +2005,20 @@ clear-colour bytes, which `MGBeginFrame` reads for the native screen clear. The 
   accesses, VU0 calls, transfers and syncs; the attract-demo route is frame-exact; captures match within 2.35 mean levels
   outside the known fade frames (Matataki 7400 has measured up to 3.8 between earlier builds). GS library calls left
   across the routes: `sceGsSyncV` 535, `sceGsResetGraph` 7.
+
+## The last two GS calls: sceGsSyncV and sceGsResetGraph
+
+- `sceGsSyncV` (boot, loading screens, mode changes; 535 calls across the seven routes) is the game waiting for the
+  next vblank, and its frame ends there: the engine's stand-in was a `frameBoundary` library function returning the
+  parity of the frames ended by then, this one included. Removing the calls had shifted the boot and attract-demo
+  timeline (see "Startup GS calls"), so the wait stays and only its owner changes: DC's override (`runtime/dc_port.cpp`)
+  sets the same parity, then ends the frame through the port (`bozo::port::frameEnd`, as DC's own frame boundary does).
+- `sceGsResetGraph` (MGInit) set the scratchpad words only the GS environment stand-ins read (none runs any more) and
+  the kernel's field rate. DC's override sets the field rate itself (NTSC 60000/1001, or PAL for video mode 3) and
+  nothing else.
+
+With both, the game calls no GS library function.
+- 128/128 suites; CI's build 59/59. All seven routes end as before with identical cards (the cheats-quit route quits at
+  frame 9,202 as before) and zero register/unknown accesses, VU0 calls, transfers and syncs; the attract-demo route is
+  frame-exact; captures match within 2.34 mean levels outside the known fade frames. No GS or DMA library call is left
+  on any route.

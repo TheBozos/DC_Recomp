@@ -71,8 +71,36 @@ namespace dc
         ctx->r[2].ud[0] = 0;
         ctx->pc = ctx->r[31].uw[0];
     }
+    // sceGsSyncV(mode): the game waits for the next vblank (boot, loading screens, mode changes), and its frame ends
+    // there. As the engine's frameBoundary stand-in did: the parity of the frames ended by then, this one included,
+    // then the frame boundary.
+    void syncV(uint8_t *, R5900Context *ctx, Runtime *rt)
+    {
+        const uint64_t parity = (rt->port->libraries().framesEnded + 1u) & 1u;
+        ctx->r[2].ud[0] = parity;
+        bozo::port::frameEnd(rt, ctx);
+        ctx->pc = ctx->r[31].uw[0];
+    }
+    // sceGsResetGraph(mode, interlace, video mode, field mode): mode 0 sets the display mode, whose only effect left is
+    // the field clock the game runs on (NTSC 59.94 Hz; PAL 50 Hz for video mode 3). No GS, no display registers; the
+    // parameter words the GS stand-ins read are no longer read by anything.
+    void resetGraph(uint8_t *, R5900Context *ctx, Runtime *rt)
+    {
+        if (static_cast<int16_t>(ctx->r[4].uw[0]) == 0)
+        {
+            auto &kernel = bozo::port::dispatcher(rt).kernel();
+            if ((ctx->r[6].uw[0] & 0xffu) == 3u)
+                kernel.fieldRate(50, 1);
+            else
+                kernel.fieldRate(60000, 1001);
+        }
+        ctx->r[2].ud[0] = 0;
+        ctx->pc = ctx->r[31].uw[0];
+    }
     void install(Runtime &rt, bozo::port::Registry &r)
     {
+        r.registerFunction(0x112f00, syncV);      // sceGsSyncV
+        r.registerFunction(0x1122b0, resetGraph); // sceGsResetGraph
         dc::native::install(rt, r);
         r.registerFunction(0x1145a0, noCache); // FlushCache
         r.registerFunction(0x1145d0, noCache); // iFlushCache

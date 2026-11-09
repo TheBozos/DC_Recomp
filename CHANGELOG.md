@@ -1,13 +1,21 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] - 2026-11-09
 
 ### Added
 - Graphics page in the game's Options (controller): display mode, resolution, render scale and frame rate, applied at once and saved to `video.ini`.
 - Cheats: weapon level-up, reveal floor map, fish always bite, item spawner, fast-forward (hold ` or the touchpad, or lock it on), damage multiplier, one-hit kills, no damage taken and a key finder on the dungeon map.
 
+### Changed
+- More of the game runs natively: the per-frame and loading-screen DMA transfers, the per-frame GS display swap and the startup GS sync-path calls are gone, and model, remake, shadow and cloth builds no longer reserve space for console packet data.
+- BozoEngine moves to its current main (8a4ac05), which adds the calls the Graphics page uses.
+
 ### Fixed
 - The game now reads `video.ini`: the launcher's display settings and the F2 Video tab apply (the game ignored them). `--fullscreen` still opens borderless over the monitor.
+
+### Known limits
+- Gameplay testing covers Norune, Divine Beast Cave, Matataki, Georama, saving and loading; a complete story playthrough and full visual parity are unverified.
+- Linux and widescreen are not qualified.
 
 ## [0.2.0] - 2026-11-09
 

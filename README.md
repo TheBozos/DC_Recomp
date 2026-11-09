@@ -28,7 +28,7 @@ BozoEngine replaces the PS2Recomp fork completely; there is no emulation fallbac
 
 ## For players (Windows)
 
-Download **`DC_Recomp-0.2.0-bozo.zip`** from [Releases](https://github.com/TheBozos/DC_Recomp/releases/latest),
+Download **`DC_Recomp-0.3.0-bozo.zip`** from [Releases](https://github.com/TheBozos/DC_Recomp/releases/latest),
 check its `.sha256`, and extract it to a writable folder such as `D:\Games\DC_Recomp_Bozo`.
 Open **DC Launcher.exe**, select your own USA disc image (`.iso` or `.bin`/`.cue`), click **Prepare the game**,
 then **Play**. Preparation runs locally with the bundled offline tools; no developer software is needed.
@@ -292,7 +292,7 @@ licences and corresponding toolchain sources, and audits the archives for game d
 ```bash
 python tools/make_build_kit.py --out D:/dc_kit/kit
 scripts/bench_run.sh --alone 20 "release package" python tools/make_release.py \
-    --version 0.2.0 --kit D:/dc_kit/kit --out D:/dc_release --with-sources
+    --version 0.3.0 --kit D:/dc_kit/kit --out D:/dc_release --with-sources
 ```
 
 Only committed source is exported. Follow [the release checklist](docs/RELEASE_CHECKLIST.md) before publishing;

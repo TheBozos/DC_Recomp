@@ -1868,3 +1868,37 @@ controller from the first frame. No script or player presses anything that early
   register/unknown accesses, VU0 calls, transfers and syncs; the cheats-quit route still ends through Quit Game; the
   attract-demo route (live script) is frame-exact, and captures match within 3.4 mean levels outside the known fade
   frame. A real controller's rumble is not covered by these runs.
+
+## Native sound transport: SIF RPC and SIF DMA retired
+
+The game reaches its sound driver (the IOP module the port compiles natively, `runtime/dc_audio.cpp`) through three
+routines only. `ezMidiInit` (`0x147970`) bound the client at `0x1CECEC0` to RPC service `0x12346` with
+`sceSifBindRpc`, retrying until the server existed. `ezMidi(command, argument)` (`0x147A00`, called from `CSound` and
+`TransHdBd`) made one blocking `sceSifCallRpc`: with command bit `0x1000` clear the argument went into `sbuff`
+(`0x1CECE80`) and those 16 bytes were sent, with it set the 64 bytes at the argument; with bit `0x8000` a 64-byte reply
+landed in `sbuff`; it returned `sbuff`'s first word. `ezTransToIOP(destination, source, bytes)` (`0x147AE0`) copied
+sample data into the module's memory with one `sceSifSetDma` and waited on `sceSifDmaStat`; the engine's
+`sceSifSetDma` also raised a DMAC channel-5 interrupt for every transfer.
+
+The three routines stay the game's own code; their seven library calls (`sceSifInitRpc`, `sceSifBindRpc`, the two
+`sceSifCallRpc`, `FlushCache`, `sceSifSetDma`, `sceSifDmaStat`) are guarded patches to `nop`, and each is a native
+site in `runtime/dc_sound.cpp`: the binding leaves the client header as the engine's did, the RPC goes straight to the
+compiled module's handler (registered when the module called `sceSifRegisterRpc`) with the same request, the record's
+bytes go straight into the module's memory (`sif.transfer`), the transfer reads as finished, and there is no cache to
+flush. No SIF RPC, SIF DMA, DMA id or DMAC interrupt remains on the game's sound path. Each site charges the 8 EE cycles
+the call's checkpoint did.
+
+A first version replaced the three routines whole. It skipped `ezMidi`'s 2000-pass spin (64,000 EE cycles a command,
+measured with a temporary probe: 64,008 per call with the call's 8) and `ezMidiInit`'s, and the attract demo drifted
+(captures up to 7.75 mean levels apart, same scene a few frames off); running the original routines restored it
+exactly. The spins are the game's own pacing, so they stay, with the checkpoints at which the original took its events.
+
+- `dc-sound-tests`: each site's request against the original call's arguments (bind before and after the server exists,
+  16-byte, 64-byte and replying commands, an unbound client, the transfer record's bytes, no DMAC interrupt, the stat),
+  and the 8 cycles each site charges. 128/128 suites.
+- All seven routes end as before with identical cards and zero register/unknown accesses, VU0 calls, transfers and
+  syncs; the attract-demo route is frame-exact again; captures match within 0.95 mean levels outside the known fade
+  frames.
+- The attract demo recorded to WAV (5,000 frames) has the same peak in every ten-second block as the released 0.3.0
+  build's, which still used SIF, and RMS within a few percent; the recordings follow the host's audio clock, so their
+  samples do not line up one to one.

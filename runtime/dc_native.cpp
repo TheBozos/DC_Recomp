@@ -376,35 +376,11 @@ namespace dc::native
             if (!textureMode) std::memcpy(&textureMode, guest.in(gp - 0x7420u, 8), 8);
             return textureMode ? 4u : 3u;
         }
-        uint32_t modelAllocationQwords(const MdtDescription &model, bool shadow, bool remake,
-                                       bozo::libs::Guest &guest, const uint8_t *ram, uint32_t mdt, uint32_t gp)
-        {
-            uint64_t qwords = 0;
-            for (const auto &primitive : model.primitives)
-            {
-                ++qwords;
-                if (shadow)
-                {
-                    const uint32_t triangles = primitive.count / 3u;
-                    qwords += triangles * 6ull + ((triangles + 9u) / 10u) * 3ull;
-                    continue;
-                }
-                if (primitive.material != -1)
-                    qwords += 5u + (remake ? 4u : textureAllocationQwords(guest, boundRecord(ram, mdt + model.materials +
-                                         static_cast<uint32_t>(primitive.material) * 0x60u + 0x34u), gp));
-                const uint32_t limit = model.stride == 4u ? 33u : 54u;
-                uint32_t remaining = primitive.count;
-                while (remaining)
-                {
-                    const uint32_t vertices = std::min(remaining, limit);
-                    qwords += vertices * model.stride + 4u;
-                    remaining -= vertices;
-                    if (primitive.kind == 4u && remaining) remaining += 2u;
-                }
-            }
-            if (qwords > 0x1ffffffu / 16u) throw std::runtime_error("native model: allocation extent too large");
-            return static_cast<uint32_t>(qwords);
-        }
+        // The extent a model, remake or shadow build reserves in the game's arena: one qword. CreateVisual allocates it
+        // at the data address it passed (and Align64 follows), so every build keeps a distinct, aligned address, the key
+        // of its retained MDT. The old VIF packet size reserved space nothing fills: DC_PROBE_EXTENTS found no game
+        // code writing into a live buffer (docs/BOZO_MIGRATION.md, "Model extents").
+        constexpr uint32_t kNativeModelQwords = 1u;
         void noteMdt(const uint8_t *rdram, uint32_t data, uint32_t mdt, bool bind, const MdtDescription &model)
         {
             const uint32_t size = model.size;
@@ -444,7 +420,7 @@ namespace dc::native
             bozo::libs::Guest guest(*runtime, ctx);
             const uint32_t visual = getRegU32(ctx, 4), data = getRegU32(ctx, 5), mdt = getRegU32(ctx, 6);
             const auto model = describeMdt(guest, mdt, shadow);
-            const uint32_t qwords = modelAllocationQwords(model, shadow, remake, guest, rdram, mdt, getRegU32(ctx, 28));
+            const uint32_t qwords = kNativeModelQwords;
             guest.in(visual + 0x18u, 8);
             noteMdt(rdram, data, mdt, !remake && !shadow, model);
             guest.write32(visual + 0x18u, data);

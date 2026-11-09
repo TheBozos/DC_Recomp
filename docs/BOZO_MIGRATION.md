@@ -1805,5 +1805,22 @@ nothing there), and every 60 frames the buffers built in the last 600 frames are
 
 No game code was found writing into a built VU data buffer that is still in use. `SetVuData`, the only original
 routine that wrote into one, is called only from the replaced `CreateVUdataFromMDT`. Cloth builds return a size before
-their buffer exists, so the probe does not cover cloth. Next: replace the legacy formula with a native extent, keeping
-each build's data address distinct (it keys the retained MDT copy), and verify routes, saves and captures.
+their buffer exists, so the probe does not cover cloth. 
+
+### Native model extent
+
+Model, remake and shadow builds now reserve **one qword**; `modelAllocationQwords` and its VIF packet formula are
+gone. `CreateVisual` builds at the allocator's cursor, reserves the returned extent, adds it to the game's running
+total at `gp-0x7460` and calls `Align64`, so every build still gets its own 64-byte-aligned data address. That address
+keys the retained MDT copy, and double-buffered visuals keep their two distinct addresses at `+0x28`/`+0x2c`. Remakes
+reuse their buffer, and the raw `CVisualMDTVu1` draw's temporary allocation now takes one qword. Before, single builds
+reserved up to hundreds of kilobytes each (the probe saw 75,008- and 334,176-byte remake buffers). Cloth keeps its
+legacy formula for now: its size is consumed inside its per-frame draw, which is not yet audited, and the probe cannot
+watch it.
+
+- The builder fixture (1,064 cases) now requires the original to reserve its VIF size and the native build to reserve
+  one qword, with its data address recorded and no console output written. 126/126 suites.
+- All seven routes end as before with identical cards and zero register/unknown accesses, VU0 calls, transfers and
+  syncs. The attract-demo route is still frame-exact. Captures match within 3.6 mean levels outside the known fade
+  frames. A scripted walk onto Divine Beast Cave B1 (map revealed through the Cheats page) renders the floor, Toan and
+  HUD normally.

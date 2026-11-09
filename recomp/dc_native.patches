@@ -385,3 +385,8 @@
 0x00223858 0x8f848bd4 0x24040000 # null packet argument; DrawNewFileTemplete__Fiii
 # main's mode change: sceGsSyncPath always answers idle; v0 is reloaded right after.
 0x00141334 0x0c044be6 0x00000000 # main: no sceGsSyncPath
+# CGamePad::Init: the controller is native (runtime/dc_pad.cpp). No libpad initialisation; both ports open (v0 = 1).
+# The sceGsSyncV waits around them stay: they are part of the boot timeline.
+0x0012a648 0x0c047d4c 0x00000000 # CGamePad::Init: no scePadInit
+0x0012a750 0x0c047de4 0x24020001 # CGamePad::Init: port 0 open, no scePadPortOpen
+0x0012a7b8 0x0c047de4 0x24020001 # CGamePad::Init: port 1 open, no scePadPortOpen

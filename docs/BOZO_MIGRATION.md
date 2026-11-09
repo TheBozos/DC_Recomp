@@ -1837,3 +1837,34 @@ it draws from the simulation grid at `cloth + row*0x100 + column*0x10`. In the c
 - With `DC_NATIVE_STATS=1` the Matataki, water and attract-demo routes build cloth 20, 12 and 64 times. All seven
   routes end as before with identical cards and zero register/unknown accesses, VU0 calls, transfers and syncs; the
   attract-demo route is frame-exact, and captures match within 3.5 mean levels outside the known fade frames.
+
+## Native controller: libpad retired
+
+The game reached its controllers only through `CGamePad` (the global at `0x1CBC540`): `Init` (`0x12A610`) called
+`scePadInit` and opened ports 0 and 1 with `scePadPortOpen`; each frame `UpDate` ran `read_pad` (`0x12A900`) for both
+ports, which walked libpad's handshake (`scePadGetState`, `scePadInfoMode`, `scePadSetMainMode`, `scePadInfoAct`,
+`scePadSetActAlign`) before `pad_button_read` (`0x12A830`) called `scePadRead`; `Step` (`0x12B140`) sent the motor
+levels with `scePadSetActDirect`. Nothing else in the game calls libpad.
+
+`runtime/dc_pad.cpp` replaces `read_pad` and `Step`. The controller in each port is what it always is on the PC, a
+DualShock 2 in analog mode: `read_pad` takes player 1's or 2's state from the engine's `PadInput` (the window's devices,
+or a script in checks) at the frames ended, as the engine's `scePadRead` did, and writes the 19-word `PAD_STATUS`
+exactly as the original left it after its handshake: the buttons byte-swapped as `scePadRead`'s halfword arrived (Cross
+`0x40`, Up `0x1000`), the sticks in ly, lx, ry, rx order, phase 99, state 6 (stable), mode IDs 7 and the actuator
+alignment (small motor byte 0, large byte 1). `Step` keeps the motor timers and the vibration switch (`+0x464`) and
+hands port 0's levels to player 1's rumble. Guarded patches retire `Init`'s `scePadInit` (`nop`) and both
+`scePadPortOpen` calls (`v0 = 1`); its `sceGsSyncV` waits stay, as they are part of the boot timeline.
+
+The handshake took a few frames at boot during which the original reported nothing pressed; the native read reports the
+controller from the first frame. No script or player presses anything that early.
+
+- `dc-pad-tests`: every one of the 16 buttons lands where the original `pad_button_read` put `scePadRead`'s bytes; sticks,
+  handshake fields and alignment as the original left them; port 1 reads player 2; no input source reads as nothing
+  pressed with centred sticks; `Step`'s timers, expiry and vibration switch, and port 0's levels reaching player 1's
+  rumble. 127/127 suites.
+- The game's only libpad call sites were `Init`'s three and those in `read_pad`, `pad_button_read` and `Step`; the
+  generated `Init` now calls only `sceGsSyncV` and `printf`, and the other three are no longer reachable.
+- All seven routes (their input comes through the same `PadInput`, scripted) end as before with identical cards and zero
+  register/unknown accesses, VU0 calls, transfers and syncs; the cheats-quit route still ends through Quit Game; the
+  attract-demo route (live script) is frame-exact, and captures match within 3.4 mean levels outside the known fade
+  frame. A real controller's rumble is not covered by these runs.

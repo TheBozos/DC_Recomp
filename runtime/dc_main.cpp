@@ -6,6 +6,7 @@
 #include "dc_functions.h"
 #include "dc_cheats.h"
 #include "dc_ingame_cheats.h"
+#include "dc_pad.h"
 #include "dc_native_api.h"
 #include "dun_functions.h"
 #include "title_functions.h"
@@ -136,6 +137,7 @@ int main(int argc, char **argv)
     dc::install(d.runtime(), registry);
     dc::cheats::install(d.runtime(), registry);
     dc::cheats::installIngameMenu(d.runtime(), registry, dc::native::finishSceneForMenu);
+    dc::pad::install(registry);
     std::string error;
     if (!host.setUp(d, dc_external_table, dc_external_count, &registry, error))
     {

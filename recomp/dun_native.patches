@@ -85,3 +85,5 @@
 0x01dc00bc 0x8f848bd4 0x24040000 # null packet argument; DrawtargetCursor__FPffff
 0x01dc0104 0x8f848bd4 0x24040000 # null packet argument; DrawtargetCursor__FPffff
 0x01dc174c 0x8f858bd4 0x24050000 # null packet argument; LoaderLoop__Fv
+# MainDraw before the battle mini-select capture: sceGsSyncPath answers idle; v0 is reloaded right after.
+0x01db0824 0x0c044be6 0x00000000 # no sceGsSyncPath

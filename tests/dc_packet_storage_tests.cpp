@@ -136,7 +136,8 @@ int main()
                 savedQwords += savings; word(expected.data(), counter, originalCounter - savings);
                 for (auto offset : {0x73f8u,0x73f4u}) word(expected.data(), gp - offset, 0x5a5a5a5a);
             }
-            if (kind == 2) { check(channels == 1, "adapted channel lookup retained"); word(expected.data(), gp - 0x742c, oldHandle); }
+            // The VIF1 handle is written as the constant sceDmaGetChan returned, without the lookup.
+            if (kind == 2) { check(channels == 0, "adapted handle without a channel lookup"); word(expected.data(), gp - 0x742c, oldHandle); }
             if (kind == 3) check(native.r[2].ud[0] == 0, "getter returns null with inaccessible GP");
             check(std::memcmp(ram, expected.data(), stack - 0x1000) == 0 &&
                 std::memcmp(ram + stack, expected.data() + stack, expected.size() - stack) == 0,

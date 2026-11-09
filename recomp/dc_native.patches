@@ -407,3 +407,27 @@
 0x00121348 0x0c0451b0 0x00000000 # sceSdTransToIOP: sceSifDmaStat (site 0x12134c)
 0x0012152c 0x0c045d2a 0x00000000 # sceSdRemote: sceSifCallRpc, 64-byte reply (site 0x121530)
 0x00121560 0x0c045d2a 0x00000000 # sceSdRemote: sceSifCallRpc (site 0x121564)
+# Remaining GS / DMA setup (docs/BOZO_MIGRATION.md, "GS and DMA setup"). sceDmaGetChan's handles are only read by
+# already-retired sends, syncs and channel bytes: the same constants are written in place (VIF1, GIF, fromSPR).
+0x0012c250 0x0c0430ea 0x3c021000 # MGInit: VIF1 handle without sceDmaGetChan (lui v0,0x1000)
+0x0012c254 0x00000000 0x34429000 # ... ori v0,v0,0x9000
+0x0012c260 0x0c0430ea 0x3c021000 # MGInit: GIF handle (lui v0,0x1000)
+0x0012c264 0x00000000 0x3442a000 # ... ori v0,v0,0xa000
+0x0012c270 0x0c0430ea 0x3c021000 # MGInit: fromSPR handle (lui v0,0x1000)
+0x0012c274 0x00000000 0x3442d000 # ... ori v0,v0,0xd000
+0x00140d44 0x0c0430ea 0x3c021000 # init_all: VIF1 handle (lui v0,0x1000)
+0x00140d48 0x00000000 0x34429000 # ... ori v0,v0,0x9000
+0x00140d54 0x0c0430ea 0x3c021000 # init_all: GIF handle (lui v0,0x1000)
+0x00140d58 0x00000000 0x3442a000 # ... ori v0,v0,0xa000
+0x00140d64 0x0c0430ea 0x3c021000 # init_all: fromSPR handle (lui v0,0x1000)
+0x00140d68 0x00000000 0x3442d000 # ... ori v0,v0,0xd000
+# DevInit only resets DMA (sceDmaReset, sceDmaGetEnv/PutEnv on a stack copy) and the GS path: nothing reads it.
+0x00140d38 0x0c049ee8 0x00000000 # init_all: no DevInit
+# The loading screen's double-buffer records are read only by the callback region already skipped (0x1546c4).
+0x00154264 0x0c044b02 0x00000000 # init_now_loading: no sceGsSetDefDBuff
+# MGInit's display halves are read only by the retired sceGsSwapDBuff. Its draw halves stay: the native frame
+# textures and the Z / alpha state read their FRAME, ZBUF and TEST images.
+0x00112c84 0x0c04490e 0x00000000 # sceGsSetDefDBuff: no sceGsSetDefDispEnv (half 0)
+0x00112ca0 0x0c04490e 0x00000000 # sceGsSetDefDBuff: no sceGsSetDefDispEnv (half 1)
+# main's loop exit on a mode change: sceGsSyncPath answers idle; v0 is not read.
+0x00141bd4 0x0c044be6 0x00000000 # main: no sceGsSyncPath

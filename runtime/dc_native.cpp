@@ -89,6 +89,68 @@ namespace dc::native
         constexpr uint32_t kTextureManager = 0x01C75870u;     // the CTextureManager every MDT material's texture is in
         uint64_t g_nativeModelBuilds = 0, g_nativeModelRemakes = 0, g_nativeShadowBuilds = 0, g_nativeClothBuilds = 0;
         uint64_t g_retiredModelBytes = 0;
+        // DC_PROBE_EXTENTS=1 (diagnosis): every model, remake, shadow and cloth buffer is filled with a pattern when
+        // built (the native builders write nothing there and nothing should read it); every 60 frames the buffers
+        // built in the last 600 frames are checked, and any byte something else changed is reported once per buffer.
+        uint32_t extentWord(const uint8_t *rdram, uint32_t address)
+        {
+            uint32_t value;
+            std::memcpy(&value, rdram + (address & 0x1FFFFFFu), 4);
+            return value;
+        }
+        struct ExtentCanary { uint32_t data = 0, bytes = 0, visual = 0, vtable = 0; uint64_t frame = 0; const char *kind = ""; bool reported = false; };
+        std::vector<ExtentCanary> g_extentCanaries;
+        uint64_t g_extentFrame = 0, g_extentChecked = 0, g_extentChanged = 0, g_extentLive = 0;
+        const uint8_t *g_extentRam = nullptr; // guest RAM, from the first build
+        bool extentProbe() { static const bool on = std::getenv("DC_PROBE_EXTENTS") != nullptr; return on; }
+        uint8_t extentPattern(uint32_t address) { return static_cast<uint8_t>(0xC5u ^ (address >> 4)); }
+        void extentFill(uint8_t *rdram, uint32_t data, uint32_t bytes, const char *kind, uint32_t visual)
+        {
+            if (!extentProbe() || bytes == 0u || bytes > 0x400000u) return;
+            g_extentRam = rdram;
+            for (uint32_t i = 0; i < bytes; ++i) rdram[(data + i) & 0x1FFFFFFu] = extentPattern(data + i);
+            // A rebuild of the same buffer starts its watch again.
+            std::erase_if(g_extentCanaries, [&](const ExtentCanary &c) { return c.data == data; });
+            g_extentCanaries.push_back({data, bytes, visual, extentWord(rdram, visual + 8u), g_extentFrame, kind});
+        }
+        void extentCheck(const uint8_t *rdram)
+        {
+            if (!extentProbe()) return;
+            ++g_extentFrame;
+            if (g_extentFrame % 60u != 0u) return;
+            std::erase_if(g_extentCanaries, [](const ExtentCanary &c) { return g_extentFrame - c.frame > 600u; });
+            for (auto &c : g_extentCanaries)
+            {
+                ++g_extentChecked;
+                if (c.reported) continue;
+                for (uint32_t i = 0; i < c.bytes; ++i)
+                    if (rdram[(c.data + i) & 0x1FFFFFFu] != extentPattern(c.data + i))
+                    {
+                        c.reported = true;
+                        ++g_extentChanged;
+                        // Live: the visual still has its vtable and still points at this buffer with this size.
+                        const bool live = extentWord(rdram, c.visual + 8u) == c.vtable && extentWord(rdram, c.visual + 0x18u) == c.data &&
+                                          extentWord(rdram, c.visual + 0x1Cu) * 16u == c.bytes;
+                        if (live) ++g_extentLive;
+                        if (live)
+                        {
+                            const uint32_t at = (c.data + (i & ~15u)) & 0x1FFFFFFu;
+                            std::fprintf(stderr, "[dc:extent]   new bytes at +0x%x: %08x %08x %08x %08x; visual +0x18 %08x +0x1c %08x\n",
+                                         i & ~15u, extentWord(rdram, at), extentWord(rdram, at + 4u), extentWord(rdram, at + 8u),
+                                         extentWord(rdram, at + 12u), extentWord(rdram, c.visual + 0x18u), extentWord(rdram, c.visual + 0x1Cu));
+                        }
+                        std::fprintf(stderr, "[dc:extent] %s buffer %08x (%u bytes, visual %08x, built frame %llu): byte +0x%x changed by frame %llu, %s\n",
+                                     c.kind, c.data, c.bytes, c.visual, static_cast<unsigned long long>(c.frame), i,
+                                     static_cast<unsigned long long>(g_extentFrame), live ? "VISUAL STILL OWNS IT" : "visual gone or moved");
+                        break;
+                    }
+            }
+            if (g_extentFrame % 600u == 0u)
+                std::fprintf(stderr, "[dc:extent] frame %llu: %zu buffers watched, %llu checks, %llu changed, %llu while their visual owned them\n",
+                             static_cast<unsigned long long>(g_extentFrame), g_extentCanaries.size(),
+                             static_cast<unsigned long long>(g_extentChecked), static_cast<unsigned long long>(g_extentChanged),
+                             static_cast<unsigned long long>(g_extentLive));
+        }
         uint64_t g_group = 0;
 
         struct Stats
@@ -314,35 +376,11 @@ namespace dc::native
             if (!textureMode) std::memcpy(&textureMode, guest.in(gp - 0x7420u, 8), 8);
             return textureMode ? 4u : 3u;
         }
-        uint32_t modelAllocationQwords(const MdtDescription &model, bool shadow, bool remake,
-                                       bozo::libs::Guest &guest, const uint8_t *ram, uint32_t mdt, uint32_t gp)
-        {
-            uint64_t qwords = 0;
-            for (const auto &primitive : model.primitives)
-            {
-                ++qwords;
-                if (shadow)
-                {
-                    const uint32_t triangles = primitive.count / 3u;
-                    qwords += triangles * 6ull + ((triangles + 9u) / 10u) * 3ull;
-                    continue;
-                }
-                if (primitive.material != -1)
-                    qwords += 5u + (remake ? 4u : textureAllocationQwords(guest, boundRecord(ram, mdt + model.materials +
-                                         static_cast<uint32_t>(primitive.material) * 0x60u + 0x34u), gp));
-                const uint32_t limit = model.stride == 4u ? 33u : 54u;
-                uint32_t remaining = primitive.count;
-                while (remaining)
-                {
-                    const uint32_t vertices = std::min(remaining, limit);
-                    qwords += vertices * model.stride + 4u;
-                    remaining -= vertices;
-                    if (primitive.kind == 4u && remaining) remaining += 2u;
-                }
-            }
-            if (qwords > 0x1ffffffu / 16u) throw std::runtime_error("native model: allocation extent too large");
-            return static_cast<uint32_t>(qwords);
-        }
+        // The extent a model, remake or shadow build reserves in the game's arena: one qword. CreateVisual allocates it
+        // at the data address it passed (and Align64 follows), so every build keeps a distinct, aligned address, the key
+        // of its retained MDT. The old VIF packet size reserved space nothing fills: DC_PROBE_EXTENTS found no game
+        // code writing into a live buffer (docs/BOZO_MIGRATION.md, "Model extents").
+        constexpr uint32_t kNativeModelQwords = 1u;
         void noteMdt(const uint8_t *rdram, uint32_t data, uint32_t mdt, bool bind, const MdtDescription &model)
         {
             const uint32_t size = model.size;
@@ -382,13 +420,14 @@ namespace dc::native
             bozo::libs::Guest guest(*runtime, ctx);
             const uint32_t visual = getRegU32(ctx, 4), data = getRegU32(ctx, 5), mdt = getRegU32(ctx, 6);
             const auto model = describeMdt(guest, mdt, shadow);
-            const uint32_t qwords = modelAllocationQwords(model, shadow, remake, guest, rdram, mdt, getRegU32(ctx, 28));
+            const uint32_t qwords = kNativeModelQwords;
             guest.in(visual + 0x18u, 8);
             noteMdt(rdram, data, mdt, !remake && !shadow, model);
             guest.write32(visual + 0x18u, data);
             guest.write32(visual + 0x1cu, qwords);
             ++(shadow ? g_nativeShadowBuilds : remake ? g_nativeModelRemakes : g_nativeModelBuilds);
             g_retiredModelBytes += qwords * 16ull;
+            extentFill(rdram, data, qwords * 16u, shadow ? "shadow" : remake ? "remake" : "model", visual);
             setReturnS32(ctx, static_cast<int32_t>(qwords));
             ctx->pc = getRegU32(ctx, 31);
         }
@@ -4801,6 +4840,8 @@ namespace dc::native
             return;
         bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
         ++g_publishedFrames;
+        if (g_extentRam)
+            extentCheck(g_extentRam);
         static uint32_t s_frames = 0;
         static const bool s_reportStats = [] {
             const char *value = std::getenv("DC_NATIVE_STATS");

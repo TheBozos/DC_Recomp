@@ -1788,3 +1788,39 @@ on. Restoring only `CGamePad::Init`'s waits put frame 0 back, but the attract de
 previous build is inside `main`'s wait-for-odd-field loop (`0x141140`), which really does spin during boot until the
 loading screen's vsync callback ends a frame. Removing these calls would change behaviour for a few dozen free calls at
 startup, so they stay; the one-time `sceGsResetGraph` (field rate) and `sceGsSetDef*` record setup stay too.
+
+## Model extents: who writes the VU data buffers (2026-11-09)
+
+The model, remake and shadow builders still return the old VIF packet size (`modelAllocationQwords`), and the game
+reserves that much arena for a buffer nothing fills. Before replacing it with a native size, `DC_PROBE_EXTENTS=1`
+checks whether anything else uses those buffers. Each buffer is filled with a pattern when built (native builders write
+nothing there), and every 60 frames the buffers built in the last 600 frames are compared. A change is classified as
+**live** when the building visual still has its vtable, still points at this buffer and still has this size.
+
+- The six gameplay routes (Matataki travel, Cheats + Quit, water, dungeon menu, save, reload) report 13–82 changed
+  buffers each, and **none while their visual owned them**: every change is reuse after the scene or asset changed.
+- The attract-demo route reports 352 changed buffers, 8 classified live. Their new bytes are float vectors ending in
+  1.0 and colour bytes: model data loaded at the demo's scene switches (frames 4,980, 6,120, 6,480, 7,020, 7,440),
+  over buffers whose old visual records simply were not overwritten yet. No VIF command words appear.
+
+No game code was found writing into a built VU data buffer that is still in use. `SetVuData`, the only original
+routine that wrote into one, is called only from the replaced `CreateVUdataFromMDT`. Cloth builds return a size before
+their buffer exists, so the probe does not cover cloth. 
+
+### Native model extent
+
+Model, remake and shadow builds now reserve **one qword**; `modelAllocationQwords` and its VIF packet formula are
+gone. `CreateVisual` builds at the allocator's cursor, reserves the returned extent, adds it to the game's running
+total at `gp-0x7460` and calls `Align64`, so every build still gets its own 64-byte-aligned data address. That address
+keys the retained MDT copy, and double-buffered visuals keep their two distinct addresses at `+0x28`/`+0x2c`. Remakes
+reuse their buffer, and the raw `CVisualMDTVu1` draw's temporary allocation now takes one qword. Before, single builds
+reserved up to hundreds of kilobytes each (the probe saw 75,008- and 334,176-byte remake buffers). Cloth keeps its
+legacy formula for now: its size is consumed inside its per-frame draw, which is not yet audited, and the probe cannot
+watch it.
+
+- The builder fixture (1,064 cases) now requires the original to reserve its VIF size and the native build to reserve
+  one qword, with its data address recorded and no console output written. 126/126 suites.
+- All seven routes end as before with identical cards and zero register/unknown accesses, VU0 calls, transfers and
+  syncs. The attract-demo route is still frame-exact. Captures match within 3.6 mean levels outside the known fade
+  frames. A scripted walk onto Divine Beast Cave B1 (map revealed through the Cheats page) renders the floor, Toan and
+  HUD normally.

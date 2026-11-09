@@ -64,14 +64,18 @@ namespace
         std::memset(ram + output, 0xa5, 0x20000);
         auto native = context(); native.pc = pc;
         registry.find(pc)(ram, &native, &rt);
-        check(native.r[2].uw[0] == expectedSize, "native allocation extent matches original compiled builder");
-        check(word(ram, visual + 0x1c) == expectedVisualSize, "visual size bookkeeping matches original");
+        // The native extent is one qword: CreateVisual reserves it at the data address and aligns to 64 bytes, so each
+        // build keeps a distinct address. The original's VIF packet size is no longer reserved.
+        check(expectedSize > 1u && expectedVisualSize == expectedSize, "the original reserves its VIF packet size");
+        check(native.r[2].uw[0] == 1u, "native allocation extent is one qword");
+        check(word(ram, visual + 0x1c) == 1u && word(ram, visual + 0x18) == output,
+              "visual records its data address and the native extent");
         check(native.pc == 0x123450 && native.r[29].uw[0] == 0x700000, "native builder preserves return and stack");
         check(std::all_of(ram + output, ram + output + 0x20000, [](uint8_t v) { return v == 0xa5; }),
               "native builder never serializes the console output");
         native = context(0x12000000); native.pc = pc;
         registry.find(pc)(ram, &native, &rt);
-        check(native.r[2].uw[0] == expectedSize, "obsolete output address is never dereferenced");
+        check(native.r[2].uw[0] == 1u, "obsolete output address is never dereferenced");
     }
 }
 int main()

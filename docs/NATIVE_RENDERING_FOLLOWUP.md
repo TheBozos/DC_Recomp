@@ -625,3 +625,16 @@ routes match the previous build (faces, HUD, menus, identical cards); the only d
 timing and the random dungeon floor. A 42-minute human fullscreen run on this build averaged 60 FPS every
 minute, its slowest two-second window 56.6 FPS, with up to 10.8 MiB hashed in a frame. The player revisited
 the slow house in that run and reported no frame drop there.
+
+## Town water mirrored the cliffs after the menu (November 9)
+
+In a town canal the water near Toan showed the cliffs above it, like a mirror, while the far water looked normal. It
+appeared only after the menu had been opened. The town copies its frame into the water's `work` place every frame
+(`MGStretchMoveImage` / `MGMoveImage`), and `CWater` refracts that copy. Opening the menu runs
+`MGMoveFrameBuffImage`, which captures both fields into the same place as a 448-row picture and marked the place
+`g_targetRows = 448`. Nothing reset it, so every later 224-row frame copy was sampled at half its height: the water
+read the upper part of the screen. A diagnostic run logged the copies (about 800 per session into `0x1A40`, two
+captures at the menu) and the water's choice (refracted from that place every frame). The stretch copy now marks its
+place 224 rows (the 640 x 224 picture it makes) and the plain copy the source's rows. The bug predates 0.3.0: its
+screenshot without a menu opened shows the same water as the fixed build. 128/128 suites; all seven routes end as
+before with identical cards, the attract demo frame-exact.

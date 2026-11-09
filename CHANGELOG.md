@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Town water no longer turns into a mirror of the cliffs after the menu has been opened.
+
 ### Changed
 - The controller is read natively: the game's pad code takes the PC controller's state directly and sends rumble back to it, with no PS2 pad library in between.
 - Sound commands, sound-hardware settings (volumes, reverb) and sample uploads go straight to the game's natively compiled sound drivers, with no PS2 SIF (EE-to-IOP) transfer layer in between.

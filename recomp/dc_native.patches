@@ -431,3 +431,10 @@
 0x00112ca0 0x0c04490e 0x00000000 # sceGsSetDefDBuff: no sceGsSetDefDispEnv (half 1)
 # main's loop exit on a mode change: sceGsSyncPath answers idle; v0 is not read.
 0x00141bd4 0x0c044be6 0x00000000 # main: no sceGsSyncPath
+# MGInit's double-buffer record (sceGsSetDefDBuff: display, draw and clear environments as GS register images) is no
+# longer made. Its readers are native: the frame-texture getters build their TEX0 words themselves, and the two loads
+# of draw 0's TEST and ZBUF are native sites (runtime/dc_port.cpp) giving the same values. MGInit writes the record's
+# clear colour bytes itself, as before.
+0x0012c33c 0x0c044b02 0x00000000 # MGInit: no sceGsSetDefDBuff
+0x0012c510 0xdcc60000 0xdcc60000 # MGInit: native site, draw 0 TEST (guard)
+0x0012c57c 0xdc840000 0xdc840000 # MGInit: native site, draw 0 ZBUF (guard)

@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The controller is read natively: the game's pad code takes the PC controller's state directly and sends rumble back to it, with no PS2 pad library in between.
+
 ## [0.3.0] - 2026-11-09
 
 ### Added

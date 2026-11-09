@@ -1140,7 +1140,7 @@ The allocation audit deliberately retains these different owners:
 | Shared primary arena and read/data subarenas | Real files, models, game objects and allocator cursor/bounds behavior |
 | Visibility descriptor/capacity/cursor | Native depth queries and per-frame reset of their logical request extent; its backing reserve is removed |
 | Visual MDT data address and size | `CreateVisual` `0x126770` passes the native builder's visual size to `CDataAlloc2::Alloc`, then advances game bookkeeping; the data address keys `g_mdtCopies` and visual fields |
-| Model/shadow/cloth allocation extents | The shared game allocation ABI still advances by these sizes. `modelAllocationQwords` and `clothCreateHook` retain legacy VIF-size formulas without serializing packets. Shrinking them requires migrating address identity, reuse/lifetime and live-animation/remake contracts together |
+| Model/shadow/cloth allocation extents | The shared game allocation ABI still advances by these sizes. Since the model-extent and cloth-extent migrations each build reserves one qword, keeping its own aligned address (see "Native model extent" and "Native cloth extent") |
 
 The earlier snapshot/lifetime and original/native builder tests still pass. No generic allocator is replaced,
 and the model/cloth size ABI is not collapsed to zero or a shared dummy identity.
@@ -1814,9 +1814,7 @@ gone. `CreateVisual` builds at the allocator's cursor, reserves the returned ext
 total at `gp-0x7460` and calls `Align64`, so every build still gets its own 64-byte-aligned data address. That address
 keys the retained MDT copy, and double-buffered visuals keep their two distinct addresses at `+0x28`/`+0x2c`. Remakes
 reuse their buffer, and the raw `CVisualMDTVu1` draw's temporary allocation now takes one qword. Before, single builds
-reserved up to hundreds of kilobytes each (the probe saw 75,008- and 334,176-byte remake buffers). Cloth keeps its
-legacy formula for now: its size is consumed inside its per-frame draw, which is not yet audited, and the probe cannot
-watch it.
+reserved up to hundreds of kilobytes each (the probe saw 75,008- and 334,176-byte remake buffers).
 
 - The builder fixture (1,064 cases) now requires the original to reserve its VIF size and the native build to reserve
   one qword, with its data address recorded and no console output written. 126/126 suites.
@@ -1824,3 +1822,18 @@ watch it.
   syncs. The attract-demo route is still frame-exact. Captures match within 3.6 mean levels outside the known fade
   frames. A scripted walk onto Divine Beast Cave B1 (map revealed through the Cheats page) renders the floor, Toan and
   HUD normally.
+
+### Native cloth extent
+
+Cloth `CreateVUData` (`0x13C5F0`) now also reserves **one qword**; `textureAllocationQwords` and its formula are gone.
+`CCloth::Initialize` stores the cursor as buffer 0 (`+0x24`), builds, records the size at `+0x1C`, reserves it with
+`Alloc`, takes buffer 1 with `Alloc64(size)` (`+0x28`) and builds again, so the two buffers keep distinct addresses.
+Its per-frame `DrawVu1` (`0x13C470`) is replaced by the native cloth draw, which never reads the size or either buffer:
+it draws from the simulation grid at `cloth + row*0x100 + column*0x10`. In the cloth code (`0x13B800`–`0x13E400`) only
+`Initialize` touches `+0x1C` (`0x13CC5C`–`0x13CC94`).
+
+- The builder fixture's cloth case now requires the original to reserve its VIF size and the native build one qword.
+  126/126 suites.
+- With `DC_NATIVE_STATS=1` the Matataki, water and attract-demo routes build cloth 20, 12 and 64 times. All seven
+  routes end as before with identical cards and zero register/unknown accesses, VU0 calls, transfers and syncs; the
+  attract-demo route is frame-exact, and captures match within 3.5 mean levels outside the known fade frames.

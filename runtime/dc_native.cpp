@@ -367,15 +367,6 @@ namespace dc::native
             }
             return model;
         }
-        // The caller still advances its shared arena by this extent. Preserve that ABI while
-        // retiring every byte of VIF/material/vertex serialization into the supplied buffer.
-        uint32_t textureAllocationQwords(bozo::libs::Guest &guest, uint32_t record, uint32_t gp)
-        {
-            uint64_t textureMode = 0;
-            if (record) std::memcpy(&textureMode, guest.in(record + 0x30u, 8), 8);
-            if (!textureMode) std::memcpy(&textureMode, guest.in(gp - 0x7420u, 8), 8);
-            return textureMode ? 4u : 3u;
-        }
         // The extent a model, remake or shadow build reserves in the game's arena: one qword. CreateVisual allocates it
         // at the data address it passed (and Align64 follows), so every build keeps a distinct, aligned address, the key
         // of its retained MDT. The old VIF packet size reserved space nothing fills: DC_PROBE_EXTENTS found no game
@@ -1881,8 +1872,10 @@ namespace dc::native
             const int32_t columns = static_cast<int32_t>(guest.read32(cloth + 0x30u));
             if (rows < 0 || rows > 16 || columns < 0 || columns > 16)
                 throw std::runtime_error("native cloth: grid outside simulation storage");
-            const uint32_t qwords = 6u + textureAllocationQwords(guest, textureRecord(ram, cloth + 0x94u), getRegU32(ctx, 28)) +
-                                    static_cast<uint32_t>(std::max(0, rows - 1)) * (4u + static_cast<uint32_t>(columns) * 6u);
+            // One qword, as for models: CCloth::Initialize reserves it for buffer 0 and takes buffer 1 with Alloc64, so the
+            // two stay distinct; its per-frame DrawVu1 (native) never uses the size, and the native draw reads the
+            // simulation grid, not either buffer.
+            const uint32_t qwords = kNativeModelQwords;
             ++g_nativeClothBuilds;
             g_retiredModelBytes += qwords * 16ull;
             setReturnS32(ctx, static_cast<int32_t>(qwords));

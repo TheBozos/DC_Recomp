@@ -18,7 +18,7 @@ base, end, helpers = {
     'water': (0x160f20, 0x1610fc, [0x161100, 0x1281b0, 0x1607e0]),
     'effect': (0x163480, 0x1638ec, [0x1312d0, 0x12e990, 0x1110b0, 0x12e740, 0x15d4b0]),
     'frame_close': (0x12d1dc, 0x12d268, [0x120de0, 0x120c28, 0x112f98, 0x104698, 0x113f40]),
-    'frame_submit': (0x12d610, 0x12d6a8, [0x10cc58, 0x10c3a8, 0x1145a0, 0x10c6f8]),
+    'frame_submit': (0x12d5c0, 0x12d6a8, [0x113e48, 0x112ea0, 0x10cc58, 0x10c3a8, 0x1145a0, 0x10c6f8]),
     'frame_draw': (0x12ed80, 0x12edec, [0x120c28, 0x120f78]),
     'frame_member': (0x12a110, 0x12a18c, [0x120c28, 0x120f78]),
     'mdt_draw': (0x1360e0, 0x136200, [0x127900, 0x1033b0, 0x135000]),
@@ -93,7 +93,7 @@ selected = [line for line in patches.read_text().splitlines()
 expected = {'frame_close': 2, 'frame_draw': 0, 'frame_member': 0, 'mdt_draw': 2,
             'message': 3, 'edit_state': 2, 'menu_state': 2, 'loading': 13, 'fire': 6, 'language': 2, 'fishing': 9,
             'debug_font': 14, 'packet_init': 2, 'begin_frame': 5, 'resident_chain': 2, 'loading_init': 2,
-            'packet_reserve': 2, 'buffer_clear': 4, 'packet_handle': 1, 'packet_get': 1, 'frame_submit': 7}.get(kind, 4)
+            'packet_reserve': 2, 'buffer_clear': 4, 'packet_handle': 1, 'packet_get': 1, 'frame_submit': 12}.get(kind, 4)
 handle_sites = {int(line.split()[0], 16) for line in selected
                 if int(line.split()[0], 16) != 0x12e280
                 and int(line.split()[1], 16) & 0xffe0ffff == 0x8f808bd4

@@ -399,3 +399,11 @@
 0x00147b10 0x0c045168 0x00000000 # ezTransToIOP: FlushCache
 0x00147b24 0x0c0451b8 0x00000000 # ezTransToIOP: sceSifSetDma
 0x00147b48 0x0c0451b0 0x00000000 # ezTransToIOP: sceSifDmaStat
+# libsdr's transport is native too (runtime/dc_sound.cpp): each call is a nop and the native site is its delay slot,
+# whose instruction the site does before the call.
+0x00121260 0x0c045b12 0x00000000 # sceSdRemoteInit: sceSifInitRpc (site 0x121264)
+0x00121274 0x0c045cb6 0x00000000 # sceSdRemoteInit: sceSifBindRpc (site 0x121278)
+0x00121330 0x0c0451b8 0x00000000 # sceSdTransToIOP: sceSifSetDma (site 0x121334)
+0x00121348 0x0c0451b0 0x00000000 # sceSdTransToIOP: sceSifDmaStat (site 0x12134c)
+0x0012152c 0x0c045d2a 0x00000000 # sceSdRemote: sceSifCallRpc, 64-byte reply (site 0x121530)
+0x00121560 0x0c045d2a 0x00000000 # sceSdRemote: sceSifCallRpc (site 0x121564)

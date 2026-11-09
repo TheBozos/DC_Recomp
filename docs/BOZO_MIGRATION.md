@@ -1924,3 +1924,31 @@ The end-of-run report now prints the host's call totals. On the Matataki route (
 All seven routes end as before with identical cards and zero register/unknown accesses, VU0 calls, transfers and syncs;
 the attract-demo route is frame-exact; captures match within 0.95 mean levels outside the known fade frames. 128/128
 suites.
+
+## Library calls by function, and libsdr's transport
+
+The host now counts its native library calls by function (BozoEngine `FreeStats::libraryByName`); with
+`DC_CALL_STATS=1` DC prints them at the end of a run, most first. On the scripted routes (6,800 to 10,000 frames) they
+are, by far, C library work that is native as it is: `__kernel_sinf` (260,000 to 675,000), `memcpy` (170,000 to
+340,000), `rand` / `srand`, `memset`, `__kernel_cosf`, `__ieee754_rem_pio2f`, `strcmp`, `strcpy`, `strlen`, `sprintf`,
+`printf`. The PS2 services are rare and event-driven: disc reads (`sceCdRead`, `sceCdSync`, `sceCdGetError`, about one
+per file loaded), memory card (`sceMc*`, at saves and the load screen), the IOP heap (`sceSifInitIopHeap`,
+`sceSifAllocIopHeap`, `sceSifFreeIopHeap`, at sound-bank loads), module loading at boot, GS setup at mode changes
+(`sceGsSetDefDrawEnv`, `sceGsSetDefDispEnv`, `sceGsSetDefClear`, `sceGsSyncPath`, `sceDmaGetChan`) and `sceGsSyncV`
+(the boot and loading timeline, kept).
+
+They also showed `sceSifCallRpc` still made 51 to 88 times a route after the sound transport. A probe of its callers found
+one: libsdr's `sceSdRemote`, the SDK's EE side of the IOP sound-hardware driver, compiled as game code, which
+`set_spu` and `CSound::SetReverb` call for SPU volumes and reverb. Its `sceSdRemoteInit` and `sceSdTransToIOP` complete
+it. They are compiled with work in their delay slots, so each call is a guarded `nop` and the native site is the delay
+slot's instruction: the handler does that instruction first (`lui s1`, `daddu a2`, `sw zero,12(v0)`,
+`daddu a0,s1`, `addiu t2,64`), then the call: binding, RPC to the module's handler, transfer into its memory, finished.
+
+- `dc-sound-tests` also checks the six libsdr sites: each delay-slot instruction's effect before the call, the binding,
+  the RPC with its 64-byte reply size set first, the record cleared through `v0` before the transfer, and the stat.
+- All seven routes end as before with identical cards and zero register/unknown accesses, VU0 calls, transfers and
+  syncs; the attract-demo route is frame-exact; captures match within 1.65 mean levels outside the known fade frame.
+  `sceSifCallRpc` no longer appears in any route's counts; the SIF calls left are boot and loading services
+  (`sceSifInitRpc`, `sceSifLoadModule`, `sceSifRebootIop`, `sceSifSyncIop`, the IOP heap).
+- The attract demo recorded to WAV again has the released 0.3.0 build's peak in every ten-second block and RMS within
+  a few percent.

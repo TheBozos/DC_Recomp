@@ -185,8 +185,29 @@ int main(int argc, char **argv)
                 REFERENCE[0].function(ram, &original, &rt);
                 check(original.pc == 0x123450 && !original.leaving, "reference returns normally");
                 check(packetCalls == (kind == 0 ? 4 : kind == 3 ? ((gate >> 1) || !(gate & 1) ? 0 : 1) : 1), "reference conditional packet count");
-                const auto expectedEvents = events;
+                auto expectedEvents = events;
                 std::vector<uint8_t> expected(ram, ram + base.size());
+                if (kind == 3)
+                {
+                    // The loading screen's sceGsSetDefDBuff is retired (its records are read only by the callback
+                    // region already skipped): no event, no write into the record, and the marker folds without it.
+                    std::vector<Event> kept;
+                    const auto read = [&](uint32_t at) { uint32_t v; std::memcpy(&v, initial.data() + at, 4); return v; };
+                    uint32_t folded = read(marker);
+                    for (const auto &event : expectedEvents)
+                    {
+                        if (event.pc == 0x112c08)
+                        {
+                            word(expected.data(), event.data[0], read(event.data[0]));
+                            continue;
+                        }
+                        kept.push_back(event);
+                        if (event.pc != 0x1110b0 && event.pc != 0x121830 && event.pc != 0x1218a8 && event.pc != 0x12c700)
+                            folded = folded * 33 + event.pc;
+                    }
+                    word(expected.data(), marker, folded);
+                    expectedEvents = kept;
+                }
                 std::memcpy(ram, initial.data(), initial.size());
                 // Poison both main objects, the loading object and all retired
                 // output. Main's packet handle is deliberately inaccessible.

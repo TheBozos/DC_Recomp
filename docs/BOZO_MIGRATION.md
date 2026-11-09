@@ -1952,3 +1952,32 @@ slot's instruction: the handler does that instruction first (`lui s1`, `daddu a2
   (`sceSifInitRpc`, `sceSifLoadModule`, `sceSifRebootIop`, `sceSifSyncIop`, the IOP heap).
 - The attract demo recorded to WAV again has the released 0.3.0 build's peak in every ten-second block and RMS within
   a few percent.
+
+## GS and DMA setup
+
+The library counts left a handful of GS / DMA setup calls, all at boot, loading screens or mode changes. A reader
+analysis (every live reader of each call's output, after the patches already in place) found:
+
+- `StoreImage` never runs (DC registers it to throw: a console screenshot needs a native owner), and the
+  `CTextureManager::EnterFixTexture(Z)` bodies never run (native hooks replace them), so their GS / DMA calls are
+  unreachable. No `sceDmaSend`, `sceDmaSync`, `sceGsSwapDBuff` or `sceGsSetHalfOffset` call is live anywhere.
+- **Retired** (guarded patches): the six `sceDmaGetChan` lookups in `MGInit` and `init_all` (their handles are read only
+  by already-retired sends, syncs and channel bytes; the same constants, VIF1 `0x10009000`, GIF `0x1000A000`, fromSPR
+  `0x1000D000`, are written in place); `DevInit` (`sceDmaReset`, `sceDmaGetEnv` / `sceDmaPutEnv` on a stack copy,
+  `sceGsResetPath`: nothing reads them); the loading screen's `sceGsSetDefDBuff` (its records are read only by the
+  callback region already skipped); `MGInit`'s two `sceGsSetDefDispEnv` halves (read only by the retired swap); and the two
+  live `sceGsSyncPath` calls (main's loop exit on a mode change, DUN `MainDraw` before the mini-select capture; `v0`
+  unread).
+- **Kept, and still a GS dependency:** `MGInit`'s two `sceGsSetDefDrawEnv` halves. The native renderer reads the GS
+  register images they write: draw 0 / draw 1 `FRAME` for the frame and back-buffer textures (`MGGetFBuff(Back)Tex`), and
+  draw 0 `TEST` / `ZBUF` for the Z mask and alpha test (`MGInit` copies them to the values `CFrameVu1::DrawVu1` hands the
+  native `SetGsReg3` hook). Retiring them means `MGInit` writing those words itself. Also kept: `sceGsResetGraph` (it sets
+  the kernel's field rate, NTSC or PAL, and the scratchpad word `DrawEnv` derives `ZBP` from) and `sceGsSyncV` (the boot and
+  loading timeline).
+
+The span fixtures follow: `packet_handle` now expects the VIF1 handle without a lookup, and `loading_init` the same
+ordered effects without `sceGsSetDefDBuff`'s event, record write or marker step.
+- 128/128 suites; CI's own build (`tests/native_lifetime`) 59/59. All seven routes end as before with identical cards
+  and zero register/unknown accesses, VU0 calls, transfers and syncs; the attract-demo route is frame-exact; captures
+  match within 1.38 mean levels outside the known fade frames. The GS / DMA library calls left across the seven routes
+  are exactly the kept ones: `sceGsSyncV` 535, `sceGsSetDefDrawEnv` 14, `sceGsResetGraph` 7.

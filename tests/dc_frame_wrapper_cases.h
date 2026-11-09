@@ -51,7 +51,7 @@ namespace
         NativePort port{libs, this};
         Observer observer{libs};
         RecompiledFunction end = nullptr, terminate = nullptr, channel = nullptr;
-        int packetCalls = 0, syncCalls = 0, flushCalls = 0, sendCalls = 0;
+        int packetCalls = 0, syncCalls = 0, flushCalls = 0, sendCalls = 0, dmaSyncCalls = 0;
         uint32_t sentChannel = 0, sentSource = 0;
         Machine()
         {
@@ -60,7 +60,7 @@ namespace
             end = rt.functions.generated(0x120de0); terminate = rt.functions.generated(0x120c28);
             channel = rt.functions.generated(0x10c3a8);
             if (!end || !terminate || !channel) throw std::runtime_error("missing original SDK helper");
-            for (uint32_t pc : {0x120de0u,0x120c28u,0x112f98u,0x104698u,0x113f40u,0x10c3a8u,0x1145a0u,0x10c6f8u})
+            for (uint32_t pc : {0x120de0u,0x120c28u,0x112f98u,0x104698u,0x113f40u,0x10c3a8u,0x1145a0u,0x10c6f8u,0x10cc58u})
                 rt.functions.setOverride(pc, sdk);
             libs.attach(dispatcher); rt.port = &port; dispatcher.kernel().setObserver(&observer);
             auto &old = libs.io.channels[1];
@@ -83,6 +83,11 @@ namespace
                 m.libs.find("sceGsSyncPath")->handler(m.libs, guest);
             }
             else if (pc == 0x10c3a8) m.channel(ram, ctx, rt);
+            else if (pc == 0x10cc58)
+            {
+                ++m.dmaSyncCalls;
+                m.libs.find("sceDmaSync")->handler(m.libs, guest);
+            }
             else if (pc == 0x1145a0) { ++m.flushCalls; guest.ret(0); } // coherent native RAM, no cache device
             else if (pc == 0x10c6f8)
             {
@@ -140,39 +145,38 @@ int main()
         }
     std::printf("DC frame close: %d reference/adapted cases, %d failures\n", cases, failures);
 #else
+    // The per-frame transfer tail: the published reference waits on the GIF channel, flushes and sends an empty VIF1
+    // transfer; the adapted tail does none of it. The game installs no DMA-completion handler, so no completion is
+    // owed. Frame counter, its first-frame flag, channel lookup and buffer toggle must match.
     for (uint32_t count : {0u,1u,0x7fffffffu,0xffffffffu})
         for (uint32_t frame : {0u,1u,0xffffffffu})
-            for (bool masked : {false,true})
+            for (bool first : {false,true})
             {
                 ++cases; Machine reference, native;
                 reference.setup(0, false, count, frame, false); native.setup(0, false, count, frame, true);
                 for (Machine *m : {&reference, &native})
                 {
-                    m->dispatcher.kernel().addHandler(true, 1, 0x123400, -1, 0, 0, 0);
-                    m->dispatcher.kernel().causeEnable(true, 1, !masked);
+                    auto *r = m->dispatcher.runtime().memory.ram();
+                    r[gp - 0x73a8] = first ? 0 : 1;
+                    word(r, gp - 0x7434, 0x1000a000); // the GIF channel handle MGInit stored
                 }
                 reference.run(DC_FRAME_REFERENCE[0].function);
                 auto *ram = native.dispatcher.runtime().memory.ram();
                 const auto *ref = reference.dispatcher.runtime().memory.ram();
                 std::vector<uint8_t> expected(ram, ram + bozo::kFlatScratchpadOffset);
                 for (uint32_t address : {gp - 0x73ac, gp - 0x7438, gp - 0x7440}) word(expected.data(), address, word(ref, address));
+                expected[gp - 0x73a8] = ref[gp - 0x73a8];
                 native.run(DC_FRAME_NATIVE[0].function);
-                check(reference.flushCalls == 1 && native.flushCalls == 1 && reference.sendCalls == 1 && native.sendCalls == 1,
-                      "native completion and surrounding retained SDK call occur exactly once");
-                check(reference.sentChannel == 0x10009000 && native.sentChannel == reference.sentChannel &&
-                      reference.sentSource == output && native.sentSource == 0, "same native channel completion no longer needs a packet source");
-                check(native.libs.io.nativeSubmissions[1] == 1 && reference.libs.io.nativeSubmissions[1] == 1 &&
-                      native.libs.io.nativeCompleted[1] && reference.libs.io.nativeCompleted[1], "native completion state matches published reference");
-                check(reference.dispatcher.kernel().handlerQueued() == !masked && native.dispatcher.kernel().handlerQueued() == !masked,
-                      "completion callback delivery respects its original mask");
-                if (masked)
-                {
-                    reference.dispatcher.kernel().causeEnable(true, 1, true); native.dispatcher.kernel().causeEnable(true, 1, true);
-                    check(reference.dispatcher.kernel().handlerQueued() && native.dispatcher.kernel().handlerQueued(),
-                          "masked completion survives until callback enable");
-                }
+                check(reference.dmaSyncCalls == 1 && reference.flushCalls == 1 && reference.sendCalls == 1,
+                      "published reference waits, flushes and sends once");
+                check(native.dmaSyncCalls == 0 && native.flushCalls == 0 && native.sendCalls == 0 &&
+                      native.libs.io.nativeSubmissions[1] == 0 && native.libs.io.nativeSynchronizations == 0,
+                      "adapted tail makes no transfer, flush or wait");
+                check(reference.sentChannel == 0x10009000 && reference.sentSource == output,
+                      "the reference sent the old packet on the VIF1 channel");
+                check(!native.dispatcher.kernel().handlerQueued(), "no completion callback is queued");
                 check(std::memcmp(ram, expected.data(), expected.size()) == 0,
-                      "frame counter, channel handle and buffer toggle match; ALL other guest RAM stays unchanged");
+                      "frame counter, its flag, channel handle and buffer toggle match; ALL other guest RAM stays unchanged");
                 reference.checkRetiredBank(); native.checkRetiredBank();
             }
     std::printf("DC frame submit: %d reference/adapted cases, %d failures\n", cases, failures);

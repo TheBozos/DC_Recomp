@@ -1713,3 +1713,26 @@ methods and six changed-instruction guard rejections. **77/77 normal suites** an
 Runtime, production patches,
 the engine pin and saves are unchanged. Live DUN coverage remains **33/43** with
 497 unobserved sites globally; fixtures add no gameplay or visual qualification.
+
+## Per-frame transfer retirement (2026-11-09)
+
+`MGEndFrame`'s tail no longer waits, flushes or sends. The earlier frame-end pass kept one native SDK send per frame,
+an empty VIF1 transfer, to preserve its completion interrupt and callback. That completion has no consumer: the game's
+only `AddDmacHandler` call is in `sceSifInitCmd`, which BozoEngine answers natively, so no DMA-completion handler is
+ever installed. The `sceDmaSync` before it waits on the GIF channel (`gp-0x7434`, from `MGInit`), which never carries a
+transfer in this port. Three guarded patches retire `sceDmaSync` (`0x12d61c`), `FlushCache` (`0x12d678`) and
+`sceDmaSend` (`0x12d68c`); every delay slot was already a `nop`. The frame counter and its first-frame flag, the
+`sceDmaGetChan(1)` lookup stored at `gp-0x7438` and the double-buffer toggle stay.
+
+- The `frame_submit` reference/adapted span now starts at `0x12d610`, covering the wait. 24 cases (counter overflow,
+  buffer states, first frame): the published reference waits, flushes and sends once; the adapted tail makes no
+  transfer, flush or wait and queues no completion. Frame counter, flag, channel handle and toggle match; all other
+  guest RAM is unchanged.
+- **126/126** suites. The seven scripted routes end as before with identical cards and zero register/unknown accesses,
+  VU0 calls or GIF submissions. VIF1 SDK submissions per route fall from 5,338–10,010 to **1,190** (1,571 on the
+  Matataki route), and sync calls from 6,536–10,986 to 2,388–3,162. Captures match the previous build within 2 mean
+  levels outside the two known fade frames.
+
+Remaining transfer calls, about 1,190 per run, sit in the boot and loading paths: `main`'s four sends at mode changes
+(two upload VU1 microcode from `0x24f960`/`0x296680`, which nothing executes), `VSyncCallBack_Load`'s send and syncs,
+`EnterFixTexture`/`EnterFixTextureZ` and `StoreImage`.

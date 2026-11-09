@@ -56,9 +56,14 @@
 # Retain frame pacing, native visibility and the later native completion callback.
 0x0012d1dc 0x8f848bd4 0x0804b49a # continue directly at native visibility 0x12d268
 0x0012d1e0 0x70002e28 0x70002e28 # guard retained delay slot: a1 = 0 (caller-volatile)
-# The retained SDK send acknowledges completed native work; it reads no packet.
-0x0012d680 0x8f828bd4 0x00000000 # no packet-object lookup before completion
-0x0012d688 0x8c450004 0x24050000 # pass no packet/source pointer; retain channel/IRQ semantics
+# The per-frame transfer tail. The game installs no DMA-completion handler (its only AddDmacHandler is in
+# sceSifInitCmd, answered natively), so nothing consumes a VIF1 completion; the GIF channel it waits on
+# never carries a transfer. The frame counter, the channel lookup and the buffer toggle stay.
+0x0012d61c 0x0c043316 0x00000000 # no sceDmaSync of the (always idle) GIF channel
+0x0012d680 0x8f828bd4 0x00000000 # no packet-object lookup
+0x0012d688 0x8c450004 0x24050000 # no packet/source pointer
+0x0012d678 0x0c045168 0x00000000 # no FlushCache before a transfer
+0x0012d68c 0x0c0431be 0x00000000 # no sceDmaSend: nothing to transfer, nothing waiting on its completion
 # CVisualMDTVu1 raw draw: retain selected buffer metadata, temporary allocation
 # extent, all native draw arguments/results, and the post-draw buffer restore.
 # Its native draw reads MDT assets, so copying console VIF output is unused.

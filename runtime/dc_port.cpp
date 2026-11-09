@@ -50,9 +50,20 @@ namespace dc
         bozo::port::frameEnd(rt, ctx);
         ctx->pc = ctx->r[31].uw[0];
     }
+    // FlushCache, iFlushCache and iSyncDCache: the game writes the PS2's data cache back before its transfers and in
+    // its vblank callbacks. The PC has no such cache to keep coherent with any device: nothing, 0, without a kernel
+    // call (each caller still makes its call, with its checkpoint).
+    void noCache(uint8_t *, R5900Context *ctx, Runtime *)
+    {
+        ctx->r[2].ud[0] = 0;
+        ctx->pc = ctx->r[31].uw[0];
+    }
     void install(Runtime &rt, bozo::port::Registry &r)
     {
         dc::native::install(rt, r);
+        r.registerFunction(0x1145a0, noCache); // FlushCache
+        r.registerFunction(0x1145d0, noCache); // iFlushCache
+        r.registerFunction(0x114c50, noCache); // iSyncDCache
         r.registerFunction(0x12d070, frameEnd);
         r.nativeGraphics(&nativeInstruction);
     }

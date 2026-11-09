@@ -1902,3 +1902,25 @@ exactly. The spins are the game's own pacing, so they stay, with the checkpoints
 - The attract demo recorded to WAV (5,000 frames) has the same peak in every ten-second block as the released 0.3.0
   build's, which still used SIF, and RMS within a few percent; the recordings follow the host's audio clock, so their
   samples do not line up one to one.
+
+## Console OS services: what the running game uses
+
+A survey of every EE kernel service's call sites (`tools/find_calls.py`, `recomp/dc_scus97111.toml`):
+
+- **Threads, semaphores, alarms:** none in the running game. Its only `CreateThread` / `CreateSema` / `WaitSema` /
+  `SetAlarm` callers are the SDK startup's `InitThread` (which the engine answers by returning 1, creating nothing, so
+  its `topThread` never exists) and libcdvd / libsif internals (`sceCdInitEeCB`, `sceCdDelayThread`, `cmd_sem_init`,
+  `sceSifBindRpc`...), which are all engine-answered stubs, never run as game code. DC runs on its main thread alone.
+- **Cache maintenance:** `FlushCache` (31 sites, every frame from `MGEndFrame`, and around texture, model and sound
+  uploads), `iFlushCache` and `iSyncDCache` (both vblank callbacks). The engine answered them with 0; the PC has no such
+  cache to keep coherent with a device. `runtime/dc_port.cpp` now answers the three itself (0, no kernel call); every
+  caller keeps its call and checkpoint, so EE time is unchanged. `SyncDCache` is called only from libpad code that no
+  longer runs.
+- **Interrupts:** the vblank (INTC 2) handler that runs the game's vsync callbacks on the field clock stays: it is the
+  game's own timeline (the loading screens wait on a flag only that callback sets).
+
+The end-of-run report now prints the host's call totals. On the Matataki route (9,000 frames) kernel calls fall from
+19,907 to 5 (the entry point's two setup syscalls, `InitThread` and the like, at boot); all seven routes report the same 5.
+All seven routes end as before with identical cards and zero register/unknown accesses, VU0 calls, transfers and syncs;
+the attract-demo route is frame-exact; captures match within 0.95 mean levels outside the known fade frames. 128/128
+suites.

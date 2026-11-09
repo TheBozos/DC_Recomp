@@ -383,3 +383,5 @@
 0x00223760 0x8f848bd4 0x24040000 # null packet argument; DrawNewFileTemplete__Fiii
 0x002237f0 0x8f848bd4 0x24040000 # null packet argument; DrawNewFileTemplete__Fiii
 0x00223858 0x8f848bd4 0x24040000 # null packet argument; DrawNewFileTemplete__Fiii
+# main's mode change: sceGsSyncPath always answers idle; v0 is reloaded right after.
+0x00141334 0x0c044be6 0x00000000 # main: no sceGsSyncPath

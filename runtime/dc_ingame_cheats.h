@@ -2,6 +2,7 @@
 #include "bozo/app/video_settings.h"
 struct Runtime;
 namespace bozo::port { class Registry; }
+namespace bozo::state { class Archive; }
 namespace dc::cheats {
     // The original Options lifecycle stays in charge of loading, fading and
     // returning to gameplay. Native pages share the existing cheat controls.
@@ -10,4 +11,6 @@ namespace dc::cheats {
     // The windowed build, before the game thread starts: the window's settings for the Graphics page (without them,
     // as headless, the page says they are unavailable).
     void setGraphicsAccess(bozo::app::video::Shared (*shared)(), void (*post)(const bozo::app::video::Settings &, bool));
+    // Save states: the native Options pages' state; on load the font is decoded again from `ram`.
+    void menuState(bozo::state::Archive &, const uint8_t *ram);
 }

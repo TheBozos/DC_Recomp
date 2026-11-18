@@ -613,4 +613,14 @@ namespace dc::cheats
         if(mapSymbols)registry.registerFunction(kMapSymbols,mapSymbolsHook);
         priorInstruction=registry.instructionHandler();registry.nativeGraphics(instruction);
     }
+    void stateLoaded()
+    {
+        currentAttack = pendingAttack = currentGilda = pendingGilda = currentSize = pendingSize = -1;
+        for (auto &item : currentItems) item = 0;
+        for (auto &item : pendingItems) item = 0;
+        pendingLevel = false;
+        pendingSpawn = 0;
+        haveHeldTime = false; // freeze time takes the loaded game's time again
+        observedGeneration = ~0u;
+    }
 }

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Save states: F5 saves the game at any moment into one of ten slots, F7 loads it back (F6 / Shift+F6 pick the slot, F2 lists them); also `--save-state` / `--load-state` on the command line.
+
 ### Fixed
 - Town water no longer turns into a mirror of the cliffs after the menu has been opened.
 

@@ -211,6 +211,11 @@ pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,libarch
 `--fullscreen` starts fullscreen; `--no-vsync` disables VSync for comparisons. The default is windowed
 with VSync enabled. **F8** captures a frame when a capture directory is configured.
 
+**Save states:** **F5** saves the whole game at that moment into the selected slot, **F7** loads it back, **F6** /
+**Shift+F6** choose the slot (0–9); **F2 → Save states** shows them. A state belongs to the build that made it: after
+an update, use the game's own memory-card saves. `--save-state FILE --save-state-at FRAME` and
+`--load-state FILE [--load-state-at FRAME]` do the same from the command line.
+
 The game's **Options** entry page offers **Game Options** (the original settings), **Graphics**, **Cheats**, and
 **Quit Game**. Up/Down selects rows, Cross confirms and Circle goes back. **Graphics** sets the display mode,
 resolution, render scale and frame rate; **Apply and save** writes them to `video.ini` (shared with the launcher's

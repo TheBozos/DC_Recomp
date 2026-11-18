@@ -7,6 +7,7 @@
 #include "dc_cheats.h"
 #include "dc_ingame_cheats.h"
 #include "dc_pad.h"
+#include "dc_state.h"
 #include <string>
 #include <cstdlib>
 #include <vector>
@@ -74,7 +75,7 @@ int main(int argc, char **argv)
     options.iso = DC_DEFAULT_ISO;
     options.frames = window ? 0 : 120;
     options.printGameOutput = true;
-    std::string wav, livePad, assetDir;
+    std::string wav, livePad, assetDir, dumpRam;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
@@ -100,6 +101,16 @@ int main(int argc, char **argv)
             window = false;
         else if (a == "--profile-io")
             options.profileIo = true;
+        else if (a == "--dump-ram" && i + 1 < argc)
+            dumpRam = argv[++i];
+        else if (a == "--load-state" && i + 1 < argc)
+            options.loadState = argv[++i];
+        else if (a == "--load-state-at" && i + 1 < argc)
+            options.loadStateFrame = std::stoul(argv[++i]);
+        else if (a == "--save-state" && i + 1 < argc)
+            options.saveState = argv[++i];
+        else if (a == "--save-state-at" && i + 1 < argc)
+            options.saveStateFrame = std::stoul(argv[++i]);
 #ifdef DC_WITH_WINDOW
         else if (a == "--no-vsync")
             windowOptions.vsync = false;
@@ -115,7 +126,8 @@ int main(int argc, char **argv)
             std::fprintf(stderr, "Usage: dc [--frames N] [--headless] [--elf FILE] [--iso FILE]\n"
                                  "          [--asset-dir DIR] [--card-dir DIR] [--pad-script FILE | --live-pad FILE] [--wav FILE]\n"
                                  "          [--out FILE] [--capture-dir DIR] [--capture-frame N] [--profile-io]\n"
-                                 "          [--fullscreen] [--no-vsync]\n");
+                                 "          [--fullscreen] [--no-vsync] [--dump-ram FILE]\n"
+                                 "          [--load-state FILE [--load-state-at FRAME]] [--save-state FILE --save-state-at FRAME]\n");
             return a == "--help" ? 0 : 2;
         }
     }
@@ -133,6 +145,7 @@ int main(int argc, char **argv)
     }
     dc::native::setAssetDirectory(assetDir);
     options.realTime = window;
+    options.gameTag = "SCUS-97111"; // a save state loads only into Dark Cloud
     bozo::host::FreeHost host(options);
     bozo::ee::Dispatcher d(host);
     dc::installAudio(host.libraries());
@@ -142,6 +155,9 @@ int main(int argc, char **argv)
     dc::cheats::install(d.runtime(), registry);
     dc::cheats::installIngameMenu(d.runtime(), registry, dc::native::finishSceneForMenu);
     dc::pad::install(registry);
+    // Save states: DC's own part (the engine saves its runtime, libraries and host).
+    host.stateSections()->add({"dc", [&](bozo::state::Archive &a) { dc::state::serialize(a, d.runtime()); },
+                               [] { return dc::state::unsaveable(); }});
     std::string error;
     if (!host.setUp(d, dc_external_table, dc_external_count, &registry, error))
     {
@@ -220,6 +236,12 @@ int main(int argc, char **argv)
             std::fprintf(stderr, "[dc] native failure: %s\n", e.what());
             return 1;
         }
+        if (!dumpRam.empty())
+            if (FILE *f = std::fopen(dumpRam.c_str(), "wb"))
+            {
+                std::fwrite(d.runtime().memory.ram(), 1, 0x2000000u, f);
+                std::fclose(f);
+            }
         std::printf("[dc] frames=%llu end=%s\n", (unsigned long long)frames, host.endReason().c_str());
         const auto &stats = host.stats();
         std::printf("[dc] compatibility: %llu register accesses, %llu unknown; %llu native VU0 calls\n",
@@ -262,6 +284,10 @@ int main(int argc, char **argv)
         game.run = run;
         game.stop = [&] { host.requestStop(); };
         game.framesEnded = [&] { return host.framesEnded(); };
+        // F5 saves the selected slot, F7 loads it, F6 / Shift+F6 pick the slot (0-9); also F2's Save states tab.
+        game.saveState = [&](int slot) { host.requestSave(bozo::app::stateSlotPath(slot)); };
+        game.loadState = [&](int slot) { host.requestLoad(bozo::app::stateSlotPath(slot)); };
+        host.onStateMessage = [](bool, const std::string &message) { bozo::app::notify(message); };
         result = bozo::app::runWindow(windowOptions, game, &devices);
     }
     else

@@ -49,4 +49,6 @@ namespace dc::cheats
     void applyPlayerEdits(uint8_t *ram,const R5900Context *ctx);
     void install(Runtime &runtime, bozo::port::Registry &registry);
     void registerMenu();
+    // Save states: after a load, the mirrors of game values and the queued edits are dropped.
+    void stateLoaded();
 }

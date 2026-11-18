@@ -1,5 +1,6 @@
 // Dark Cloud's sound-library selection. Engine services and translation are game independent.
 #include "dc_audio_modules.h"
+#include "bozo/state.h"
 #include <algorithm>
 #include <cctype>
 #include <memory>
@@ -34,4 +35,11 @@ namespace dc
             return sound->startImage(name + ";1");
         };
     }
+    // Save states: the compiled sound modules' IOP host, and why it cannot be saved right now (empty: it can).
+    void audioState(bozo::state::Archive &a)
+    {
+        if (sound)
+            sound->serialize(a);
+    }
+    std::string audioUnsaveable() { return sound ? sound->unsaveable() : std::string(); }
 } // namespace dc

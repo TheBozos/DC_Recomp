@@ -6,6 +6,7 @@
 #include "bozo/runtime.h"
 #include "bozo/app/video_settings.h"
 #include "bozo/render/renderer.h"
+#include "bozo/state.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -395,6 +396,19 @@ void installIngameMenu(Runtime &rt,bozo::port::Registry &registry,void (*prepare
     registry.registerFunction(kInit,init);registry.registerFunction(kExit,exit);registry.registerFunction(kKey,key);registry.registerFunction(kDraw,draw);
 }
 bool takeIngameQuitRequest(){return quitRequested.exchange(false,std::memory_order_relaxed);}
+// Save states: the native Options pages' state (a state may be saved with them open); the font is decoded again from the
+// loaded game's atlas, and no quit request of the replaced run survives.
+void menuState(bozo::state::Archive &a,const uint8_t *ram)
+{
+    auto &g=menu.graphics;
+    bozo::state::fields(a,menu.active,menu.queued,menu.page,menu.root,menu.row,menu.attack,menu.quitChoice,menu.gold,menu.slot,
+                        menu.quantity,menu.capacity,menu.spawn,menu.spawnCount,menu.held,menu.ticks,menu.graphicsRow,
+                        g.width,g.height,g.mode,g.renderScale,g.gsScale,g.frameRate);
+    if(!a.loading())return;
+    menu.font=menu.active?fontFromGame(ram):nullptr;
+    menu.graphicsStatus="";
+    quitRequested.store(false,std::memory_order_relaxed);
+}
 void setGraphicsAccess(bozo::app::video::Shared (*shared)(),void (*post)(const bozo::app::video::Settings &,bool))
 {videoPost.store(post,std::memory_order_release);videoShared.store(shared,std::memory_order_release);}
 }

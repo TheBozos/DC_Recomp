@@ -2022,3 +2022,34 @@ With both, the game calls no GS library function.
   frame 9,202 as before) and zero register/unknown accesses, VU0 calls, transfers and syncs; the attract-demo route is
   frame-exact; captures match within 2.34 mean levels outside the known fade frames. No GS or DMA library call is left
   on any route.
+
+## Save states
+
+BozoEngine saves the whole runtime at the dispatcher's safe point (EE RAM, dispatcher, kernel, every library, host;
+`docs/save-states.md` in the engine). DC adds one section, `"dc"` (`runtime/dc_state.cpp`), for what those do not
+hold. An audit of every piece of state the port keeps across frames sorted it into facts, caches, settings and
+per-frame state:
+
+- **Saved (facts the game told the port once):** DC's compiled sound modules' IOP host (`CompiledLibraries::serialize`:
+  IOP memory, tasks, RPC servers, mixer, libsd); the MDT copies (the game reuses a static model's MDT memory after
+  building it, so the copy is the only model left) with their texture bindings; the water objects of each visual;
+  pictures pinned to their records; what was sent to each GS place last; the records `MGMoveImage` patched and
+  their pictures; the frame identities last asked for; the haze's random sequences (one writes guest RAM); the
+  depth-of-field group; the fishing line's strip between two points; the native Options pages' state. Images are
+  written once in a table (many bindings share one): a Matataki state is 69 MB, 33.6 MB of it EE RAM.
+- **Dropped on load (caches of the old guest memory):** decoded textures (except the patched records'), the render
+  places and their row counts (and the renderer's targets), CLUT overrides, shadow queues, the partial frame; the
+  cheats' mirrors of game values and their queued edits (nothing of the replaced run is applied to the loaded one).
+- **Kept as the player's:** cheat toggles and rates.
+- **Unsaveable, with the reason:** while the sound modules say so, and in the middle of a debug-font composition.
+- **Not restored:** render-target pixels (on the GPU). A picture the game makes once, such as the menu's backdrop,
+  stays blank after a load until the game makes it again.
+
+Checks (headless runs are deterministic):
+
+- Matataki route, saved at 6,500: loaded in a new process, and loaded mid-run at 7,000, both give EE RAM byte-identical
+  to the run that never stopped, at 7,500. Dungeon route, saved at 5,000, loaded mid-run at 5,500: identical at 6,000.
+- Windowed: a state saved by the window at 6,500 and loaded into it gives captures identical to the uninterrupted
+  run at 6,600, 7,000, 7,400, 7,700, 8,100, 8,500 and 8,900 (0.00 mean difference) and identical RAM at 9,000.
+- A state made by the headless build loads into the window and plays, but follows the headless run's timeline (the
+  window runs on the PC clock), so compare windowed states with windowed runs.

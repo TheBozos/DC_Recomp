@@ -21,6 +21,7 @@
 
 #include "dc_native_api.h"
 #include "dc_visibility.h"
+#include "bozo/state.h"
 #include "bozo/render/renderer.h"
 #include "bozo/hash.h"
 #include "bozo/libs/guest.h"
@@ -4531,19 +4532,24 @@ namespace dc::native
     // whether it connects to its predecessor. No packed graphics output is read.
     // Like DrawLine, native segments are one-pixel-wide quads; console line
     // rasterization and fishing gameplay still require visual qualification.
+    // FishLineDraw's strip between two of its points (namespace scope: a save state carries it, as a state can be saved
+    // between two points of the compiled loop).
+    struct FishStrip
+    {
+        Runtime *owner = nullptr;
+        uint32_t next = 0;
+        Point3 previous{};
+    };
+    thread_local FishStrip g_fishStrip;
+    // The debug font's compositions in progress (debugFontBoundary): a state is not saved in the middle of one.
+    thread_local bool g_debugFontBusy = false;
     void fishLineVertex(uint8_t *ram, R5900Context *ctx, Runtime *runtime)
     {
-        struct Strip
-        {
-            Runtime *owner = nullptr;
-            uint32_t next = 0;
-            Point3 previous{};
-        };
-        static thread_local Strip strip;
+        FishStrip &strip = g_fishStrip;
         const uint32_t index = getRegU32(ctx, 19), decision = getRegU32(ctx, 5);
         if (index >= 24u || (decision != 4u && decision != 12u))
             throw std::runtime_error("native fishing line: invalid point boundary");
-        if (index == 0u) strip = {runtime, 0u, {}};
+        if (index == 0u) strip = FishStrip{runtime, 0u, {}};
         if (strip.owner != runtime || strip.next != index)
             throw std::runtime_error("native fishing line: nonsequential points");
         bozo::libs::Guest guest(*runtime, ctx);
@@ -4585,6 +4591,12 @@ namespace dc::native
             std::shared_ptr<bozo::render::Texture> image;
         };
         static thread_local std::unordered_map<Runtime *, std::unordered_map<uint32_t, Work>> pending;
+        struct Busy
+        {
+            std::unordered_map<Runtime *, std::unordered_map<uint32_t, Work>> &work;
+            Runtime *runtime;
+            ~Busy() { g_debugFontBusy = !work[runtime].empty(); }
+        } busy{pending, runtime};
         const uint32_t stack = getRegU32(ctx, 29);
         bozo::libs::Guest guest(*runtime, ctx);
         if (pc == 0x0013DFA8u)
@@ -5027,5 +5039,220 @@ namespace dc::native
                          static_cast<uint32_t>(tex0 >> 20) & 0x3Fu, static_cast<uint32_t>(tex0 >> 26) & 0xFu,
                          static_cast<uint32_t>(tex0 >> 30) & 0xFu, static_cast<uint32_t>(tex0 >> 37) & 0x3FFFu, name);
         }
+    }
+
+    // ---- Save states ----------------------------------------------------------------------------------------------
+    namespace
+    {
+        // A texture image (null: none), restored with a new version so the renderer sends it again.
+        void textureIo(bozo::state::Archive &a, std::shared_ptr<const bozo::render::Texture> &texture)
+        {
+            bool has = texture != nullptr;
+            uint32_t width = 0, height = 0;
+            std::vector<uint32_t> rgba;
+            uint64_t key = 0;
+            std::vector<std::pair<uint32_t, uint32_t>> pages;
+            std::vector<std::vector<uint32_t>> levels;
+            bool asset = false;
+            if (!a.loading() && texture)
+            {
+                width = texture->width, height = texture->height, rgba = texture->rgba, key = texture->key;
+                pages = texture->pages, levels = texture->levels, asset = texture->asset;
+            }
+            bozo::state::fields(a, has, width, height, rgba, key, pages, levels, asset);
+            if (!a.loading())
+                return;
+            if (!has)
+            {
+                texture = nullptr;
+                return;
+            }
+            auto made = std::make_shared<bozo::render::Texture>();
+            made->width = width, made->height = height, made->rgba = std::move(rgba), made->key = key;
+            made->pages = std::move(pages), made->levels = std::move(levels), made->asset = asset;
+            made->version = ++g_textureVersion;
+            texture = made;
+        }
+        // The images a state refers to, each written once (many bindings share one), and referred to by index (-1: none).
+        struct TextureTable
+        {
+            std::vector<std::shared_ptr<const bozo::render::Texture>> images;
+            std::unordered_map<const bozo::render::Texture *, int32_t> index;
+            int32_t add(const std::shared_ptr<const bozo::render::Texture> &image)
+            {
+                if (!image)
+                    return -1;
+                const auto [at, added] = index.emplace(image.get(), static_cast<int32_t>(images.size()));
+                if (added)
+                    images.push_back(image);
+                return at->second;
+            }
+            std::shared_ptr<const bozo::render::Texture> at(int32_t i) const
+            {
+                if (i < 0)
+                    return nullptr;
+                if (static_cast<size_t>(i) >= images.size())
+                    throw std::runtime_error("save state: a texture index past the table");
+                return images[static_cast<size_t>(i)];
+            }
+        };
+        template <class Key> std::vector<Key> sortedKeys(const auto &map)
+        {
+            std::vector<Key> keys;
+            for (const auto &entry : map)
+                keys.push_back(static_cast<Key>(entry.first));
+            std::sort(keys.begin(), keys.end());
+            return keys;
+        }
+    }
+
+    // What the native renderer and asset builders know that guest memory alone does not tell again, and, on load, the
+    // caches decoded from the old guest memory dropped (docs/BOZO_MIGRATION.md, "Save states").
+    void state(bozo::state::Archive &a, Runtime &runtime)
+    {
+        const uint8_t *rdram = runtime.memory.ram();
+        TextureTable table;
+        if (!a.loading())
+        {
+            std::lock_guard<std::mutex> lock(g_mdtMutex);
+            for (const uint32_t data : sortedKeys<uint32_t>(g_mdtCopies))
+                if (const auto &records = g_mdtCopies.at(data).records)
+                    for (const TextureBinding &binding : *records)
+                        if (resolveBinding(rdram, binding) == 0u)
+                            table.add(binding.image);
+            for (const uint32_t record : sortedKeys<uint32_t>(g_pinned))
+                table.add(g_pinned.at(record).texture);
+            for (const uint32_t record : g_patchedRecords)
+                if (const auto found = g_decoded.find(record); found != g_decoded.end())
+                    table.add(found->second.second);
+        }
+        {
+            uint64_t images = table.images.size();
+            bozo::state::fields(a, images);
+            if (a.loading())
+                table.images.resize(images);
+            for (auto &image : table.images)
+                textureIo(a, image);
+        }
+        // The MDT copies: the game reuses a static piece's MDT memory after building it, so its copy is the only model
+        // left. A binding's image is kept only where its record no longer resolves (otherwise it is decoded again).
+        {
+            std::lock_guard<std::mutex> lock(g_mdtMutex);
+            uint64_t count = g_mdtCopies.size();
+            bozo::state::fields(a, count);
+            std::vector<uint32_t> keys = a.loading() ? std::vector<uint32_t>(count) : sortedKeys<uint32_t>(g_mdtCopies);
+            if (a.loading())
+                g_mdtCopies.clear();
+            for (uint64_t i = 0; i < count; ++i)
+            {
+                uint32_t data = keys[i], mdt = 0;
+                bool hasCopy = false, hasRecords = false;
+                std::vector<uint8_t> bytes;
+                std::vector<TextureBinding> bindings;
+                if (!a.loading())
+                {
+                    const MdtCopy &entry = g_mdtCopies.at(data);
+                    mdt = entry.mdt;
+                    hasCopy = entry.copy != nullptr;
+                    if (hasCopy)
+                        bytes = *entry.copy;
+                    hasRecords = entry.records != nullptr;
+                    if (hasRecords)
+                        bindings = *entry.records;
+                }
+                bozo::state::fields(a, data, mdt, hasCopy, bytes, hasRecords);
+                uint64_t bindingCount = bindings.size();
+                bozo::state::fields(a, bindingCount);
+                if (a.loading())
+                    bindings.resize(bindingCount);
+                for (TextureBinding &binding : bindings)
+                {
+                    bozo::state::fields(a, binding.record, binding.resolvedRecord, binding.identity);
+                    int32_t image = !a.loading() && resolveBinding(rdram, binding) == 0u ? table.add(binding.image) : -1;
+                    bozo::state::fields(a, image);
+                    if (a.loading())
+                        binding.image = table.at(image);
+                }
+                if (a.loading())
+                {
+                    MdtCopy &entry = g_mdtCopies[data];
+                    entry.mdt = mdt;
+                    entry.copy = hasCopy ? std::make_shared<const std::vector<uint8_t>>(std::move(bytes)) : nullptr;
+                    entry.records = hasRecords ? std::make_shared<const std::vector<TextureBinding>>(std::move(bindings)) : nullptr;
+                }
+            }
+        }
+        {
+            uint64_t count = g_pinned.size();
+            bozo::state::fields(a, count);
+            std::vector<uint32_t> keys = a.loading() ? std::vector<uint32_t>(count) : sortedKeys<uint32_t>(g_pinned);
+            if (a.loading())
+                g_pinned.clear();
+            for (uint64_t i = 0; i < count; ++i)
+            {
+                uint32_t record = keys[i];
+                Pinned pinned = a.loading() ? Pinned{} : g_pinned.at(record);
+                int32_t image = a.loading() ? -1 : table.add(pinned.texture);
+                bozo::state::fields(a, record, pinned.pixels, pinned.tex0, image);
+                if (a.loading())
+                    pinned.texture = table.at(image);
+                if (a.loading())
+                    g_pinned[record] = std::move(pinned);
+            }
+        }
+        // What was sent to each GS place last, the records MGMoveImage patched and their decoded pictures.
+        bozo::state::fields(a, g_resident, g_waterOfVisual);
+        {
+            std::vector<uint32_t> patched(g_patchedRecords.begin(), g_patchedRecords.end());
+            std::sort(patched.begin(), patched.end());
+            bozo::state::fields(a, patched);
+            if (a.loading())
+            {
+                g_patchedRecords = std::unordered_set<uint32_t>(patched.begin(), patched.end());
+                g_decoded.clear();
+            }
+            for (uint32_t record : patched)
+            {
+                bool has = !a.loading() && g_decoded.count(record) != 0;
+                uint64_t hash = has ? g_decoded.at(record).first : 0u;
+                int32_t image = has ? table.add(g_decoded.at(record).second) : -1;
+                bozo::state::fields(a, has, hash, image);
+                if (a.loading() && has)
+                    g_decoded[record] = {hash, table.at(image)};
+            }
+        }
+        // Facts and seeds: the frame identities the game asked for last, the haze's random sequences (the first writes
+        // guest RAM), the group the depth of field follows, the fishing strip between two points.
+        bozo::state::fields(a, g_frameBase, g_backBase, g_backAsked, g_hazeSeed, g_hazeRandom, g_group);
+        bozo::state::fields(a, g_fishStrip.next, g_fishStrip.previous.x, g_fishStrip.previous.y, g_fishStrip.previous.z,
+                            g_fishStrip.previous.fog);
+        if (!a.loading())
+            return;
+        g_fishStrip.owner = &runtime;
+        // Caches of the old guest memory and of render targets whose pictures are on the GPU: dropped.
+        g_targetOfBase.clear();
+        for (float &rows : g_targetRows)
+            rows = 224.0f;
+        g_blendedLast.clear();
+        g_hazeLast.clear();
+        g_blendedExtent.clear();
+        bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
+        for (uint8_t target = 1; target < 8; ++target)
+        {
+            renderer.setTargetSize(target, 0, 0);
+            renderer.setTargetSharesDepth(target, false);
+        }
+        g_clutOverride.clear();
+        g_shadowDraws.clear();
+        g_pendingShadows.clear();
+        renderer.beginFrame(screen());
+        g_lastMainPublish.store(nowMs(), std::memory_order_relaxed);
+    }
+
+    std::string unsaveable()
+    {
+        if (g_debugFontBusy)
+            return "the debug font is drawing a picture";
+        return {};
     }
 }

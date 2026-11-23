@@ -102,19 +102,14 @@ and conditional dispatch audit; [docs/RECOMP_NOTES.md](docs/RECOMP_NOTES.md) rec
 
 ## Screenshots
 
-
-Historical bring-up captures from before the native renderer and BozoEngine migration. They show the earlier
-progress and are not evidence of the current build; current validation is in
-[docs/NATIVE_RENDERING_FOLLOWUP.md](docs/NATIVE_RENDERING_FOLLOWUP.md).
+Captured from the current build at 960x720.
 
 | | | |
 |---|---|---|
-| ![The intro's castle](docs/screenshots/intro-castle.png) | ![The Dark Genie](docs/screenshots/genie.png) | ![The title menu](docs/screenshots/title-logo.png) |
-| ![The desk narration](docs/screenshots/opening-desk.png) | ![In a dungeon](docs/screenshots/dungeon-scene.png) | ![Toan and the Fairy King](docs/screenshots/fairy-king.png) |
-| ![Toan's house](docs/screenshots/toan-house.png) | ![The forest](docs/screenshots/forest-scene.png) | ![New game: the name entry](docs/screenshots/register-name.png) |
-| ![The Dark Shrine](docs/screenshots/shrine-soldiers.png) | ![Colonel Flag](docs/screenshots/colonel-flag.png) | ![The urn](docs/screenshots/shrine-urn.png) |
-| ![Opening dialogue](docs/screenshots/opening-dialogue.png) | ![The Dark Genie rises](docs/screenshots/genie-rises.png) | ![Norune at night](docs/screenshots/norune-night.png) |
-| ![Toan at home](docs/screenshots/norune-house.png) | ![Norune's festival](docs/screenshots/norune-festival.png) | ![A cutscene dialogue](docs/screenshots/cutscene-balloon.png) |
+| ![The title screen](docs/screenshots/title.jpg) | ![The attract demo: the castle](docs/screenshots/demo-castle.jpg) | ![The attract demo: Toan and the light](docs/screenshots/demo-light.jpg) |
+| ![The attract demo: a serpent](docs/screenshots/demo-serpent.jpg) | ![The attract demo: the forest](docs/screenshots/demo-forest.jpg) | ![The attract demo: the crystals](docs/screenshots/demo-crystals.jpg) |
+| ![Toan in Matataki](docs/screenshots/matataki.jpg) | ![Outside Norune](docs/screenshots/norune-outskirts.jpg) | ![Adventure Day 1, night](docs/screenshots/adventure-day.jpg) |
+| ![The town menu](docs/screenshots/town-menu.jpg) | ![Loading a save](docs/screenshots/load-file.jpg) | ![The in-game cheats menu](docs/screenshots/cheats-menu.jpg) |
 
 ## Goal
 

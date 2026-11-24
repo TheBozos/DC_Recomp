@@ -23,8 +23,7 @@ namespace dc::cheats
     {
         std::array<std::atomic<bool>, 11> options{};
         std::atomic<int> damageRate{1};
-        std::atomic<int> fastRate{300};
-        std::atomic<bool> fastHeld{false};
+        std::atomic<int> fastRate{300}; // the Video tab's fast-forward speed (0: as fast as the PC goes)
         std::atomic<int> currentAttack{-1}, pendingAttack{-1};
         std::atomic<int> absRate{1},moveRate{100},currentGilda{-1},pendingGilda{-1};
         std::atomic<int> currentSize{-1},minimumSize{1},pendingSize{-1};
@@ -557,9 +556,8 @@ namespace dc::cheats
     int absMultiplier(){return absRate.load(std::memory_order_relaxed);}
     void setAbsMultiplier(int v){absRate.store(std::clamp(v,1,16),std::memory_order_relaxed);}
     int fastForwardPercent(){return fastRate.load(std::memory_order_relaxed);}
-    void setFastForwardPercent(int v){fastRate.store(std::clamp(v,150,400),std::memory_order_relaxed);}
-    void setFastForwardHeld(bool held){fastHeld.store(held,std::memory_order_relaxed);}
-    int gameSpeedPercent(){return fastHeld.load(std::memory_order_relaxed) || enabled(Cheat::FastForwardLock) ? fastForwardPercent() : 100;}
+    void setFastForwardPercent(int v){fastRate.store(v,std::memory_order_relaxed);}
+    int gameSpeedPercent(){return enabled(Cheat::FastForwardLock) ? fastForwardPercent() : 100;}
     int damageMultiplier(){return damageRate.load(std::memory_order_relaxed);}
     void setDamageMultiplier(int v){damageRate.store(std::clamp(v,1,16),std::memory_order_relaxed);}
     int movementPercent(){return moveRate.load(std::memory_order_relaxed);}

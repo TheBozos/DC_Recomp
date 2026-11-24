@@ -4,6 +4,7 @@
 
 ### Added
 - Save states: F5 saves the game at any moment into one of ten slots, F7 loads it back (F6 / Shift+F6 pick the slot, F2 lists them); also `--save-state` / `--load-state` on the command line.
+- Hidden test runs: `--hidden` runs the game silently without showing its window, and `--capture-frame` then reads the game's offscreen picture. `--mute` runs without a sound device.
 
 ### Fixed
 - Town water no longer turns into a mirror of the cliffs after the menu has been opened.
@@ -11,6 +12,8 @@
 ### Changed
 - The controller is read natively: the game's pad code takes the PC controller's state directly and sends rumble back to it, with no PS2 pad library in between.
 - Sound commands, sound-hardware settings (volumes, reverb) and sample uploads go straight to the game's natively compiled sound drivers, with no PS2 SIF (EE-to-IOP) transfer layer in between.
+- Fast forward is the engine's: hold **`** or a gamepad's touchpad (rebindable in the Controls tab) at the Video tab's speed, 2x to 10x or unlimited. The Cheats menu keeps **Fast-forward always on**, at that same speed; its own speed row is gone.
+- BozoEngine moves to its current master (e15775a): anti-aliasing, texture smoothing, F12 screenshots, save-state pictures, rumble strength, pause in the background and the settings window from a gamepad.
 - The game's PS2 cache-maintenance calls are answered natively instead of by the emulated console kernel: kernel calls during play drop to none after boot.
 - Leftover PS2 graphics and DMA setup calls at boot, loading screens and mode changes are retired, the renderer no longer reads GS register images, and the vblank wait and video-mode setup are DC's own: the game calls no PS2 graphics library function.
 

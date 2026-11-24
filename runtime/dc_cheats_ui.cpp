@@ -77,11 +77,10 @@ namespace dc::cheats
             }
             else ImGui::TextDisabled("Item names appear once the game has loaded its messages.");
             ImGui::Separator();
-            int fast = fastForwardPercent();
-            if (ImGui::SliderInt("Fast-forward speed", &fast, 150, 400, "%d%%")) setFastForwardPercent(fast / 50 * 50);
-            toggle("Fast-forward always on", Cheat::FastForwardLock, "Or hold ` (below Esc) or the gamepad's touchpad. Sound is muted.");
+            toggle("Fast-forward always on", Cheat::FastForwardLock,
+                   "At the Video tab's fast-forward speed. Or hold the Fast forward binding (Controls tab: ` or the touchpad). Sound is muted.");
             ImGui::Separator();
-            ImGui::TextWrapped("Cheats reset each launch: toggles off, ABS 1x, movement 100%, fast-forward 300%.");
+            ImGui::TextWrapped("Cheats reset each launch: toggles off, ABS 1x, movement 100%.");
         });
     }
 }

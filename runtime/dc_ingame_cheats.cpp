@@ -47,7 +47,7 @@ RecompiledFunction originalInit=nullptr,originalExit=nullptr,originalKey=nullptr
 RecompiledFunction originalHelp=nullptr,originalMessage=nullptr;
 constexpr uint32_t kHelp=0x217A60,kMessage=0x153310;
 // Rows 0..15 as before; then the level-up, map, fishing, spawner and fast-forward rows.
-enum Row { LevelUp=16, RevealMap, FishBite, SpawnItem, SpawnCount, GiveItem, FastSpeed, FastLock, DamageRate, OneHit,
+enum Row { LevelUp=16, RevealMap, FishBite, SpawnItem, SpawnCount, GiveItem, FastLock, DamageRate, OneHit,
            NoDamage, KeyFinder, RowEnd };
 constexpr int rowCount=RowEnd;
 // The toggle rows and the cheat each switches.
@@ -227,7 +227,7 @@ void drawPage(int alpha)
             "Equipped weapon ATK","Apply weapon ATK","Weapon ABS multiplier","Gilda","Apply Gilda",
             "Active consumable slot","Consumable quantity","Apply quantity","Movement speed","Freeze time of day",
             "Inventory size","Apply inventory size","Level up equipped weapon","Reveal floor map","Fish always bite",
-            "Spawn item","Spawn count","Give item","Fast-forward speed","Fast-forward always on","Damage multiplier",
+            "Spawn item","Spawn count","Give item","Fast-forward always on","Damage multiplier",
             "One-hit kills","No damage taken","Key finder"};
         const int first=std::max(0,menu.row-5);
         for(int i=first;i<std::min(first+6,rowCount);++i){
@@ -244,7 +244,6 @@ void drawPage(int alpha)
             if(i==14)value=inventorySize()<0?"---":std::to_string(menu.capacity);
             if(i==SpawnItem)value=spawnItemCount()?spawnItem(menu.spawn).name:"---";
             if(i==SpawnCount)value=std::to_string(menu.spawnCount);
-            if(i==FastSpeed)value=std::to_string(fastForwardPercent())+"%";
             if(i==DamageRate)value=std::to_string(damageMultiplier())+"x";
             text(v,value,526-float(value.size())*10,y,1.25f,c);
         }
@@ -252,7 +251,7 @@ void drawPage(int alpha)
         const char *help="L/R: 1  L1/R1: 10  L2/R2: 100  O: Back";
         if(Cheat cheat;toggleRow(menu.row,cheat))
             help=menu.row==RevealMap?"X: Toggle   Whole floor shown on the map":menu.row==FishBite?"X: Toggle   Fish bite and stay hooked":
-                 menu.row==FastLock?"X: Toggle   Sound is muted while fast":
+                 menu.row==FastLock?"X: Toggle   Video tab speed, sound muted":
                  menu.row==OneHit?"X: Toggle   Any hit that deals damage kills":
                  menu.row==NoDamage?"X: Toggle   Monster attacks never land":
                  menu.row==KeyFinder?"X: Toggle   Key holder blinks gold on the map":"X: Toggle   Left/Right: Set   O: Back";
@@ -266,7 +265,6 @@ void drawPage(int alpha)
         else if(menu.row==SpawnItem)help=spawnItemCount()?"L/R: 1  L1/R1: 10   Story items excluded":"Item names load with the game";
         else if(menu.row==SpawnCount)help="L/R: 1   Each one takes a bag slot";
         else if(menu.row==GiveItem)help="X: Give when play resumes   O: Back";
-        else if(menu.row==FastSpeed)help="L/R: 50%   Hold ` or the touchpad";
         else if(menu.row==DamageRate)help="L/R: 1x   Damage you deal to monsters";
         if((menu.row==4 || menu.row==5 || menu.row==LevelUp) && equippedWeaponAttack()<0)help="No weapon equipped   O: Back";
         if((menu.row==10 || menu.row==11) && activeConsumable(menu.slot).id<0)help="Equip a consumable in this HUD slot first";
@@ -356,7 +354,6 @@ void key(uint8_t *r,R5900Context *c,Runtime *rt)
         }
         else if(menu.row==SpawnCount && delta)menu.spawnCount=std::clamp(menu.spawnCount+(delta>0?1:-1),1,10);
         else if(menu.row==GiveItem && spawnItemCount() && (pressed&kCross)){requestSpawn(spawnItem(menu.spawn).id,menu.spawnCount);menu.queued=true;}
-        else if(menu.row==FastSpeed && delta)setFastForwardPercent(fastForwardPercent()+(delta>0?50:-50));
         else if(menu.row==DamageRate && delta)setDamageMultiplier(damageMultiplier()+delta);
 
     }

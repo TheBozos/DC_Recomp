@@ -11,12 +11,12 @@ namespace dc::cheats
     enum class Cheat { InfiniteHealth, InfiniteWeaponDurability, InfiniteThirst, InfiniteStamina, FreezeTimeOfDay, FastForwardLock, FishingHelper, RevealFloorMap, OneHitKills, NoDamageTaken, KeyFinder };
     bool enabled(Cheat cheat);
     void setEnabled(Cheat cheat, bool on);
-    // Fast-forward: while held (the window's ` key or a gamepad's touchpad / Share button) or locked on, the frame
-    // cap is raised to this percentage of the normal rate and the sound is muted. Game logic runs per frame.
+    // Fast-forward always on: the frame cap is raised to the Video tab's fast-forward speed and the sound is muted.
+    // Holding fast forward is the engine's (its FastForward binding: ` or the touchpad by default); the two never
+    // stack. Game logic runs per frame.
     int fastForwardPercent();
-    void setFastForwardPercent(int value); // 150..400
-    void setFastForwardHeld(bool held);    // window input, sampled once a frame
-    int gameSpeedPercent();                // 100, or fastForwardPercent() while held or locked
+    void setFastForwardPercent(int value); // the Video tab's speed, copied each frame (0: as fast as the PC goes)
+    int gameSpeedPercent();                // 100, or fastForwardPercent() while locked on
     int equippedWeaponAttack(); // game-thread snapshot; -1 when no weapon is equipped
     void requestWeaponAttack(int value); // one edit, applied on the game thread
     int absMultiplier();

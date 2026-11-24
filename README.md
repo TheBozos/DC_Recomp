@@ -274,7 +274,8 @@ CI uses game-free engine fixtures and offline-tool checks; retail-route tests re
 `--frames 0` runs until shutdown; `--frames N` bounds a run. `--wav <file>` records sound.
 `--pad-script <file>` accepts entries such as `1200:START/6,1500:CROSS/6`; `--live-pad <file>` reloads
 changed input text relative to the current frame. `--capture-dir` and repeatable `--capture-frame`
-select native captures. `--profile-io` reports device-register accesses after a bounded run.
+select native captures. `--hidden` never shows the window and plays no sound: captures then read the game's offscreen picture, so a
+scripted run needs no visible window. `--mute` alone runs without a sound device. `--profile-io` reports device-register accesses after a bounded run.
 Normal play leaves expensive diagnostic recording disabled.
 
 Recent results live in [NATIVE_RENDERING_FOLLOWUP.md](docs/NATIVE_RENDERING_FOLLOWUP.md).

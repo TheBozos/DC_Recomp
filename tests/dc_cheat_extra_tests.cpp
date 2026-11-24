@@ -192,10 +192,10 @@ int main()
 
     // Fast-forward.
     check(gameSpeedPercent()==100,"normal speed by default");
-    setFastForwardHeld(true);check(gameSpeedPercent()==300,"held: the fast-forward speed (300% by default)");
-    setFastForwardPercent(1000);check(gameSpeedPercent()==400,"fast-forward speed capped at 400%");
-    setFastForwardHeld(false);check(gameSpeedPercent()==100,"released: normal speed");
-    setEnabled(Cheat::FastForwardLock,true);check(gameSpeedPercent()==400,"locked on without holding");
-    setEnabled(Cheat::FastForwardLock,false);setFastForwardPercent(300);
+    setEnabled(Cheat::FastForwardLock,true);check(gameSpeedPercent()==300,"locked on: the Video tab's speed (300% by default)");
+    setFastForwardPercent(1000);check(gameSpeedPercent()==1000,"the Video tab's speed is taken as it is (up to 10x)");
+    setFastForwardPercent(0);check(gameSpeedPercent()==0,"unlimited: 0");
+    setEnabled(Cheat::FastForwardLock,false);check(gameSpeedPercent()==100,"off: normal speed");
+    setFastForwardPercent(300);
     std::printf("Extra cheats: %d failures\n",failures);return failures?1:0;
 }

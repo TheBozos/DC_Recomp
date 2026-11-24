@@ -30,13 +30,13 @@ game's interpolated). Left/Right changes a row; **Apply and save** applies the c
 | Reveal floor map | Marks every floor cell of the current dungeon floor explored, on arrival and when switched on; unopened chests, Atla and trap circles show too |
 | Fish always bite | A fish near the bait never leaves it, and a hooked fish stays hooked until you reel in; fish kinds, sizes and points are unchanged |
 | Spawn item / Spawn count / Give item | Gives up to 10 of a bag item, attachment or weapon through the game's own give-item routine, while there is room. Event, key and story items, default and story weapons are not offered |
-| Fast-forward speed / always on | 150–400% (default 300%). Hold **`** (the key below Esc) or a gamepad's **touchpad** / **Share** button, or lock it on. Sound is muted while fast |
+| Fast-forward always on | Runs the game at the **Video** tab's fast-forward speed (2×–10× or unlimited, 3× by default). To fast-forward only while a button is held, use the engine's **Fast forward** binding (**`** or a gamepad's **touchpad** by default, rebindable in the **Controls** tab), at the same speed; the two never stack. Sound is muted while fast |
 | Damage multiplier | 1–16× damage you deal to monsters, capped at the monster's remaining HP; immunities stay |
 | One-hit kills | Any hit that deals damage defeats the monster; immunities stay |
 | No damage taken | Monster attacks never land: no damage, knock-down, status or theft. Poison already active, traps and thirst still apply |
 | Key finder | The monster carrying the current floor's key blinks as a gold square on the dungeon map |
 
-On the in-game list, Up/Down selects and scrolls through all 28 rows. Cross toggles on/off rows;
+On the in-game list, Up/Down selects and scrolls through all 27 rows. Cross toggles on/off rows;
 Left/Right sets them off/on. ATK, quantities and capacity use Left/Right ±1, L1/R1 ±10, L2/R2 ±100.
 Gilda uses ±1/100/1000; movement uses ±5%. Select the active slot (1–3, left to right on the HUD)
 before changing its quantity. Empty slots cannot create items. The row hint describes each control.
@@ -47,7 +47,7 @@ may allow a larger quantity afterward; close and reopen Options to refresh the d
 Quantity requests retain the expected item ID, so changing the selected item before application
 cannot silently edit a different item. Resizing never deletes or moves items.
 
-Toggles start off, ABS and damage start at 1×, movement at 100% and fast-forward at 300% on each launch. These settings are not
+Toggles start off, ABS and damage start at 1×, movement at 100% on each launch. These settings are not
 stored in saves. Restored resources and one-time inventory edits **are** included if the game saves
 afterward. Disabling a resource cheat restores normal depletion from its current value.
 
@@ -96,8 +96,9 @@ return-address checks and the identity-matched DUN module):
   copy of the hook's context with a sentinel return. Names come from the resident system messages (`SystemMes`,
   key = number + 100; a weapon's number from `ComItemInfo`, indexed id − 0x51). The allow-list excludes the 53
   event-flagged bag items (every floor gate key among them), unused IDs, the Synthsphere and default/story weapons.
-- **Fast-forward**: the frame pacer's cap is raised (the game's clock advances per frame); audio is not queued while
-  fast. `PS2X_FRAME_CAP=0` runs are left unlimited.
+- **Fast-forward**: always on raises the frame pacer's cap to the Video tab's speed (the game's clock advances per
+  frame); while the engine's hold is active (`FramePacer::speedPercent`) the cap stays normal and the pacer applies
+  that speed itself, so they never stack. Audio is not queued while fast. `PS2X_FRAME_CAP=0` runs are left unlimited.
 - **Damage dealt**: an instruction hook at 0x1DC3F4 (`subu v0,v0,s4` in `CMonstorUnit::CheckDmg`, a native site)
   scales the final damage before the original subtraction. Every player attack reaches monster HP there.
 - **Damage taken**: `CheckHitUser` (0x1B5920) answers "no hit" (-1) to DUN `BtCheckDamageProc` (return 0x1DBB0E0).

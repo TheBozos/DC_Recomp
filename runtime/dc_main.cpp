@@ -27,42 +27,20 @@
 #include "bozo/app/app.h"
 #include "bozo/app/audio_device.h"
 #include "bozo/app/device_pad.h"
+#include "bozo/app/video_settings.h"
 #include "bozo/app/window.h"
-#include <SDL3/SDL.h>
 #endif
 namespace dc
 {
     void installAudio(bozo::libs::Libraries &);
     void install(Runtime &, bozo::port::Registry &);
 } // namespace dc
-#ifdef DC_WITH_WINDOW
-namespace
-{
-    // The fast-forward hold: the ` key (by position, below Esc), or a gamepad's touchpad / Share (MISC1) button. None
-    // of them is in the default PS2 bindings. SDL releases the keys when the window loses the keyboard.
-    bool fastForwardHeld()
-    {
-        bool held = false;
-        if (const bool *keys = SDL_GetKeyboardState(nullptr))
-            held = keys[SDL_SCANCODE_GRAVE];
-        int count = 0;
-        if (SDL_JoystickID *ids = SDL_GetGamepads(&count))
-        {
-            for (int i = 0; i < count && !held; ++i)
-                if (SDL_Gamepad *pad = SDL_GetGamepadFromID(ids[i]))
-                    held = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_TOUCHPAD) ||
-                           SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_MISC1);
-            SDL_free(ids);
-        }
-        return held;
-    }
-}
-#endif
 int main(int argc, char **argv)
 {
     bozo::host::FreeOptions options;
     options.framePeriodCycles = 294912000 / 60;
     bool window = false;
+    [[maybe_unused]] bool mute = false; // no sound device: --mute, and every --hidden run
 #ifdef DC_WITH_WINDOW
     window = true;
     bozo::app::setIdentity({"Dark Cloud", "DC_Recomp", "dc-recomp", "SCUS_971.11"});
@@ -116,6 +94,10 @@ int main(int argc, char **argv)
             windowOptions.vsync = false;
         else if (a == "--fullscreen")
             windowOptions.fullscreen = true;
+        else if (a == "--hidden") // never shown, and silent; captures read the game's offscreen picture
+            windowOptions.hidden = mute = true;
+        else if (a == "--mute") // no sound device (a --wav recording still gets every sample)
+            mute = true;
         else if (a == "--capture-dir" && i + 1 < argc)
             windowOptions.captureDir = argv[++i];
         else if (a == "--capture-frame" && i + 1 < argc)
@@ -126,7 +108,7 @@ int main(int argc, char **argv)
             std::fprintf(stderr, "Usage: dc [--frames N] [--headless] [--elf FILE] [--iso FILE]\n"
                                  "          [--asset-dir DIR] [--card-dir DIR] [--pad-script FILE | --live-pad FILE] [--wav FILE]\n"
                                  "          [--out FILE] [--capture-dir DIR] [--capture-frame N] [--profile-io]\n"
-                                 "          [--fullscreen] [--no-vsync] [--dump-ram FILE]\n"
+                                 "          [--fullscreen] [--hidden] [--mute] [--no-vsync] [--dump-ram FILE]\n"
                                  "          [--load-state FILE [--load-state-at FRAME]] [--save-state FILE --save-state-at FRAME]\n");
             return a == "--help" ? 0 : 2;
         }
@@ -183,12 +165,19 @@ int main(int argc, char **argv)
     {
         if (dc::cheats::takeIngameQuitRequest()) host.requestStop();
 #ifdef DC_WITH_WINDOW
-        if (window)
-            dc::cheats::setFastForwardHeld(fastForwardHeld());
+        // Fast-forward always on runs at the Video tab's fast-forward speed (the one the engine's hold uses).
+        if (window && dc::cheats::enabled(dc::cheats::Cheat::FastForwardLock))
+            if (const auto shared = bozo::app::video::shared(); shared.open)
+                dc::cheats::setFastForwardPercent(shared.applied.fastForward);
 #endif
-        // Fast-forward raises the cap: the game's logic and clock advance per frame, so it simply runs more of them.
+        // Fast-forward always on raises the cap: the game's logic and clock advance per frame, so it simply runs more
+        // of them. While the engine's fast forward is held (FramePacer::speedPercent), the pacer already runs the cap at
+        // that speed: the cap stays normal then, so the two never stack.
         if (normalCap)
-            pacer.setCap(normalCap * static_cast<uint32_t>(dc::cheats::gameSpeedPercent()) / 100u);
+        {
+            const bool engineFast = bozo::app::FramePacer::speedPercent().load(std::memory_order_relaxed) != 100u;
+            pacer.setCap(engineFast ? normalCap : normalCap * static_cast<uint32_t>(dc::cheats::gameSpeedPercent()) / 100u);
+        }
         pacer.frameEnd();
         if (f % 60 == 0)
             std::printf("[dc] frame=%llu pc=%x cycles=%llu\n", (unsigned long long)f, ctx->pc,
@@ -216,14 +205,15 @@ int main(int argc, char **argv)
 #ifdef DC_WITH_WINDOW
         // Muted while fast-forwarding: sound made faster than real time would overflow the device's queue and be
         // dropped in bursts. A WAV recording keeps every sample.
-        if (window && dc::cheats::gameSpeedPercent() == 100)
+        if (window && !mute && dc::cheats::gameSpeedPercent() == 100 &&
+            bozo::app::FramePacer::speedPercent().load(std::memory_order_relaxed) == 100u)
             audio.push(pcm, count);
 #endif
     };
     auto run = [&]()
     {
 #ifdef DC_WITH_WINDOW
-        if (window)
+        if (window && !mute)
             audio.open();
 #endif
         uint64_t frames = 0;

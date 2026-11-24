@@ -7,6 +7,7 @@
 - Hidden test runs: `--hidden` runs the game silently without showing its window, and `--capture-frame` then reads the game's offscreen picture. `--mute` runs without a sound device.
 
 ### Fixed
+- Character shadows no longer vanish with anti-aliasing on (Video tab).
 - Town water no longer turns into a mirror of the cliffs after the menu has been opened.
 
 ### Changed

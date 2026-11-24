@@ -2213,6 +2213,12 @@ namespace dc::native
             // texture shares its Z buffer): where a character stands in front of the ground, its depth hides the flattened
             // shadow, the work texture stays unmarked and the character is not darkened.
             mark.depthTest = true;
+            // With anti-aliasing the shared depth is resolved from one sample point off each pixel's centre: on sloping
+            // ground it can lie nearer than the mark's centre depth, and every mark failed (the shadows vanished). The
+            // marks are moved toward the camera by up to a pixel's depth slope then; without anti-aliasing they stay at
+            // the ground's own depth, as on the GS.
+            if (renderer.antiAliasing() >= 2)
+                mark.depthOffsetSlope = mark.depthOffsetUnits = 1.0f;
             for (ShadowDraw &draw : draws)
             {
                 for (bozo::render::Vertex &v : draw.vertices)

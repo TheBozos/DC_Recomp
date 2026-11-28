@@ -61,6 +61,7 @@ namespace dc::warp
         constexpr uint32_t kQuestDungeon = 0x00158870u, kPartsGet = 0x00158660u, kChipGet = 0x00158760u;
         constexpr uint32_t kPartsLoad = 0x0019A3F0u, kEdGetItem = 0x001730A0u, kEquipDefault = 0x0020BFB0u;
         constexpr uint32_t kReturnSentinel = 0x00080000u; // not code: a routine's jr ra lands here
+        constexpr uint32_t kRunTownEvent = 0x001779F0u, kTownCamera = 0x002A28F0u; // RunEvent(n, NowCamera), outdoor maps
 
         const Place kPlaces[] = {
             {0, "Norune Village"}, {1, "Matataki Village"}, {2, "Queens"}, {3, "Muska Lacka"}, {4, "Sun Giant georama"},
@@ -82,7 +83,7 @@ namespace dc::warp
 
         // ---- requests ----
         enum class Kind { Place, Dungeon, Monster, Georama, World, Chapter, Cheat, Flag, IntFlag, Where, Talk, Wait, Peek,
-                          Event, Kill, Party, Item, Press, Until };
+                          Event, Kill, Party, Item, Press, Until, TownEvent };
         struct Command
         {
             Kind kind;
@@ -193,12 +194,20 @@ namespace dc::warp
             std::string out = line;
             if (mode == 3)
             {
-                std::snprintf(line, sizeof line, " | bt-mode %d task 0x%x event %d exist %d fade %d ura %d jump-floor %d act %d",
+                std::snprintf(line, sizeof line, " | bt-mode %d task 0x%x event %d exist %d fade %d ura %d jump-floor %d act %d active %d",
                               rd<int32_t>(ram, kBtGameMode), rd<int32_t>(ram, kGameTask), rd<int32_t>(ram, kBtEventMode),
                               rd<int32_t>(ram, kExistFlag), rd<int32_t>(ram, kFadeInOut), rd<int32_t>(ram, kBtUra),
-                              rd<int32_t>(ram, kBtMapJumpFloor), rd<int32_t>(ram, kBtActBusy));
+                              rd<int32_t>(ram, kBtMapJumpFloor), rd<int32_t>(ram, kBtActBusy), rd<int8_t>(ram, userStatus(ram) + 4u));
                 out += line;
+                // The floor's monsters: slot:HP for each one present (-1 empty slots left out).
+                const uint32_t unit = rd<uint32_t>(ram, kMonsterUnit) & 0x1FFFFFFu;
+                out += " monsters";
+                for (uint32_t i = 0; unit && i < 16u; ++i)
+                    if (rd<int32_t>(ram, unit + 0x1E3D0u + i * 400u) != -1)
+                        out += " " + std::to_string(i) + ":" + std::to_string(rd<int32_t>(ram, unit + 0x1E3F4u + i * 400u));
             }
+            out += " cleared " + std::to_string(rd<int32_t>(ram, kGameClear)) + "/" + std::to_string(rd<int32_t>(ram, kSaveData + 0x38u)) +
+                   " demon-shaft-visits " + std::to_string(rd<int16_t>(ram, kSaveData + 0x12EE8u + 60u * 2u));
             out += " deepest";
             for (int i = 0; i < 7; ++i)
                 out += " " + std::to_string(rd<int8_t>(ram, kDngStatusInSave + 0x42BFu + static_cast<uint32_t>(i)));
@@ -699,6 +708,14 @@ namespace dc::warp
                     finish("Party: " + std::to_string(rd<int8_t>(ram, kDngStatusInSave + 5u)));
                 }
                 return;
+            case Kind::TownEvent:
+                // townevent <n>: a town or area map's own event (its event.stb), as its triggers run it: RunEvent.
+                if (townIdle(ram))
+                {
+                    call(rt, ram, ctx, kRunTownEvent, {static_cast<uint32_t>(g_current.a), rd<uint32_t>(ram, kTownCamera)});
+                    finish("Town event " + std::to_string(g_current.a) + " started");
+                }
+                return;
             case Kind::Item:
                 if (idle)
                 {
@@ -795,6 +812,7 @@ namespace dc::warp
                 return out.kind = Kind::Peek, true;
             if (word == "talk" && (in >> out.a))
                 return out.kind = Kind::Talk, true;
+
             if (word == "wait" && (in >> out.a))
                 return out.kind = Kind::Wait, true;
             if (word == "event" && (in >> out.a))
@@ -805,6 +823,8 @@ namespace dc::warp
             }
             if (word == "kill")
                 return out.kind = Kind::Kill, true;
+            if (word == "townevent" && (in >> out.a))
+                return out.kind = Kind::TownEvent, true;
             if (word == "party" && (in >> out.a))
                 return out.kind = Kind::Party, true;
             if (word == "item" && (in >> out.a))

@@ -1149,6 +1149,11 @@ Version {version}
 
 
 def main():
+    # The changelog and the notes are UTF-8 ("Options → Travel"): the console's code page (cp1252 on Windows) cannot
+    # print every character, so the tool's output is UTF-8 too.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8')
     ap = argparse.ArgumentParser(description='Makes the DC_Recomp release zip (see the docstring).')
     ap.add_argument('--version', help='MAJOR.MINOR.PATCH[-pre] (default: the commit\'s tag, v stripped)')
     ap.add_argument('--commit', help='the commit to release (default HEAD); only committed files count')

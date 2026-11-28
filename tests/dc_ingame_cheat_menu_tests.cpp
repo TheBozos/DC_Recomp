@@ -2,6 +2,7 @@
 // player state. Real cheat resource hooks consume the queued weapon edit.
 #include "../runtime/dc_ingame_cheats.h"
 #include "../runtime/dc_cheats.h"
+#include "../runtime/dc_warp.h"
 #include "bozo/port.h"
 #include "bozo/runtime.h"
 #include "bozo/render/renderer.h"
@@ -115,6 +116,15 @@ int main(){
     tap(*rt,p,0x40);tap(*rt,p,0x4000);tap(*rt,p,0x40);
     check(dc::cheats::takeIngameQuitRequest() && !dc::cheats::takeIngameQuitRequest(),"explicit Quit Game confirmation produces one shutdown request");
     call(*rt,p,exitPc);
+    // Travel: the fourth entry; its warp row queues a request for the game thread (carried out once play is idle).
+    call(*rt,p,initPc);finishFade(*rt,p);tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x40); // Root -> Travel
+    check(!dc::warp::busy(),"opening Travel queues nothing");
+    tap(*rt,p,0x2000);tap(*rt,p,0x4000);tap(*rt,p,0x40); // the next town, then Warp to the town
+    check(dc::warp::busy(),"Warp to the town queues the warp");
+    draw(*rt,p);const auto travelPage=bozo::render::Renderer::instance().published();
+    check(travelPage && travelPage->batches.size()>=2,"Travel page draws native text and board");
+    tap(*rt,p,0x20);check(read<int32_t>(r,phase)==0,"back from Travel returns to root without closing");
+    tap(*rt,p,0x20);finishFade(*rt,p);
     // Graphics: without the window (headless) the page only explains; with it, Apply posts the edited settings once.
     call(*rt,p,initPc);finishFade(*rt,p);tap(*rt,p,0x4000);tap(*rt,p,0x40); // Root -> Graphics
     tap(*rt,p,0x2000);tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x40);
@@ -125,11 +135,15 @@ int main(){
     tap(*rt,p,0x2000);tap(*rt,p,0x4000);tap(*rt,p,0x2000);tap(*rt,p,0x4000);tap(*rt,p,0x2000);tap(*rt,p,0x4000);tap(*rt,p,0x2000);
     check(postCalls==0,"Graphics edits wait for Apply");
     draw(*rt,p);const auto graphics=bozo::render::Renderer::instance().published();check(graphics && graphics->batches.size()>=2,"Graphics page draws native text and board");
+    // Widescreen on, anti-aliasing 2x, texture smoothing trilinear, then Apply.
+    tap(*rt,p,0x4000);tap(*rt,p,0x2000);tap(*rt,p,0x4000);tap(*rt,p,0x2000);tap(*rt,p,0x4000);tap(*rt,p,0x2000);
     tap(*rt,p,0x4000);tap(*rt,p,0x40);
     check(postCalls==1 && postedSave && posted.mode==video::WindowMode::Fullscreen && posted.width==1920 && posted.height==1080 &&
           posted.renderScale==1.5f && posted.frameRate==-1,"Apply posts mode, size, render scale and frame rate once, saved");
+    check(posted.widescreen && posted.antiAliasing==2 && posted.textureSmoothing==1,
+          "Apply posts widescreen, anti-aliasing and texture smoothing");
     tap(*rt,p,0x4000);tap(*rt,p,0x2000);tap(*rt,p,0x4000);tap(*rt,p,0x2000); // Display -> Borderless; its size row is locked
-    tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x40);
+    tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x4000);tap(*rt,p,0x40);
     check(postCalls==2 && posted.mode==video::WindowMode::Borderless && posted.width==1280 && posted.height==960,
           "Borderless keeps the window size it returns to");
     const int exitsBefore=exitCalls;tap(*rt,p,0x20);tap(*rt,p,0x20);finishFade(*rt,p);check(exitCalls==exitsBefore+1,"Options still closes after Graphics");

@@ -8,6 +8,7 @@
 #include "dc_ingame_cheats.h"
 #include "dc_pad.h"
 #include "dc_state.h"
+#include "dc_warp.h"
 #include <string>
 #include <cstdlib>
 #include <vector>
@@ -41,6 +42,7 @@ int main(int argc, char **argv)
     options.framePeriodCycles = 294912000 / 60;
     bool window = false;
     [[maybe_unused]] bool mute = false; // no sound device: --mute, and every --hidden run
+    std::string cheatScript; // --cheat-script FILE
 #ifdef DC_WITH_WINDOW
     window = true;
     bozo::app::setIdentity({"Dark Cloud", "DC_Recomp", "dc-recomp", "SCUS_971.11"});
@@ -96,6 +98,8 @@ int main(int argc, char **argv)
             windowOptions.fullscreen = true;
         else if (a == "--hidden") // never shown, and silent; captures read the game's offscreen picture
             windowOptions.hidden = mute = true;
+        else if (a == "--cheat-script" && i + 1 < argc) // travel/progress commands by frame (dc_warp.cpp)
+            cheatScript = argv[++i];
         else if (a == "--mute") // no sound device (a --wav recording still gets every sample)
             mute = true;
         else if (a == "--capture-dir" && i + 1 < argc)
@@ -109,7 +113,8 @@ int main(int argc, char **argv)
                                  "          [--asset-dir DIR] [--card-dir DIR] [--pad-script FILE | --live-pad FILE] [--wav FILE]\n"
                                  "          [--out FILE] [--capture-dir DIR] [--capture-frame N] [--profile-io]\n"
                                  "          [--fullscreen] [--hidden] [--mute] [--no-vsync] [--dump-ram FILE]\n"
-                                 "          [--load-state FILE [--load-state-at FRAME]] [--save-state FILE --save-state-at FRAME]\n");
+                                 "          [--load-state FILE [--load-state-at FRAME]] [--save-state FILE --save-state-at FRAME]\n"
+                                 "          [--cheat-script FILE]\n");
             return a == "--help" ? 0 : 2;
         }
     }
@@ -120,6 +125,8 @@ int main(int argc, char **argv)
         options.cardDir = bozo::app::userDirectory().string();
     }
 #endif
+    if (!cheatScript.empty() && !dc::warp::loadScript(cheatScript))
+        return 2;
     if (assetDir.empty())
     {
         const auto besideElf = std::filesystem::absolute(options.elf).parent_path();
@@ -135,6 +142,7 @@ int main(int argc, char **argv)
     bozo::port::Registry registry;
     dc::install(d.runtime(), registry);
     dc::cheats::install(d.runtime(), registry);
+    dc::warp::install(d.runtime(), registry);
     dc::cheats::installIngameMenu(d.runtime(), registry, dc::native::finishSceneForMenu);
     dc::pad::install(registry);
     // Save states: DC's own part (the engine saves its runtime, libraries and host).
@@ -163,12 +171,25 @@ int main(int argc, char **argv)
     const uint32_t normalCap = pacer.cap(); // 60, or PS2X_FRAME_CAP (0: unlimited, left alone)
     host.onFrame = [&](uint64_t f, const R5900Context *ctx)
     {
+        dc::warp::onFrame(f);
         if (dc::cheats::takeIngameQuitRequest()) host.requestStop();
 #ifdef DC_WITH_WINDOW
         // Fast-forward always on runs at the Video tab's fast-forward speed (the one the engine's hold uses).
         if (window && dc::cheats::enabled(dc::cheats::Cheat::FastForwardLock))
             if (const auto shared = bozo::app::video::shared(); shared.open)
                 dc::cheats::setFastForwardPercent(shared.applied.fastForward);
+        // Widescreen (the Video tab, video.ini's widescreen, PS2X_WIDESCREEN): a 16:9 picture showing more at the sides,
+        // the HUD at the edges. A hidden run (a test) reads it from the environment alone, never the player's video.ini.
+        if (window)
+        {
+            static const bool s_hiddenWide = [] { const char *e = std::getenv("PS2X_WIDESCREEN"); return e && (e[0] == '1' || e[0] == 'o'); }();
+            bool wide = s_hiddenWide;
+            if (!windowOptions.hidden)
+                if (const auto shared = bozo::app::video::shared(); shared.open)
+                    wide = shared.applied.widescreen;
+            dc::native::setWidescreen(wide);
+            bozo::app::setPictureAspect(wide ? 16.0f / 9.0f : 0.0f);
+        }
 #endif
         // Fast-forward always on raises the cap: the game's logic and clock advance per frame, so it simply runs more
         // of them. While the engine's fast forward is held (FramePacer::speedPercent), the pacer already runs the cap at
@@ -269,6 +290,7 @@ int main(int argc, char **argv)
         if (windowOptions.fullscreen)
             bozo::app::video::edited().mode = bozo::app::video::WindowMode::Borderless;
         windowOptions.videoSettings = true;
+        bozo::app::video::offerWidescreen(true); // the Video tab's Widescreen (see the frame hook)
         dc::cheats::setGraphicsAccess(&bozo::app::video::shared, &bozo::app::video::post);
         bozo::app::Game game;
         game.run = run;

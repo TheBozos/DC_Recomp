@@ -41,7 +41,7 @@ The unsigned launcher may trigger Windows SmartScreen. Game files and generated 
 Use the launcher's **Settings** for display options, logs, maintenance and updates. **F2** opens the game's
 settings. Saves, controls, video settings and cheats are stored in `%APPDATA%\DC_Recomp` and survive launcher
 updates. Existing development saves are kept separately; copy only the desired card files into that directory.
-The in-game pause menu includes **Graphics**, **Cheats** and **Quit Game**. Updates offer a rebuild when the source changes.
+The in-game pause menu includes **Graphics** (widescreen, anti-aliasing and more), **Cheats**, **Travel** and **Quit Game**. Updates offer a rebuild when the source changes.
 See [CHANGELOG.md](CHANGELOG.md) for release changes and the checked routes above for current coverage.
 
 ## Status
@@ -67,7 +67,8 @@ A complete story playthrough and full visual parity remain unverified.
 | New-game opening on the current engine | 🔧 |
 | Complete story, all companions, locations and effects | 🔧 |
 | Linux build | ⏳ |
-| Widescreen | ⏳ |
+| Widescreen, with the HUD at the screen's edges | ✅ |
+| Travel: any town, area, dungeon floor and story chapter (cheats, scripted runs) | ✅ |
 
 **Native port.** Models, textures, camera, lights and drawing routines feed native PC draws.
 BozoEngine supplies the runtime, native SDK services, renderer and mixer.
@@ -114,8 +115,8 @@ Captured from the current build at 960x720.
 ## Goal
 
 A fully playable *Dark Cloud* as a native PC program, from the opening to the ending, drawing and playing
-sound directly from the game's data. Accuracy and complete gameplay coverage come first; Linux,
-widescreen and additional presentation options follow.
+sound directly from the game's data. Accuracy and complete gameplay coverage come first; Linux and additional
+presentation options follow.
 
 ## How it works
 
@@ -211,10 +212,12 @@ with VSync enabled. **F8** captures a frame when a capture directory is configur
 an update, use the game's own memory-card saves. `--save-state FILE --save-state-at FRAME` and
 `--load-state FILE [--load-state-at FRAME]` do the same from the command line.
 
-The game's **Options** entry page offers **Game Options** (the original settings), **Graphics**, **Cheats**, and
-**Quit Game**. Up/Down selects rows, Cross confirms and Circle goes back. **Graphics** sets the display mode,
-resolution, render scale and frame rate; **Apply and save** writes them to `video.ini` (shared with the launcher's
-Settings and **F2 → Video**). Quit Game asks for confirmation,
+The game's **Options** entry page offers **Game Options** (the original settings), **Graphics**, **Cheats**,
+**Travel** and **Quit Game**. Up/Down selects rows, Cross confirms and Circle goes back. **Graphics** sets the display
+mode, resolution, render scale, frame rate, widescreen, anti-aliasing and texture smoothing; **Apply and save** writes
+them to `video.ini` (shared with the launcher's Settings and **F2 → Video**). **Widescreen** shows a 16:9 picture
+with more of the scene at the sides; the HUD moves to the screen's edges while menus and full-screen pictures stay
+centred. Quit Game asks for confirmation,
 with Cancel selected initially. Save through the game's normal save menu before quitting to keep progress;
 quitting does not autosave.
 
@@ -243,6 +246,11 @@ Select the corresponding **Apply** row for ATK, Gilda, consumable quantity or in
 Those edits apply when Options closes or gameplay resumes, and become part of a game save if you save
 afterward. Toggle/multiplier settings are session-only: each launch starts with toggles off,
 ABS at 1× and movement at 100%. See [the cheat reference](docs/CHEATS.md) for limits and validation.
+
+**Travel** (**Options → Travel** or **F2 → Travel**) warps to any town or area, to any floor of any dungeon
+(boss floors included) and next to the floor's monsters; it also unlocks every georama part, opens the whole world
+map and advances the story to a chosen chapter. Each request waits until you walk freely, then goes through the
+game's own fade and loading. Save before advancing the story: it is meant for testing.
 
 ### Memory cards and data paths
 
@@ -275,7 +283,9 @@ CI uses game-free engine fixtures and offline-tool checks; retail-route tests re
 `--pad-script <file>` accepts entries such as `1200:START/6,1500:CROSS/6`; `--live-pad <file>` reloads
 changed input text relative to the current frame. `--capture-dir` and repeatable `--capture-frame`
 select native captures. `--hidden` never shows the window and plays no sound: captures then read the game's offscreen picture, so a
-scripted run needs no visible window. `--mute` alone runs without a sound device. `--profile-io` reports device-register accesses after a bounded run.
+scripted run needs no visible window. `--mute` alone runs without a sound device. `--cheat-script <file>` drives
+Travel, story and cheat commands by frame (`3400 dungeon 0 15`, `talk 1` to read through dialogue, `where` to log
+the state; see [the cheat reference](docs/CHEATS.md)). `--profile-io` reports device-register accesses after a bounded run.
 Normal play leaves expensive diagnostic recording disabled.
 
 Recent results live in [NATIVE_RENDERING_FOLLOWUP.md](docs/NATIVE_RENDERING_FOLLOWUP.md).

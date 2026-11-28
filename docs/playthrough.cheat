@@ -1,0 +1,81 @@
+# Dark Cloud, the whole story by script (dc.exe --cheat-script, see docs/CHEATS.md "Scripted runs").
+# Frame 3400 is when this run's --pad-script had reached Norune's free walk from an early save (any Norune save
+# works: start the commands once the game is in Norune). Each command waits its turn and for an idle game.
+# Checked headless (2026-11-28): every boss below beaten through the game's own death and defeat scenes, the
+# ending, the credits and the cleared save, twice, each milestone within about 50 frames of the other run.
+# One continuous run from an early Norune save to the ending: each boss's fight started by its own trigger, each
+# boss defeated through the game's own death path (kill), each defeat scene left to set the story (until ...).
+# Allies join as their scenes give them (party); the temple's signet doors as they set their flags (26, 27).
+3400 talk 1
+3400 cheat nodamage 1
+3400 cheat health 1
+3400 where
+# 1. Divine Beast Cave: Dran
+3400 party 2
+3400 dungeon 0 15
+3400 wait 300
+3400 event 500
+3400 kill
+3400 until intflag 0 100
+3400 wait 1800
+3400 where
+# 2. Wise Owl Forest: Master Utan
+3400 party 3
+3400 dungeon 1 17
+3400 wait 300
+3400 event 500
+3400 kill
+3400 until flag 34
+3400 wait 1800
+3400 where
+# 3. The Shipwreck: La Saia (the floor's own scene in Area s34 first)
+3400 party 4
+3400 dungeon 2 18
+3400 kill
+3400 until intflag 0 300
+3400 wait 1800
+3400 where
+# 4. The Sun & Moon Temple: King's Curse (both signet doors opened)
+3400 party 5
+3400 flag 26 1
+3400 flag 27 1
+3400 dungeon 3 18
+3400 wait 300
+3400 event 403
+3400 kill
+3400 until intflag 0 400
+3400 wait 1800
+3400 where
+# 5. The Moon Sea: Minotaur Joe
+3400 party 6
+3400 dungeon 4 15
+3400 wait 300
+3400 event 500
+3400 kill
+3400 until intflag 0 500
+3400 wait 1800
+3400 where
+# 6. The Gallery of Time: the Dark Genie, then the ending
+3400 dungeon 5 25
+3400 kill
+3400 kill
+3400 wait 600
+3400 kill
+3400 wait 600
+3400 kill
+3400 until flag 41
+3400 where
+# The ending and the credits, then the game's own "save cleared data?": Yes, the card, the save.
+3400 wait 30000
+3400 where
+3400 press cross 4
+3400 wait 240
+3400 press cross 4
+3400 wait 240
+3400 press cross 4
+3400 wait 240
+3400 press cross 4
+3400 wait 900
+3400 where
+3400 wait 3000
+3400 where

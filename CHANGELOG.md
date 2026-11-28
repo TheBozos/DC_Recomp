@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- The whole story by script: [docs/playthrough.cheat](docs/playthrough.cheat) beats every story boss (Dran, Master Utan, La Saia, King's Curse, Minotaur Joe, the Dark Genie) through the game's own fights and defeat scenes, plays the ending and the credits and saves the cleared game, headless. New script commands: `event`, `kill`, `party`, `item`, `press`, `until`.
 - Widescreen (Video tab, the in-game Graphics page, `widescreen = on` in `video.ini`): a 16:9 picture with more of the scene at the sides, nothing stretched; the HUD moves to the screen's edges (the town clock, the dungeon's status, floor and attack gauge, the minimap), menus and full-screen pictures stay centred, fades and backgrounds cover the whole width.
 - The in-game Graphics page also sets widescreen, anti-aliasing and texture smoothing.
 - Travel (Options → Travel, F2 → Travel): warp to any town or area, to any floor of any dungeon (boss floors included), next to the floor's monsters; every georama part, the whole world map, and a story chapter select. See [the cheat reference](docs/CHEATS.md).

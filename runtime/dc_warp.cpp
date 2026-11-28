@@ -81,7 +81,8 @@ namespace dc::warp
                                          "6: Dark Heaven Castle, Gallery of Time", "7: After the Dark Genie (post-game)"};
 
         // ---- requests ----
-        enum class Kind { Place, Dungeon, Monster, Georama, World, Chapter, Cheat, Flag, IntFlag, Where, Talk, Wait, Peek };
+        enum class Kind { Place, Dungeon, Monster, Georama, World, Chapter, Cheat, Flag, IntFlag, Where, Talk, Wait, Peek,
+                          Event, Kill, Party, Item, Press, Until };
         struct Command
         {
             Kind kind;
@@ -216,6 +217,8 @@ namespace dc::warp
         // event (gameTask 0x191) waits, so a scripted run reads through the story; never in free walk or a menu.
         bool g_talk = false;
         uint32_t g_talkClock = 0;
+        // press <buttons> <frames> (scripts): buttons held on top of the controller for that many frames.
+        uint32_t g_pressButtons = 0, g_pressFrames = 0;
         bool talking(const uint8_t *ram)
         {
             const int mode = mainMode(ram);
@@ -566,6 +569,7 @@ namespace dc::warp
                     say(where(ram));
                 else if (now.kind == Kind::Talk)
                     say((g_talk = now.a != 0) ? "Dialogue advance on" : "Dialogue advance off");
+
                 else
                     say(setCheat(now.text, now.a != 0) ? "Cheat " + now.text + (now.a ? " on" : " off") : "Unknown cheat " + now.text);
             }
@@ -579,6 +583,25 @@ namespace dc::warp
                 g_active = true;
                 g_phase = 0;
                 g_waited = 0;
+            }
+            if (g_current.kind == Kind::Until) // until intflag <i> <value> / until flag <n>: at most 20 minutes
+            {
+                ++g_waited;
+                const bool flag = g_current.text == "flag";
+                const int32_t value = flag ? int32_t((rd<uint32_t>(ram, kSaveData + 0x10268u + uint32_t(g_current.a >> 5) * 4u) >> (g_current.a & 31)) & 1u)
+                                           : rd<int32_t>(ram, kSaveData + 0x10668u + static_cast<uint32_t>(g_current.a) * 4u);
+                const std::string name = (flag ? "Story flag " : "Story counter ") + std::to_string(g_current.a);
+                if (value >= g_current.b)
+                    return finish(name + " reached " + std::to_string(value));
+                if (g_waited > 72000u)
+                    return finish(name + " never reached " + std::to_string(g_current.b));
+                return;
+            }
+            if (g_current.kind == Kind::Press) // press <buttons> <frames>: in turn, then held by the pad hook
+            {
+                g_pressButtons = static_cast<uint32_t>(g_current.a);
+                g_pressFrames = static_cast<uint32_t>(std::max(0, g_current.b));
+                return finish("Pressing " + g_current.text + " for " + std::to_string(g_current.b) + " frames");
             }
             if (g_current.kind == Kind::Wait) // wait <frames>: the next command that much later
             {
@@ -614,6 +637,81 @@ namespace dc::warp
             case Kind::Chapter:
                 if (idle)
                     applyChapter(ram, ctx, rt, g_current.a);
+                return;
+            case Kind::Event:
+                // event <n> (a dungeon's system event, as the stairs run event 100: the boss's start, 500, where the
+                // dungeon has one). Free play only.
+                if (dungeonIdle(ram, rt))
+                {
+                    wr<int32_t>(ram, kEventNext, g_current.a);
+                    wr<int32_t>(ram, kEventReload, g_current.b); // 1: the read buffers and monster views reset first
+                    wr<int32_t>(ram, kGameTask, 0x190);
+                    finish("Dungeon event " + std::to_string(g_current.a) + " started");
+                }
+                else if (mainMode(ram) != 3)
+                    finish("Dungeon event: only in a dungeon");
+                return;
+            case Kind::Kill:
+                // kill: every live monster of the floor (bosses too) defeated by the game's own poison tick: its
+                // countdown (+0xC) at 1 and its strength (+0x20) past its HP (CMonstorUnit::CheckDmg takes 0.1 x the
+                // strength when the countdown runs out; below 1 HP it is the monster's death, as from a blow: the
+                // kill counted, the death and, for a boss, its defeat scene). Editing HP alone skips that death.
+                // It waits (at most two minutes) for a dungeon's free play with a live monster: a boss may first need
+                // its scene, or the story may pass through another map on the way.
+                if (mainMode(ram) == 3 && rt->functions.generated(kDunResident) && rd<int32_t>(ram, kGameTask) == 0 &&
+                    [&] {
+                        const uint32_t unit = rd<uint32_t>(ram, kMonsterUnit) & 0x1FFFFFFu;
+                        for (uint32_t i = 0; unit && i < 16u; ++i)
+                            if (rd<int32_t>(ram, unit + 0x1E3D0u + i * 400u) != -1 && rd<int32_t>(ram, unit + 0x1E3F4u + i * 400u) > 0)
+                                return true;
+                        return false;
+                    }())
+                {
+                    const uint32_t unit = rd<uint32_t>(ram, kMonsterUnit) & 0x1FFFFFFu;
+                    int poisoned = 0;
+                    for (uint32_t i = 0; unit && i < 16u; ++i)
+                    {
+                        const uint32_t rec = unit + 0x1E3D0u + i * 400u;
+                        const int32_t hp = rd<int32_t>(ram, rec + 0x24u);
+                        if (rd<int32_t>(ram, rec) != -1 && hp > 0)
+                        {
+                            wr<int32_t>(ram, rec + 0xCu, 1);
+                            wr<int32_t>(ram, rec + 0x20u, std::min(hp, 10000000) * 10 + 100);
+                            ++poisoned;
+                        }
+                    }
+                    finish("Defeating " + std::to_string(poisoned) + " monsters");
+                }
+                return;
+            case Kind::Party:
+                // party <n>: the allies up to n, as their join scenes give them (the party size, the ally's weapon
+                // through EdGetItem, its default weapon selected).
+                if (idle)
+                {
+                    static const int kAllyItem[] = {0, 0, 22, 34, 47, 59, 71};
+                    const int target = std::clamp(g_current.a, 1, 6);
+                    for (int n = rd<int8_t>(ram, kDngStatusInSave + 5u) + 1; n <= target; ++n)
+                    {
+                        wr<int8_t>(ram, kDngStatusInSave + 5u, static_cast<int8_t>(n));
+                        call(rt, ram, ctx, kEdGetItem, {static_cast<uint32_t>(kAllyItem[n]), 1u, 0xFFFFFFFFu});
+                        call(rt, ram, ctx, kEquipDefault, {static_cast<uint32_t>(n - 1)});
+                    }
+                    finish("Party: " + std::to_string(rd<int8_t>(ram, kDngStatusInSave + 5u)));
+                }
+                return;
+            case Kind::Item:
+                if (idle)
+                {
+                    call(rt, ram, ctx, kEdGetItem, {static_cast<uint32_t>(g_current.a), static_cast<uint32_t>(std::max(1, g_current.b)), 0xFFFFFFFFu});
+                    finish("Item " + std::to_string(g_current.a) + " x" + std::to_string(std::max(1, g_current.b)));
+                }
+                return;
+            case Kind::Until:
+                // until intflag <i> <value>: wait (up to the frames given, else 20 minutes) for a story counter
+                if (rd<int32_t>(ram, kSaveData + 0x10668u + static_cast<uint32_t>(g_current.a) * 4u) >= g_current.b)
+                    return finish("Story counter " + std::to_string(g_current.a) + " reached " + std::to_string(g_current.b));
+                if (g_waited > 72000u)
+                    return finish("Story counter " + std::to_string(g_current.a) + " never reached " + std::to_string(g_current.b));
                 return;
             case Kind::Flag:
                 if (idle)
@@ -651,7 +749,10 @@ namespace dc::warp
         {
             stepExecutor(ram, ctx, rt);
             const bool tap = g_talk && talking(ram) && (++g_talkClock % 16u) == 0u;
-            dc::pad::press(tap ? 0x40u : 0u); // Cross, for this frame's read only
+            uint32_t held = tap ? 0x40u : 0u; // Cross, for this frame's read only
+            if (g_pressFrames)
+                --g_pressFrames, held |= g_pressButtons;
+            dc::pad::press(held);
             g_padUpdate(ram, ctx, rt);
             dc::pad::press(0u);
         }
@@ -696,6 +797,52 @@ namespace dc::warp
                 return out.kind = Kind::Talk, true;
             if (word == "wait" && (in >> out.a))
                 return out.kind = Kind::Wait, true;
+            if (word == "event" && (in >> out.a))
+            {
+                if (!(in >> out.b))
+                    out.b = 1;
+                return out.kind = Kind::Event, true;
+            }
+            if (word == "kill")
+                return out.kind = Kind::Kill, true;
+            if (word == "party" && (in >> out.a))
+                return out.kind = Kind::Party, true;
+            if (word == "item" && (in >> out.a))
+            {
+                if (!(in >> out.b))
+                    out.b = 1;
+                return out.kind = Kind::Item, true;
+            }
+            if (word == "until" && (in >> out.text))
+            {
+                if (out.text == "intflag" && (in >> out.a >> out.b))
+                    return out.kind = Kind::Until, true;
+                if (out.text == "flag" && (in >> out.a))
+                    return out.b = 1, out.kind = Kind::Until, true;
+                return false;
+            }
+            if (word == "press" && (in >> out.text >> out.b))
+            {
+                // Buttons by name, joined with '+': cross circle square triangle l1 r1 l2 r2 up down left right start
+                // select (DC's word: Cross 0x40, Circle 0x20, Square 0x80, Triangle 0x10, R1 8, L1 4, R2 2, L2 1, ...).
+                static const std::pair<const char *, int> kButtons[] = {
+                    {"cross", 0x40}, {"circle", 0x20}, {"square", 0x80}, {"triangle", 0x10}, {"r1", 8}, {"l1", 4}, {"r2", 2},
+                    {"l2", 1}, {"up", 0x1000}, {"down", 0x4000}, {"left", 0x8000}, {"right", 0x2000}, {"start", 0x800},
+                    {"select", 0x100}};
+                out.a = 0;
+                std::stringstream names(out.text);
+                std::string name;
+                while (std::getline(names, name, '+'))
+                {
+                    bool found = false;
+                    for (const auto &[n, bits] : kButtons)
+                        if (name == n)
+                            out.a |= bits, found = true;
+                    if (!found)
+                        return false;
+                }
+                return out.kind = Kind::Press, true;
+            }
             if (word == "cheat" && (in >> out.text >> out.a))
                 return out.kind = Kind::Cheat, true;
             return false;

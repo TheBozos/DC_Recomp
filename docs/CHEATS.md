@@ -88,7 +88,18 @@ all recreated, and an advanced save is not the same as a played one.
 | `cheat <name> <0/1>` | `health`, `durability`, `thirst`, `stamina`, `time`, `fast`, `fishing`, `map`, `onehit`, `nodamage`, `key` |
 | `talk <0/1>` | Cross tapped every 16 frames while a conversation or an event waits, so a run reads through the story |
 | `wait <frames>` | The next command that many frames later |
+| `party <1-6>` | The allies up to that many, as their join scenes give them (the party size, each ally's weapon, its default weapon selected) |
+| `item <n> [count]` | A story or bag item by the scripts' item number, through the game's own give-item routine |
+| `event <n>` | In a dungeon: start that dungeon event as the game's triggers do (500: the boss's start in Divine Beast Cave, Wise Owl Forest and the Moon Sea; 403: King's Curse's) |
+| `kill` | In a dungeon: defeat every live monster of the floor, bosses included, through the game's own poison tick (its countdown at 1, its strength past the HP): the death, the kill count and a boss's defeat scene follow as from a blow. Waits up to two minutes for free play with a live monster |
+| `until intflag <n> <value>`, `until flag <n>` | Wait (up to 20 minutes) for the story to set that counter or flag |
+| `press <buttons> <frames>` | Buttons held on top of the controller (`cross`, `circle`, `square`, `triangle`, `l1`, `r1`, `l2`, `r2`, `up`, `down`, `left`, `right`, `start`, `select`, joined with `+`) |
 | `where`, `peek` | The game's state in the log (`[dc:warp]`): mode, map, dungeon, floor, chapter, party, deepest floors. `where` in turn, `peek` at once |
+
+[`docs/playthrough.cheat`](playthrough.cheat) is a whole story in one script: from an early Norune save, each
+chapter's allies join, each boss is fought (its trigger, then `kill`) and each defeat scene sets the story, from
+Dran to the Dark Genie and the ending. Run it with `--hidden --cheat-script docs/playthrough.cheat` on a card whose
+save is loaded by the `--pad-script` that reaches Norune's free walk (or start the script's frames later).
 
 ## Implementation and bounded validation
 

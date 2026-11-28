@@ -65,7 +65,8 @@ A complete story playthrough and full visual parity remain unverified.
 | Controller-operated Graphics, Cheats and Quit Game inside Options; F2 settings remain available | ✅ |
 | Georama and dungeon play on the current engine | ✅ |
 | New-game opening on the current engine | 🔧 |
-| Complete story, all companions, locations and effects | 🔧 |
+| Scripted run of the whole story: every boss through the game's own fights and scenes, the ending, the cleared save ([docs/playthrough.cheat](docs/playthrough.cheat)) | ✅ |
+| Complete story played by hand, all companions, locations and effects | 🔧 |
 | Linux build | ⏳ |
 | Widescreen, with the HUD at the screen's edges | ✅ |
 | Travel: any town, area, dungeon floor and story chapter (cheats, scripted runs) | ✅ |

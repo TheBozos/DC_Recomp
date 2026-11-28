@@ -1,16 +1,21 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.0] - 2026-11-28
 
 ### Added
-- The whole story by script: [docs/playthrough.cheat](docs/playthrough.cheat) beats every story boss (Dran, Master Utan, La Saia, King's Curse, Minotaur Joe, the Dark Genie) through the game's own fights and defeat scenes, plays the ending and the credits and saves the cleared game, headless. New script commands: `event`, `kill`, `party`, `item`, `press`, `until`.
 - Widescreen (Video tab, the in-game Graphics page, `widescreen = on` in `video.ini`): a 16:9 picture with more of the scene at the sides, nothing stretched; the HUD moves to the screen's edges (the town clock, the dungeon's status, floor and attack gauge, the minimap), menus and full-screen pictures stay centred, fades and backgrounds cover the whole width.
 - The in-game Graphics page also sets widescreen, anti-aliasing and texture smoothing.
-- Travel (Options → Travel, F2 → Travel): warp to any town or area, to any floor of any dungeon (boss floors included), next to the floor's monsters; every georama part, the whole world map, and a story chapter select. See [the cheat reference](docs/CHEATS.md).
-- `--cheat-script FILE`: travel, story and cheat commands by frame for scripted test runs, with dialogue read through (`talk 1`) and the game's state logged (`where`).
+- Travel (Options → Travel, F2 → Travel): warp to any town or area, to any floor of any dungeon (boss floors included), next to the floor's monsters; every georama part, the whole world map, and a story chapter select. A story dungeon's floors ahead of its allies say which chapter to advance to first. See [the cheat reference](docs/CHEATS.md).
+- `--cheat-script FILE`: travel, story and cheat commands by frame for scripted test runs, with dialogue read through (`talk 1`), the game's state logged (`where`: map, floor, chapter, party, the active character, the monsters' HP, the game-cleared mark) and a map's own events (`townevent`).
+- The whole story by script: [docs/playthrough.cheat](docs/playthrough.cheat) beats every story boss (Dran, Master Utan, La Saia, King's Curse, Minotaur Joe, the Dark Genie) through the game's own fights and defeat scenes, plays the ending and the credits and saves the cleared game, headless. Script commands for it: `event`, `kill`, `party`, `item`, `press`, `until`.
 
 ### Changed
 - BozoEngine moves to its current master (c27ce41): the widescreen setting and picture shape it needs, among other engine work.
+
+### Known limits
+- Gameplay testing covers, headless and by script: every town and area map, every dungeon floor (the Demon Shaft's 100 included), every story boss, the ending and the cleared save; every ally switched in and fighting with real input; the cleared save opening the Demon Shaft through the world map. A complete playthrough by hand, the allies' own join scenes and georama town building are unverified, as is full visual parity.
+- A few areas warped to outside their story show an empty or dark view (s11, s12, s14, s38, s39, s96).
+- Linux is not qualified.
 
 ## [0.4.0] - 2026-11-24
 

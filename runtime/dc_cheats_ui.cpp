@@ -1,4 +1,5 @@
 #include "dc_cheats.h"
+#include "dc_warp.h"
 #include "bozo/app/settings_tabs.h"
 #include "imgui.h"
 #include <algorithm>
@@ -81,6 +82,61 @@ namespace dc::cheats
                    "At the Video tab's fast-forward speed. Or hold the Fast forward binding (Controls tab: ` or the touchpad). Sound is muted.");
             ImGui::Separator();
             ImGui::TextWrapped("Cheats reset each launch: toggles off, ABS 1x, movement 100%.");
+        });
+        // Travel and progress (dc_warp.h): carried out when the game is idle (a town's free walk, a dungeon's free
+        // play), through the game's own fades and loads.
+        bozo::app::ui::registerTab("Travel", [] {
+            ImGui::TextWrapped("Status: %s", dc::warp::status().c_str());
+            ImGui::TextDisabled("Each runs as soon as you are walking freely in a town or a dungeon (not in a menu, a talk or an interior).");
+            ImGui::Separator();
+            static int place = 0;
+            if (ImGui::BeginCombo("Town or area", dc::warp::place(place).name))
+            {
+                for (int i = 0; i < dc::warp::placeCount(); ++i)
+                    if (ImGui::Selectable(dc::warp::place(i).name, i == place))
+                        place = i;
+                ImGui::EndCombo();
+            }
+            if (ImGui::Button("Warp there"))
+                dc::warp::requestPlace(dc::warp::place(place).map);
+            ImGui::Separator();
+            static int dungeon = 0, floor = 1;
+            if (ImGui::BeginCombo("Dungeon", dc::warp::dungeon(dungeon).name))
+            {
+                for (int i = 0; i < dc::warp::dungeonCount(); ++i)
+                    if (ImGui::Selectable(dc::warp::dungeon(i).name, i == dungeon))
+                        dungeon = i;
+                ImGui::EndCombo();
+            }
+            ImGui::SliderInt("Floor", &floor, 1, dc::warp::dungeon(dungeon).floors);
+            floor = std::clamp(floor, 1, dc::warp::dungeon(dungeon).floors);
+            if (ImGui::Button("Warp to that floor"))
+                dc::warp::requestDungeon(dungeon, floor - 1);
+            ImGui::TextDisabled("The last floor is the boss's. A floor reached by warp counts as reached on the entrance menu.");
+            if (ImGui::Button("Teleport to the next monster"))
+                dc::warp::requestMonster();
+            ImGui::TextDisabled("In a dungeon: next to the next live monster of the floor, in turn.");
+            ImGui::Separator();
+            if (ImGui::Button("Unlock every georama part"))
+                dc::warp::requestGeorama();
+            ImGui::TextDisabled("Every town's buildings, villagers and elements, as if every Atla were opened. The dungeons' Atla are then empty.");
+            if (ImGui::Button("Open the whole world map"))
+                dc::warp::requestWorld();
+            ImGui::TextDisabled("Every town and dungeon on the world map, and the World Map item.");
+            ImGui::Separator();
+            static int chapter = 2;
+            if (ImGui::BeginCombo("Story chapter", dc::warp::chapterName(chapter)))
+            {
+                for (int i = 1; i <= dc::warp::chapterCount(); ++i)
+                    if (ImGui::Selectable(dc::warp::chapterName(i), i == chapter))
+                        chapter = i;
+                ImGui::EndCombo();
+            }
+            if (ImGui::Button("Advance the story to that chapter"))
+                dc::warp::requestChapter(chapter);
+            ImGui::TextWrapped("Sets the story state a playthrough has when that chapter starts (allies and their weapons, the "
+                               "dungeons before it cleared, the places visited). It never moves the story back. Save first: "
+                               "it is meant for testing, and skipped key items and house events are not all recreated.");
         });
     }
 }

@@ -190,19 +190,96 @@ namespace dc::native
             std::memcpy(rdram + (address & 0x1FFFFFFu), &value, sizeof(value));
         }
 
+        // Widescreen (the engine's Settings::widescreen, posted each frame by dc_main): the frame is 16:9, 853.33 GS
+        // pixels wide (640 x 4/3) about the game's own centre (x 2048). The 3D shows more at the sides (Hor+: the game's
+        // projection is unchanged, its culling widened, see clipVertexHook); the game's 2D stays where it was, centred,
+        // except full-frame draws (clears, fills, fades, frame copies), which span the whole width, and the HUD's side
+        // pieces, which move out to the edges (hudShift). Latched once per frame, at its start (screen()).
+        std::atomic<bool> g_wideRequest{false};
+        bool g_wideFrame = false;
+        float frameW() { return g_wideFrame ? 640.0f * 4.0f / 3.0f : 640.0f; }
+        float frameLeft() { return 2048.0f - frameW() / 2.0f; }
+        // A span of the game's 640-wide frame (game x, 0..640) in GS x: the whole frame stays the whole, wider, frame.
+        bool wholeSpan(float x0, float x1) { return x0 <= 0.5f && x1 >= 639.5f; }
+        float spanLeft(float x0, float x1) { return g_wideFrame && wholeSpan(x0, x1) ? frameLeft() : 1728.0f + x0; }
+        float spanRight(float x0, float x1) { return g_wideFrame && wholeSpan(x0, x1) ? frameLeft() + frameW() : 1728.0f + x1; }
+        // An untextured fill's edges (game x): one on the frame's left or right edge reaches the wider frame's edge (the
+        // dungeon's fade is 64 x 32 tiles over the frame, letterbox bars and backgrounds touch the edges).
+        float fillLeft(float x0) { return g_wideFrame && x0 <= 0.5f ? frameLeft() : 1728.0f + x0; }
+        float fillRight(float x1) { return g_wideFrame && x1 >= 639.5f ? frameLeft() + frameW() : 1728.0f + x1; }
+        // A frame-sampling texture coordinate (0..1 over the frame) for GS x.
+        float frameU(float gsX) { return (gsX - frameLeft()) / frameW(); }
+        // A copy between the game's frame-sized pictures, x spans in game pixels: its GS x and its u (0..1 over the
+        // frame). Under widescreen each side is taken on its own: the whole 640 is the whole wider frame (a source over
+        // it samples all of it, a destination over it covers all of it); a part keeps its game pixels. So the game's
+        // half-size work copies of the frame (the whole frame into 0..320) hold the whole wider frame squeezed, and
+        // drawn back over the whole frame they spread it out again.
+        struct CopySpan
+        {
+            float x0, x1, u0, u1;
+        };
+        CopySpan copySpan(float dst0, float dst1, float src0, float src1)
+        {
+            const bool wideDst = g_wideFrame && wholeSpan(dst0, dst1), wideSrc = g_wideFrame && wholeSpan(src0, src1);
+            return {wideDst ? frameLeft() : 1728.0f + dst0, wideDst ? frameLeft() + frameW() : 1728.0f + dst1,
+                    wideSrc ? 0.0f : frameU(1728.0f + src0), wideSrc ? 1.0f : frameU(1728.0f + src1)};
+        }
+        // The HUD under widescreen: while the game draws its field HUD (g_hudScope > 0, inside the HUD routines hooked
+        // in installWideHud), a piece in the left third of the game's frame moves to the left edge, one in its right
+        // third to the right edge; the middle stays. Menus, dialogue and pictures stay centred.
+        int g_hudScope = 0;
+        // The minimap moves as one piece (its large centred view stays centred): its first piece decides, and the
+        // monster symbols drawn on it after (DrawMapSymbol, the key finder's marker) take the same shift.
+        int g_mapScope = 0;
+        bool g_mapDecided = false;
+        float g_mapShift = 0.0f;
+        uint32_t g_2dCallerSeen = 0; // the 2D routine's caller (set by the 2D hooks)
+        float thirdShift(float gameLo, float gameHi)
+        {
+            const float half = (frameW() - 640.0f) / 2.0f, middle = (gameLo + gameHi) / 2.0f;
+            return middle < 640.0f / 3.0f ? -half : middle > 1280.0f / 3.0f ? half : 0.0f;
+        }
+        float hudShift(float gameLo, float gameHi)
+        {
+            if (!g_wideFrame)
+                return 0.0f;
+            const uint32_t caller = g_2dCallerSeen;
+            if (g_mapScope > 0)
+            {
+                if (!g_mapDecided)
+                    g_mapShift = thirdShift(gameLo, gameHi), g_mapDecided = true;
+                return g_mapShift;
+            }
+            // DrawMapSymbol (0x1D7AA0..0x1D7C78) and the key finder's marker (drawn from a hook: its return is the
+            // cheats' sentinel, 0x80000) lie on the minimap.
+            if ((caller >= 0x001D7AA0u && caller < 0x001D7C78u) || caller == 0x00080000u)
+                return g_mapShift;
+            // DUN's MainDraw draws the weapon-ready plate itself (beside the attack gauge, bottom left).
+            if (g_hudScope > 0 || caller == 0x01DB019Cu)
+                return thirdShift(gameLo, gameHi);
+            return 0.0f;
+        }
+
         bozo::render::Screen screen()
         {
-            // DC's drawing environment: 640 x 224 fields, XYOFFSET (1728, 1936) (0x6C00, 0x7900 in 12.4).
+            // DC's drawing environment: 640 x 224 fields, XYOFFSET (1728, 1936) (0x6C00, 0x7900 in 12.4); widescreen
+            // widens it about the same centre.
             bozo::render::Screen s;
-            s.originX = 1728.0f;
+            s.originX = frameLeft();
             s.originY = 1936.0f;
-            s.width = 640.0f;
+            s.width = frameW();
             s.height = 224.0f;
             s.depthMax = 16777215.0f;
             // The models' GIF tag writes ST, RGBAQ, XYZF2 (REGS 0x412) PACKED: the GS takes Z from bits 4..27 of the
             // FTOI4 word, so Z is the matrices' z / w itself (24 bits), not 16 x it as an XYZ2 would have it.
             s.gsZScale = 1.0f;
             return s;
+        }
+        // A frame's start: widescreen is latched for the whole frame.
+        bozo::render::Screen beginScreen()
+        {
+            g_wideFrame = g_wideRequest.load(std::memory_order_relaxed);
+            return screen();
         }
 
         // DC's matrices as its VU0 code keeps them: four columns of four floats. mul(a, b) = a x b (MulMatrix).
@@ -698,6 +775,7 @@ namespace dc::native
         std::unordered_map<uint32_t, std::pair<uint64_t, std::shared_ptr<const bozo::render::Texture>>> g_decoded;
         uint64_t g_textureVersion = 0;
         bool g_dump2D = false; // the on-demand frame dump (drawStrip's [dc:dump])
+        uint32_t g_2dCaller = 0; // the game code that called the 2D routine being drawn (its return address)
         // Live toggles (diagnosis): D:/DC_Recomp/build/toggles.txt, read every 60 frames, one word per line: noshadow
         // (shadow passes not laid), nosprites3d (effect sprites not drawn), nofog, noguard, nodof (depth of field), nomade
         // (sprites sampling a picture the game makes, frame copies), nomodels (DrawVu1 models), no2d (2D sprites), nocopies
@@ -1394,7 +1472,7 @@ namespace dc::native
                             const float x = (m[0] * v.x + m[4] * v.y + m[8] * v.z + m[12]) / w;
                             const float y = (m[1] * v.x + m[5] * v.y + m[9] * v.z + m[13]) / w;
                             const float z = (m[2] * v.x + m[6] * v.y + m[10] * v.z + m[14]) / w;
-                            v.u = (x - 1728.0f + v.u) / material.frameWidth;
+                            v.u = frameU(x + v.u); // v.u held the displacement in GS pixels
                             v.v = (y - 1936.0f + v.v) / material.frameHeight;
                             v.x = x; v.y = y; v.z = z; v.q = 1.0f;
                             valid &= std::isfinite(x) && std::isfinite(y) && std::isfinite(z) && std::isfinite(v.u) && std::isfinite(v.v);
@@ -2183,14 +2261,15 @@ namespace dc::native
                 std::vector<bozo::render::Vertex> vertices;
                 auto vertex = [&](float x, float y, float u, float v) {
                     bozo::render::Vertex out;
-                    out.x = 1728.0f + x;
+                    out.x = frameLeft() + x;
                     out.y = 1936.0f + y;
                     out.u = u;
                     out.v = v;
                     out.rgba = rgba;
                     return out;
                 };
-                const bozo::render::Vertex a = vertex(0, 0, 0, 0), b = vertex(640, 0, 1, 0), c = vertex(0, 224, 0, 1), d = vertex(640, 224, 1, 1);
+                const float w = frameW(); // the whole frame, widescreen or not
+                const bozo::render::Vertex a = vertex(0, 0, 0, 0), b = vertex(w, 0, 1, 0), c = vertex(0, 224, 0, 1), d = vertex(w, 224, 1, 1);
                 vertices.insert(vertices.end(), {a, b, c, b, d, c});
                 return vertices;
             };
@@ -2292,9 +2371,11 @@ namespace dc::native
             material.clampU = material.clampV = true;
             static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
             std::vector<bozo::render::Vertex> strip, triangles;
+            // The strips cover the whole frame (u 0..1): widescreen stretches them over its width.
+            const float xScale = frameW() / 640.0f;
             auto vertex = [&](float x, float y, int32_t z, float u, float v, uint32_t a) {
                 bozo::render::Vertex out;
-                out.x = 1728.0f + x;
+                out.x = frameLeft() + x * xScale;
                 out.y = 1936.0f + y;
                 out.z = static_cast<float>(static_cast<uint32_t>(z)) / zScale; // XYZ2's Z, unsigned
                 out.u = u;
@@ -2567,6 +2648,7 @@ namespace dc::native
             if (!vertices.empty())
                 bozo::render::Renderer::instance().draw(material, kIdentity, vertices.data(), static_cast<uint32_t>(vertices.size()),
                                                         std::move(texture));
+            g_2dCallerSeen = 0; // a caller counts for its own draw only
         }
 
         // MGClearScreen (0x130000, a0..a3 the colour): a sprite over the 640 x 224 frame in that colour, ALPHA 0x2A (Cs:
@@ -2580,7 +2662,7 @@ namespace dc::native
             material.depthTest = false;
             material.depthWrite = true;
             std::vector<bozo::render::Vertex> vertices;
-            quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, 0.0f,
+            quad(vertices, frameLeft(), kOriginY, frameLeft() + frameW(), kOriginY + 224.0f, 0.0f,
                  flatColour(getRegU32(ctx, 4), getRegU32(ctx, 5), getRegU32(ctx, 6), getRegU32(ctx, 7)));
             ++g_stats.clears;
             seq('C');
@@ -2598,14 +2680,76 @@ namespace dc::native
             material.depthTest = false;
             material.depthWrite = true;
             std::vector<bozo::render::Vertex> vertices;
-            quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f,
+            quad(vertices, frameLeft(), kOriginY, frameLeft() + frameW(), kOriginY + 224.0f,
                  static_cast<float>(getRegU32(ctx, 4)), 0u);
             drawScreen(material, vertices);
+        }
+        // The field HUD's routines (widescreen moves their side pieces to the edges, see hudShift): each runs inside a
+        // HUD scope. EdDrawClock (0x17DB60) is the towns' day clock, top right.
+        struct HudHook
+        {
+            uint32_t address;
+            RecompiledFunction original;
+        };
+        // topStatusInfo (0x1B04F0) is the dungeon's: health and weapon (top left), the item slots (middle), the floor
+        // and keys (top right), the attack gauge (bottom left); its numbers come from ValuePrint inside it.
+        // CDungeonMap::DrawMiniMap (0x1C3180) is the minimap, moved as one piece (g_mapScope).
+        HudHook g_hudHooks[] = {{0x0017DB60u, nullptr}, {0x001B04F0u, nullptr}, {0x001C3180u, nullptr}};
+        void hudHook(uint8_t *rdram, R5900Context *ctx, Runtime *runtime)
+        {
+            const uint32_t pc = ctx->pc;
+            for (const HudHook &hook : g_hudHooks)
+                if (hook.address == pc && hook.original)
+                {
+                    int &scope = pc == 0x001C3180u ? g_mapScope : g_hudScope;
+                    if (pc == 0x001C3180u)
+                        g_mapDecided = false;
+                    ++scope;
+                    hook.original(rdram, ctx, runtime);
+                    --scope;
+                    return;
+                }
+        }
+        // MGClipVertex (0x12EA40: a0 a point; MGClipBox and the models' culling call it): the point through the
+        // world-to-screen matrix (0x1C755F0), its clip flags: 0x20 nearer than the near plane (0x1C756E8), 0x10 past the
+        // far one (0x1C756F8), 8 / 4 above / below the frame (y within 112 of the centre 0x1C756D4), 2 / 1 left / right
+        // of it (x within 320 of the centre 0x1C756D0). Behind the camera (w <= 0) the tests reverse, as the game's do.
+        // Widescreen culls against the wider frame's half width instead, so what its sides show is drawn.
+        void clipVertexHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
+        {
+            ctx->pc = getRegU32(ctx, 31);
+            const Matrix m = load(rdram, 0x01C755F0u);
+            const uint32_t point = getRegU32(ctx, 4);
+            float in[4], out[4];
+            for (uint32_t k = 0; k < 4u; ++k)
+                in[k] = rdf(rdram, point + k * 4u);
+            for (int r = 0; r < 4; ++r)
+                out[r] = m.m[r] * in[0] + m.m[4 + r] * in[1] + m.m[8 + r] * in[2] + m.m[12 + r] * in[3];
+            float w = out[3];
+            if (w == 0.0f)
+                w = 1.0f;
+            const float x = out[0] * (1.0f / w) - rdf(rdram, 0x01C756D0u), y = out[1] * (1.0f / w) - rdf(rdram, 0x01C756D4u);
+            const float halfW = frameW() / 2.0f;
+            uint32_t flags = 0;
+            if (w < rdf(rdram, 0x01C756E8u))
+                flags = 0x20u;
+            if (rdf(rdram, 0x01C756F8u) < w)
+                flags |= 0x10u;
+            if (0.0f < w)
+            {
+                flags |= (y < -112.0f ? 8u : 0u) | (112.0f < y ? 4u : 0u) | (x < -halfW ? 2u : 0u) | (halfW < x ? 1u : 0u);
+            }
+            else
+            {
+                flags |= (-112.0f < y ? 8u : 0u) | (y < 112.0f ? 4u : 0u) | (-halfW < x ? 2u : 0u) | (x < halfW ? 1u : 0u);
+            }
+            setRegU64(ctx, 2, flags);
         }
         // MGFillBox (0x12FA70: a0 the rectangle, x, y, w, h in 1/16 pixels; a1..a4 the colour): an alpha-blended sprite
         // (PRIM ABE with the game's ALPHA, (Cs - Cd) As + Cd), Z test ALWAYS, Z not written.
         void fillBoxHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t rect = getRegU32(ctx, 4);
             const float x = static_cast<float>(static_cast<int32_t>(rd32(rdram, rect))) / 16.0f;
@@ -2618,7 +2762,12 @@ namespace dc::native
             material.depthTest = false;
             material.depthWrite = false;
             std::vector<bozo::render::Vertex> vertices;
-            quad(vertices, kOriginX + x, kOriginY + y, kOriginX + x + w, kOriginY + y + h, 0.0f,
+            const float shift = hudShift(x, x + w); // widescreen: a fill on the frame's edges reaches the wider frame's
+            if (g_dump2D)
+                std::fprintf(stderr, "[dc:dump] caller %08x fill (%.1f %.1f %.1fx%.1f) colour %u %u %u %u\n", g_2dCaller, x, y, w, h,
+                             getRegU32(ctx, 5) & 0xFFu, getRegU32(ctx, 6) & 0xFFu, getRegU32(ctx, 7) & 0xFFu, getRegU32(ctx, 8) & 0xFFu);
+            quad(vertices, shift != 0.0f ? 1728.0f + x + shift : fillLeft(x), kOriginY + y,
+                 shift != 0.0f ? 1728.0f + x + w + shift : fillRight(x + w), kOriginY + y + h, 0.0f,
                  flatColour(getRegU32(ctx, 5), getRegU32(ctx, 6), getRegU32(ctx, 7), getRegU32(ctx, 8)));
             drawScreen(material, vertices);
         }
@@ -2692,10 +2841,33 @@ namespace dc::native
         // A strip of four corners (v0 v1 v2, v1 v2 v3), textured with the record's texture when there is one.
         // D:/DC_Recomp/build/dump2d.flag present (diagnosis, checked every 30 frames): the next frame's 2D draws logged one
         // by one ([dc:dump]), then the flag removed.
-        void drawStrip(const uint8_t *rdram, uint32_t record, const Corner (&c)[4], bool flat = false)
+        void drawStrip(const uint8_t *rdram, uint32_t record, const Corner (&given)[4], bool flat = false)
         {
             if (g_toggles.no2D)
                 return;
+            // Widescreen: the strip placed in the wider frame. A strip over the whole 640-wide frame (a fade, a fill, a
+            // frame copy) spans the whole wide one: stretched here when flat, in the made-picture path below when it
+            // samples the frame; a picture of its own stays centred (pillarboxed). A HUD side piece moves out.
+            Corner c[4] = {given[0], given[1], given[2], given[3]};
+            const float gameLo = std::min({c[0].x, c[1].x, c[2].x, c[3].x}) - 1728.0f;
+            const float gameHi = std::max({c[0].x, c[1].x, c[2].x, c[3].x}) - 1728.0f;
+            const bool whole = g_wideFrame && wholeSpan(gameLo, gameHi);
+            auto stretch = [&]() {
+                for (Corner &k : c)
+                    k.x = 2048.0f + (k.x - 2048.0f) * frameW() / 640.0f;
+            };
+            if (whole && (flat || record == 0u))
+                stretch();
+            else if (!whole)
+            {
+                const float shift = hudShift(gameLo, gameHi);
+                for (Corner &k : c)
+                {
+                    k.x += shift;
+                    if ((flat || record == 0u) && shift == 0.0f) // an untextured strip on an edge reaches the wider frame's
+                        k.x = k.x <= 1728.5f ? fillLeft(k.x - 1728.0f) : k.x >= 2367.5f ? fillRight(k.x - 1728.0f) : k.x;
+                }
+            }
             // DC_PROBE_COPIES=1 (diagnosis): the message windows' more-text triangle ("syst04"), each change of its
             // corners, and its decoded texture once (build/syst04.pam).
             static const bool s_probeTriangle = std::getenv("DC_PROBE_COPIES") != nullptr;
@@ -2721,8 +2893,8 @@ namespace dc::native
                         }
             }
             if (g_dump2D)
-                std::fprintf(stderr, "[dc:dump] sprite %08x \"%.32s\" tex0 %016llx pixels %08x (%.1f %.1f)-(%.1f %.1f) uv (%.0f %.0f)-(%.0f %.0f) rgba %08x alpha %llx flat %d\n",
-                             record, record ? reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)) : "",
+                std::fprintf(stderr, "[dc:dump] caller %08x hud %d sprite %08x \"%.32s\" tex0 %016llx pixels %08x (%.1f %.1f)-(%.1f %.1f) uv (%.0f %.0f)-(%.0f %.0f) rgba %08x alpha %llx flat %d\n",
+                             g_2dCaller, g_hudScope, record, record ? reinterpret_cast<const char *>(rdram + ((record + 8u) & 0x1FFFFFFu)) : "",
                              record ? static_cast<unsigned long long>(rd64(rdram, record + 0x28u)) : 0ull, record ? rd32(rdram, record + 0x38u) : 0u,
                              c[0].x, c[0].y, c[3].x, c[3].y, c[0].u, c[0].v, c[3].u, c[3].v, c[0].rgba, static_cast<unsigned long long>(g_alpha2D), flat ? 1 : 0);
             bozo::render::Material made;
@@ -2764,12 +2936,17 @@ namespace dc::native
                 material.blend = bozo::render::blendOf(g_alpha2D);
                 material.depthTest = false;
                 material.depthWrite = false;
+                // Widescreen (as copySpan): drawn over the whole frame, it covers the whole wider frame; sampling the
+                // whole 640, it samples the whole wider frame; a part is the same game pixels.
+                const bool wholeSource = g_wideFrame && wholeSpan(std::min(c[0].u, c[3].u), std::max(c[0].u, c[3].u));
+                if (whole)
+                    stretch();
                 std::vector<bozo::render::Vertex> vertices;
                 auto vertex = [&](const Corner &k) {
                     bozo::render::Vertex v;
                     v.x = k.x;
                     v.y = k.y;
-                    v.u = k.u / 640.0f; // the target's pixels are the texture's texels
+                    v.u = wholeSource ? k.u / 640.0f : frameU(1728.0f + k.u); // the target's pixels are the texture's texels
                     v.v = k.v / static_cast<float>(made.frameHeight);
                     v.rgba = k.rgba;
                     return v;
@@ -2876,6 +3053,7 @@ namespace dc::native
         // set2DSprite (0x15BD00: a1 texture, a2 destination, a3 / t0 the source's corner, its size the destination's).
         void sprite2DHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t texture = getRegU32(ctx, 5);
             if (texture == 0u)
@@ -2888,6 +3066,7 @@ namespace dc::native
         // (0x15C630: t0..t3 the colour).
         void sprite2DRectsHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             const uint32_t entry = ctx->pc;
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t texture = getRegU32(ctx, 5);
@@ -2907,6 +3086,7 @@ namespace dc::native
         // (top-left, top-right, bottom-left, bottom-right), the 9th argument the strip's order: 0 starts top-right).
         void sprite2DCornersHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t texture = getRegU32(ctx, 5);
             if (texture == 0u)
@@ -2932,6 +3112,7 @@ namespace dc::native
         // set2DSpriteC4 (0x15E120: a1 the rectangle, a2..a5 the corners' spRGBA): an untextured gradient strip.
         void sprite2DC4Hook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             ctx->pc = getRegU32(ctx, 31);
             const Rect d = rectAt(rdram, getRegU32(ctx, 5));
             const float x0 = kOriginX + static_cast<float>(d.x), x1 = kOriginX + static_cast<float>(d.x + d.w);
@@ -2944,6 +3125,7 @@ namespace dc::native
         // strip (PRIM 0x44).
         void colSpriteHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t rgba = (getRegU32(ctx, 8) & 0xFFu) | (getRegU32(ctx, 9) & 0xFFu) << 8 | (getRegU32(ctx, 10) & 0xFFu) << 16 |
                                   (getRegU32(ctx, 11) & 0xFFu) << 24;
@@ -2961,6 +3143,7 @@ namespace dc::native
         // colour): the corners turned about the pivot with the game's own formulas.
         void sprite2DRotHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             const uint32_t entry = ctx->pc;
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t texture = getRegU32(ctx, 5);
@@ -3022,6 +3205,7 @@ namespace dc::native
         // (0x14C3C0: the same arguments; the sprite set2DSprite_Start opened a batch for, the message windows' glyphs).
         void mySpriteHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t texture = getRegU32(ctx, 5);
             if (texture == 0u)
@@ -3057,6 +3241,7 @@ namespace dc::native
         // + 0x28, the next entry at + 0x30. Sprites with mgAlpha's blend, Z test ALWAYS, no Z write.
         void spriteTableHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t table = getRegU32(ctx, 4);
             const int32_t lists = static_cast<int32_t>(rd32(rdram, table + 4u));
@@ -3166,6 +3351,7 @@ namespace dc::native
         // set3DColSprite (0x15D1B0: a1..a4 the points, t0..t3 their spRGBA): untextured, Gouraud.
         void colSprite3DHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             ctx->pc = getRegU32(ctx, 31);
             Point3 p[4];
             uint32_t rgba[4];
@@ -3182,6 +3368,7 @@ namespace dc::native
         // 0x15DCA0: the sprite's corners with F, t1 the spRGBA).
         void sprite3DHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             const uint32_t entry = ctx->pc;
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t texture = getRegU32(ctx, 5);
@@ -3216,6 +3403,7 @@ namespace dc::native
         // DrawLine (0x171210: a0 / a1 the ends, x, y in 1/16 pixels and Z; a2..a5 the colour): a line, drawn as a thin quad.
         void drawLineHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             ctx->pc = getRegU32(ctx, 31);
             const Point3 a = pointAt(rdram, getRegU32(ctx, 4), false), b = pointAt(rdram, getRegU32(ctx, 5), false);
             const uint32_t rgba = (getRegU32(ctx, 6) & 0xFFu) | (getRegU32(ctx, 7) & 0xFFu) << 8 | (getRegU32(ctx, 8) & 0xFFu) << 16 |
@@ -3462,9 +3650,10 @@ namespace dc::native
                 made.depthWrite = false;
                 made.clampU = made.clampV = true;
                 std::vector<bozo::render::Vertex> vertices;
-                quad(vertices, kOriginX + static_cast<float>(dx), kOriginY + static_cast<float>(dy), kOriginX + static_cast<float>(dx + r.w),
-                     kOriginY + static_cast<float>(dy + r.h), 0.0f, 0x80808080u, static_cast<float>(r.x) / 640.0f,
-                     static_cast<float>(r.y) / made.frameHeight, static_cast<float>(r.x + r.w) / 640.0f,
+                const CopySpan span = copySpan(static_cast<float>(dx), static_cast<float>(dx + r.w), static_cast<float>(r.x),
+                                               static_cast<float>(r.x + r.w));
+                quad(vertices, span.x0, kOriginY + static_cast<float>(dy), span.x1, kOriginY + static_cast<float>(dy + r.h), 0.0f,
+                     0x80808080u, span.u0, static_cast<float>(r.y) / made.frameHeight, span.u1,
                      static_cast<float>(r.y + r.h) / made.frameHeight);
                 drawScreen(made, vertices);
                 return;
@@ -3641,6 +3830,7 @@ namespace dc::native
         }
         void balloonHook(uint8_t *rdram, R5900Context *ctx, Runtime *)
         {
+            g_2dCaller = g_2dCallerSeen = getRegU32(ctx, 31); // the HUD probe and scope
             ctx->pc = getRegU32(ctx, 31);
             const uint32_t cls = getRegU32(ctx, 4);
             const uint32_t balloonRecord = textureRecord(rdram, 0x00299A78u);
@@ -3659,7 +3849,7 @@ namespace dc::native
             clear.depthWrite = true;
             clear.target = balloon;
             std::vector<bozo::render::Vertex> vertices;
-            quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, screen().depthMax, 0u);
+            quad(vertices, frameLeft(), kOriginY, frameLeft() + frameW(), kOriginY + 224.0f, screen().depthMax, 0u);
             drawScreen(clear, vertices);
             // Opaque draws deliberately publish full coverage. Clear coverage
             // separately so the sampled image stays transparent outside the
@@ -3921,7 +4111,7 @@ namespace dc::native
             // The work picture at the PS2's size (the game's 640 x 224 frame copy): the title draws it back into the
             // frame each frame before copying the frame into it again, a feedback loop whose blur is that of a 640 x
             // 224 picture filtered each frame (at the window's resolution it blurred several times less).
-            bozo::render::Renderer::instance().setTargetSize(material.target, 640, 224);
+            bozo::render::Renderer::instance().setTargetSize(material.target, static_cast<uint32_t>(frameW() + 0.5f), 224);
             // A 640 x 224 picture from now on: a place the menu's MGMoveFrameBuffImage filled with both fields (448 rows)
             // and the town copies its frame into again each frame (the water's "work") is sampled as 224 rows again.
             g_targetRows[material.target] = 224.0f;
@@ -3930,10 +4120,11 @@ namespace dc::native
             material.depthWrite = false;
             material.clampU = material.clampV = true;
             std::vector<bozo::render::Vertex> vertices;
-            quad(vertices, kOriginX + static_cast<float>(to.x) / 16.0f, kOriginY + static_cast<float>(to.y) / 16.0f,
-                 kOriginX + static_cast<float>(to.x + to.w) / 16.0f, kOriginY + static_cast<float>(to.y + to.h) / 16.0f, 0.0f, 0x80808080u,
-                 static_cast<float>(from.x) / 16.0f / 640.0f, static_cast<float>(from.y) / 16.0f / 224.0f,
-                 static_cast<float>(from.x + from.w) / 16.0f / 640.0f, static_cast<float>(from.y + from.h) / 16.0f / 224.0f);
+            const CopySpan span = copySpan(static_cast<float>(to.x) / 16.0f, static_cast<float>(to.x + to.w) / 16.0f,
+                                           static_cast<float>(from.x) / 16.0f, static_cast<float>(from.x + from.w) / 16.0f);
+            quad(vertices, span.x0, kOriginY + static_cast<float>(to.y) / 16.0f, span.x1, kOriginY + static_cast<float>(to.y + to.h) / 16.0f,
+                 0.0f, 0x80808080u, span.u0, static_cast<float>(from.y) / 16.0f / 224.0f, span.u1,
+                 static_cast<float>(from.y + from.h) / 16.0f / 224.0f);
             drawScreen(material, vertices);
             ++g_stats.stretches;
             seq('S');
@@ -3984,7 +4175,9 @@ namespace dc::native
                 const float wave = rdf(rdram, 0x01D18980u + static_cast<uint32_t>(std::clamp(index, 0, 31)) * 4u);
                 const int32_t offset = static_cast<int32_t>(amplitude * factor * wave * 16.0f);
                 const int32_t x0 = std::max(frame.x * 16 + offset, 0), x1 = std::min(offset + (frame.x + frame.w) * 16, 0x27F0);
-                quad(vertices, kOriginX, kOriginY + static_cast<float>(row), kOriginX + static_cast<float>(frame.w),
+                // Widescreen: the whole frame waves, its offsets in proportion (u 0..1 is the whole frame either way).
+                const float w = static_cast<float>(frame.w);
+                quad(vertices, spanLeft(0.0f, w), kOriginY + static_cast<float>(row), spanRight(0.0f, w),
                      kOriginY + static_cast<float>(row + 2), 0.0f, 0x80808080u, static_cast<float>(x0) / 16.0f / 640.0f,
                      static_cast<float>(frame.y + row) / copy.frameHeight, static_cast<float>(x1) / 16.0f / 640.0f,
                      static_cast<float>(frame.y + row + 2) / copy.frameHeight);
@@ -4139,7 +4332,7 @@ namespace dc::native
             material.depthWrite = false;
             material.clampU = material.clampV = true;
             std::vector<bozo::render::Vertex> vertices;
-            quad(vertices, kOriginX, kOriginY, kOriginX + 640.0f, kOriginY + 224.0f, 0.0f, 0x80808080u);
+            quad(vertices, frameLeft(), kOriginY, frameLeft() + frameW(), kOriginY + 224.0f, 0.0f, 0x80808080u);
             drawScreen(material, vertices);
         }
 
@@ -4740,11 +4933,15 @@ namespace dc::native
         registry.registerFunction(0x00130B30u, &endShadowHook);
         bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
         renderer.setEnabled(true);
-        renderer.beginFrame(screen());
+        renderer.beginFrame(beginScreen());
         renderer.setStreamDraws(false);
         renderer.setPresentsAlone(true);
         {
             registry.registerFunction(0x00130000u, &clearScreenHook);
+            registry.registerFunction(0x0012EA40u, &clipVertexHook); // culls against the frame's width (widescreen)
+            for (HudHook &hook : g_hudHooks)
+                if ((hook.original = runtime.functions.generated(hook.address)))
+                    registry.registerFunction(hook.address, &hudHook);
             registry.registerFunction(0x0012FD30u, &clearZHook);
             registry.registerFunction(0x0012FA70u, &fillBoxHook);
             registry.registerFunction(0x0015BD00u, &sprite2DHook);
@@ -4957,7 +5154,7 @@ namespace dc::native
         }
         flushShadows();
         renderer.endFrame();
-        renderer.beginFrame(screen());
+        renderer.beginFrame(beginScreen());
         g_clutOverride.clear();
         if (!g_publishingFromLoad)
             g_lastMainPublish.store(nowMs(), std::memory_order_relaxed);
@@ -5007,6 +5204,23 @@ namespace dc::native
         static uint32_t s_toggleCheck = 0;
         if (++s_toggleCheck % 60u == 0u)
             readToggles();
+        // DC_DUMP2D_AT=frame,frame,... (diagnosis, hidden runs): those published frames' 2D dumped as the flag file does.
+        static const std::vector<uint64_t> s_dumpAt = [] {
+            std::vector<uint64_t> at;
+            if (const char *e = std::getenv("DC_DUMP2D_AT"))
+                for (const char *p = e; *p;)
+                {
+                    char *end = nullptr;
+                    at.push_back(std::strtoull(p, &end, 10));
+                    p = *end ? end + 1 : end;
+                }
+            return at;
+        }();
+        if (std::find(s_dumpAt.begin(), s_dumpAt.end(), g_publishedFrames) != s_dumpAt.end())
+        {
+            g_dump2D = true;
+            std::fprintf(stderr, "[dc:dump] frame start %llu\n", static_cast<unsigned long long>(g_publishedFrames));
+        }
         static uint32_t s_dumpCheck = 0;
         if (++s_dumpCheck % 30u == 0u)
             if (FILE *flag = std::fopen("D:/DC_Recomp/build/dump2d.flag", "rb"))
@@ -5251,9 +5465,11 @@ namespace dc::native
         g_clutOverride.clear();
         g_shadowDraws.clear();
         g_pendingShadows.clear();
-        renderer.beginFrame(screen());
+        renderer.beginFrame(beginScreen());
         g_lastMainPublish.store(nowMs(), std::memory_order_relaxed);
     }
+
+    void setWidescreen(bool on) { g_wideRequest.store(on, std::memory_order_relaxed); }
 
     std::string unsaveable()
     {

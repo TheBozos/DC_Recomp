@@ -2,6 +2,7 @@
 // text buffers, menu-table extensions, save-format changes or console packets.
 #include "dc_ingame_cheats.h"
 #include "dc_cheats.h"
+#include "dc_warp.h"
 #include "bozo/port.h"
 #include "bozo/runtime.h"
 #include "bozo/app/video_settings.h"
@@ -27,7 +28,7 @@ constexpr uint32_t kPhase=0x1da8a50,kFade=0x1da8a54,kLoaded=0x1da8ac4,kPad=0x1cb
 constexpr uint32_t kUp=0x1000,kDown=0x4000,kLeft=0x8000,kRight=0x2000,kCross=0x40,kCircle=0x20;
 constexpr uint32_t kL1=4,kR1=8,kL2=1,kR2=2;
 constexpr float identity[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
-enum class Page { Root, Game, Graphics, Cheats, Quit };
+enum class Page { Root, Game, Graphics, Cheats, Quit, Travel }; // Travel last: saved states keep their values
 struct Menu {
     bool active=false,queued=false;
     Page page=Page::Root;
@@ -39,9 +40,11 @@ struct Menu {
     bozo::app::video::Settings graphics;
     const char *graphicsStatus="";
 } menu;
-constexpr int rootCount=4;
-const char *const rootLabels[rootCount]={"Game Options","Graphics","Cheats","Quit Game"};
-enum GraphicsRow { Display, Resolution, RenderScale, FrameRate, ApplyGraphics, GraphicsRowEnd };
+constexpr int rootCount=5;
+const char *const rootLabels[rootCount]={"Game Options","Graphics","Cheats","Travel","Quit Game"};
+const Page rootPages[rootCount]={Page::Game,Page::Graphics,Page::Cheats,Page::Travel,Page::Quit};
+enum GraphicsRow { Display, Resolution, RenderScale, FrameRate, Widescreen, AntiAliasing, Smoothing, ApplyGraphics, GraphicsRowEnd };
+constexpr int antiAliasings[]={0,2,4,8},smoothings[]={0,1,2,4,8,16};
 constexpr float renderScales[]={0.5f,0.75f,1.f,1.5f,2.f};
 RecompiledFunction originalInit=nullptr,originalExit=nullptr,originalKey=nullptr,originalDraw=nullptr;
 RecompiledFunction originalHelp=nullptr,originalMessage=nullptr;
@@ -131,7 +134,8 @@ namespace video=bozo::app::video;
 bool sameGraphics(const video::Settings &a,const video::Settings &b)
 {
     return a.mode==b.mode && a.width==b.width && a.height==b.height && std::abs(a.renderScale-b.renderScale)<0.01f &&
-           a.frameRate==b.frameRate;
+           a.frameRate==b.frameRate && a.widescreen==b.widescreen && a.antiAliasing==b.antiAliasing &&
+           a.textureSmoothing==b.textureSmoothing;
 }
 int renderScaleIndex(float scale)
 {
@@ -154,6 +158,9 @@ std::string graphicsValue(int row,const video::Settings &g,const video::Shared &
         if(g.frameRate<0)std::snprintf(text,sizeof(text),"Monitor %d Hz",shared.monitorRefresh);
         else std::snprintf(text,sizeof(text),"%d fps",g.frameRate);
     }
+    if(row==Widescreen)return g.widescreen?"16:9":"Off";
+    if(row==AntiAliasing)return g.antiAliasing?std::to_string(g.antiAliasing)+"x":"Off";
+    if(row==Smoothing)return g.textureSmoothing==0?"Off":g.textureSmoothing==1?"Trilinear":std::to_string(g.textureSmoothing)+"x";
     return text;
 }
 // Left/Right on a graphics row: the next choice that way.
@@ -172,6 +179,13 @@ void stepGraphics(int row,int way,const video::Shared &shared)
         if(shared.applied.frameRate>0)rates.push_back(shared.applied.frameRate);
         int at=0;for(int i=0;i<int(rates.size());++i)if(rates[i]==g.frameRate)at=i;
         g.frameRate=rates[(at+int(rates.size())+way)%int(rates.size())];
+    }else if(row==Widescreen)g.widescreen=!g.widescreen;
+    else if(row==AntiAliasing){
+        int at=0;for(int i=0;i<int(std::size(antiAliasings));++i)if(antiAliasings[i]==g.antiAliasing)at=i;
+        g.antiAliasing=antiAliasings[std::clamp(at+way,0,int(std::size(antiAliasings))-1)];
+    }else if(row==Smoothing){
+        int at=0;for(int i=0;i<int(std::size(smoothings));++i)if(smoothings[i]==g.textureSmoothing)at=i;
+        g.textureSmoothing=smoothings[std::clamp(at+way,0,int(std::size(smoothings))-1)];
     }
     menu.graphicsStatus="";
 }
@@ -182,9 +196,9 @@ void drawGraphics(std::vector<bozo::render::Vertex> &v,uint32_t white,uint32_t g
         text(v,"Window settings are not",156,170,1.25f,white);text(v,"available in this run.",156,200,1.25f,white);
         text(v,"O: Back",292,352,1,white);return;
     }
-    const char *labels[]={"Display","Resolution","Render scale","Frame rate","Apply and save"};
+    const char *labels[]={"Display","Resolution","Render scale","Frame rate","Widescreen","Anti-aliasing","Texture smoothing","Apply and save"};
     for(int i=0;i<GraphicsRowEnd;++i){
-        const float y=120.f+i*34+(i==ApplyGraphics?12:0);
+        const float y=112.f+i*26+(i==ApplyGraphics?8:0);
         const bool locked=i==Resolution && menu.graphics.mode==video::WindowMode::Borderless;
         const auto c=i==menu.graphicsRow?gold:locked?dim:white;
         text(v,labels[i],140,y,1.25f,c);if(i==menu.graphicsRow)text(v,">",120,y,1.25f,c);
@@ -195,24 +209,75 @@ void drawGraphics(std::vector<bozo::render::Vertex> &v,uint32_t white,uint32_t g
     }
     const std::string now="Now: "+graphicsValue(Display,shared.applied,shared)+", "+graphicsValue(Resolution,shared.applied,shared)+
                           ", "+graphicsValue(RenderScale,shared.applied,shared)+", "+graphicsValue(FrameRate,shared.applied,shared);
-    text(v,now,320-float(now.size())*3.6f,312,0.9f,dim);
+    text(v,now,320-float(now.size())*3.6f,330,0.9f,dim);
     const char *help=menu.graphicsRow==Display?"L/R: Window, full screen or borderless":
                      menu.graphicsRow==Resolution?(menu.graphics.mode==video::WindowMode::Borderless?"Borderless uses the monitor size":"L/R: Window or full-screen size"):
                      menu.graphicsRow==RenderScale?"L/R: 3D resolution against the window":
-                     menu.graphicsRow==FrameRate?"L/R: Monitor smooths between frames":"X: Apply now and keep for next launch";
+                     menu.graphicsRow==FrameRate?"L/R: Monitor smooths between frames":
+                     menu.graphicsRow==Widescreen?"L/R: 16:9, more at the sides, HUD at the edges":
+                     menu.graphicsRow==AntiAliasing?"L/R: Smoother edges, 2x to 8x":
+                     menu.graphicsRow==Smoothing?"L/R: Smoother textures at a distance":"X: Apply now and keep for next launch";
     if(*menu.graphicsStatus)help=menu.graphicsStatus;
     else if(!sameGraphics(menu.graphics,shared.applied) && menu.graphicsRow!=ApplyGraphics)help="Not applied yet: choose Apply and save";
     text(v,help,320-float(std::strlen(help))*4,354,1,white);
+}
+// The Travel page (dc_warp.h): its choices live outside Menu, so a save state's menu record keeps its layout.
+enum TravelRow { TownChoice, WarpTown, DungeonChoice, FloorChoice, WarpFloor, NextMonster, Georama, World, ChapterChoice, Advance, TravelRowEnd };
+struct Travel { int row=0,place=0,dungeon=0,floor=1,chapter=2; const char *note=""; } travel;
+void drawTravel(std::vector<bozo::render::Vertex> &v,uint32_t white,uint32_t gold,uint32_t dim)
+{
+    const char *labels[]={"Town or area","Warp to the town","Dungeon","Floor","Warp to the floor","Next monster",
+                          "Unlock georama parts","Open the world map","Story chapter","Advance the story"};
+    const int first=std::max(0,travel.row-5);
+    for(int i=first;i<std::min(first+6,int(TravelRowEnd));++i){
+        const float y=126.f+(i-first)*34;const auto c=i==travel.row?gold:white;
+        text(v,labels[i],128,y,1.25f,c);if(i==travel.row)text(v,">",108,y,1.25f,c);
+        std::string value;
+        if(i==TownChoice)value=dc::warp::place(travel.place).name;
+        if(i==DungeonChoice)value=dc::warp::dungeon(travel.dungeon).name;
+        if(i==FloorChoice)value=std::to_string(travel.floor)+"/"+std::to_string(dc::warp::dungeon(travel.dungeon).floors);
+        if(i==ChapterChoice)value=dc::warp::chapterShort(travel.chapter);
+        if(i==travel.row && !value.empty())value="< "+value+" >";
+        text(v,value,526-float(value.size())*10,y,1.25f,c);
+    }
+    char count[32];std::snprintf(count,sizeof(count),"%d/%d",travel.row+1,int(TravelRowEnd));text(v,count,470,88,1,dim);
+    const char *help=travel.row==TownChoice?"L/R: 1  L1/R1: 10":travel.row==DungeonChoice?"L/R: Choose a dungeon":
+                     travel.row==FloorChoice?"L/R: 1  L1/R1: 10   The last is the boss":travel.row==ChapterChoice?"L/R: Choose   Save first":
+                     travel.row==NextMonster?"X: In a dungeon, next to a monster":travel.row==Georama?"X: Every town's parts":
+                     travel.row==World?"X: Every place on the world map":travel.row==Advance?"X: Never moves the story back":"X: Go when play resumes";
+    if(*travel.note)help=travel.note;
+    text(v,help,112,354,1,white);
+}
+void travelKey(uint32_t pressed)
+{
+    if(pressed&kUp)travel.row=(travel.row+TravelRowEnd-1)%TravelRowEnd;else if(pressed&kDown)travel.row=(travel.row+1)%TravelRowEnd;
+    if(pressed&(kUp|kDown))travel.note="";
+    int delta=0;if(pressed&kLeft)--delta;if(pressed&kRight)++delta;if(pressed&kL1)delta-=10;if(pressed&kR1)delta+=10;
+    const int places=dc::warp::placeCount(),dungeons=dc::warp::dungeonCount();
+    if(travel.row==TownChoice && delta)travel.place=((travel.place+delta)%places+places)%places;
+    if(travel.row==DungeonChoice && delta){travel.dungeon=((travel.dungeon+(delta>0?1:-1))%dungeons+dungeons)%dungeons;
+        travel.floor=std::min(travel.floor,dc::warp::dungeon(travel.dungeon).floors);}
+    if(travel.row==FloorChoice && delta)travel.floor=std::clamp(travel.floor+delta,1,dc::warp::dungeon(travel.dungeon).floors);
+    if(travel.row==ChapterChoice && delta)travel.chapter=std::clamp(travel.chapter+(delta>0?1:-1),1,dc::warp::chapterCount());
+    if(!(pressed&kCross))return;
+    const char *queued="Queued: close Options to go";
+    if(travel.row==WarpTown){dc::warp::requestPlace(dc::warp::place(travel.place).map);travel.note=queued;}
+    else if(travel.row==WarpFloor){dc::warp::requestDungeon(travel.dungeon,travel.floor-1);travel.note=queued;}
+    else if(travel.row==NextMonster){dc::warp::requestMonster();travel.note=queued;}
+    else if(travel.row==Georama){dc::warp::requestGeorama();travel.note="Queued: given when play resumes";}
+    else if(travel.row==World){dc::warp::requestWorld();travel.note="Queued: opened when play resumes";}
+    else if(travel.row==Advance){dc::warp::requestChapter(travel.chapter);travel.note="Queued: applied when play resumes";}
 }
 void drawPage(int alpha)
 {
     if(prepareScene)prepareScene();panel(alpha);
     std::vector<bozo::render::Vertex> v;
     const uint32_t white=colour(0x808080,alpha),gold=colour(0x207080,alpha),dim=colour(0x484848,alpha);
-    const auto heading=menu.page==Page::Root?"OPTIONS":menu.page==Page::Quit?"QUIT GAME?":menu.page==Page::Graphics?"GRAPHICS":"CHEATS";
+    const auto heading=menu.page==Page::Root?"OPTIONS":menu.page==Page::Quit?"QUIT GAME?":menu.page==Page::Graphics?"GRAPHICS":
+                       menu.page==Page::Travel?"TRAVEL":"CHEATS";
     text(v,heading,320-float(std::strlen(heading))*8,76,2,gold);
     if(menu.page==Page::Root){
-        for(int i=0;i<rootCount;++i){const float y=136.f+i*44;const auto c=i==menu.root?gold:white;text(v,rootLabels[i],164,y,1.5f,c);if(i==menu.root)text(v,">",132,y,1.5f,c);}
+        for(int i=0;i<rootCount;++i){const float y=126.f+i*40;const auto c=i==menu.root?gold:white;text(v,rootLabels[i],164,y,1.5f,c);if(i==menu.root)text(v,">",132,y,1.5f,c);}
         text(v,"D-pad: Select   X: Open   O: Back",120,352,1,white);
     }else if(menu.page==Page::Quit){
         text(v,"Close the game?",200,150,1.5f,white);
@@ -222,6 +287,8 @@ void drawPage(int alpha)
         text(v,"X: Confirm   O: Cancel",164,352,1,white);
     }else if(menu.page==Page::Graphics){
         drawGraphics(v,white,gold,dim);
+    }else if(menu.page==Page::Travel){
+        drawTravel(v,white,gold,dim);
     }else{
         const char *labels[]={"Infinite health","Weapon durability","Infinite thirst","Combo stamina",
             "Equipped weapon ATK","Apply weapon ATK","Weapon ABS multiplier","Gilda","Apply Gilda",
@@ -300,7 +367,7 @@ void key(uint8_t *r,R5900Context *c,Runtime *rt)
         return;
     }
     if(pressed&kCircle){
-        if(menu.page==Page::Cheats || menu.page==Page::Graphics || menu.page==Page::Quit){menu.page=Page::Root;menu.held=menu.ticks=0;done(c);}
+        if(menu.page==Page::Cheats || menu.page==Page::Graphics || menu.page==Page::Quit || menu.page==Page::Travel){menu.page=Page::Root;menu.held=menu.ticks=0;done(c);}
         else {
             // The original Circle boundary starts this fade. Do not also run
             // hidden Game Options navigation if Circle and a direction coincide.
@@ -310,7 +377,7 @@ void key(uint8_t *r,R5900Context *c,Runtime *rt)
     }
     if(menu.page==Page::Root){
         if(pressed&kUp)menu.root=(menu.root+rootCount-1)%rootCount;else if(pressed&kDown)menu.root=(menu.root+1)%rootCount;
-        if(pressed&kCross){menu.page=menu.root==0?Page::Game:menu.root==1?Page::Graphics:menu.root==2?Page::Cheats:Page::Quit;
+        if(pressed&kCross){menu.page=rootPages[menu.root];travel.note="";
             menu.graphics=windowSettings().applied;menu.graphicsRow=0;menu.graphicsStatus="";menu.quitChoice=0;menu.held=menu.ticks=0;menu.attack=std::max(0,equippedWeaponAttack());menu.gold=std::max(0,gilda());menu.capacity=std::clamp(inventorySize(),1,100);menu.quantity=std::max(1,activeConsumable(menu.slot).quantity);menu.queued=false;}
     }else if(menu.page==Page::Graphics){
         const video::Shared shared=windowSettings();
@@ -325,6 +392,8 @@ void key(uint8_t *r,R5900Context *c,Runtime *rt)
                 if(const auto post=videoPost.load(std::memory_order_acquire))post(next,true);menu.graphics=next;menu.graphicsStatus="Applied and saved";
             }
         }
+    }else if(menu.page==Page::Travel){
+        travelKey(pressed);
     }else if(menu.page==Page::Quit){
         if(pressed&(kUp|kDown|kLeft|kRight))menu.quitChoice^=1;
         if(pressed&kCross){if(menu.quitChoice)quitRequested.store(true,std::memory_order_relaxed);else menu.page=Page::Root;}

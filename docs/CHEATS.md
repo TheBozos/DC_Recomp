@@ -1,7 +1,7 @@
 # Cheats and in-game options
 
 Open the game's main menu, choose **Options**, then **Cheats**. The entry page also offers
-**Game Options** (the original settings), **Graphics** and **Quit Game**. Circle goes back; Circle on the entry page
+**Game Options** (the original settings), **Graphics**, **Travel** (below) and **Quit Game**. Circle goes back; Circle on the entry page
 closes Options through the original fade/exit lifecycle. Quit Game defaults to Cancel and requires
 an explicit confirmation. It uses normal application shutdown and does not autosave.
 
@@ -10,7 +10,9 @@ The same cheat controls remain available in **F2 → Cheats**. Both interfaces s
 **Graphics** sets the window from the controller: **Display** (windowed, fullscreen or borderless),
 **Resolution** (the window's or full-screen size; borderless uses the monitor's), **Render scale** (50% to 200% of
 the window's resolution for the 3D) and **Frame rate** (60 fps, or the monitor's refresh with the frames between the
-game's interpolated). Left/Right changes a row; **Apply and save** applies the choices at once and writes them to
+game's interpolated), **Widescreen** (16:9: more of the scene at the sides, the HUD at the screen's edges, menus and
+pictures centred), **Anti-aliasing** (off, 2x, 4x or 8x) and **Texture smoothing** (off, trilinear, 2x to 16x
+anisotropic). Left/Right changes a row; **Apply and save** applies the choices at once and writes them to
 `video.ini`, the same file as the launcher's Settings and **F2 → Video**. Nothing is stored in the game's save.
 
 | Control | Effect and limits |
@@ -50,6 +52,43 @@ cannot silently edit a different item. Resizing never deletes or moves items.
 Toggles start off, ABS and damage start at 1×, movement at 100% on each launch. These settings are not
 stored in saves. Restored resources and one-time inventory edits **are** included if the game saves
 afterward. Disabling a resource cheat restores normal depletion from its current value.
+
+## Travel
+
+**Options → Travel** in the game (or **F2 → Travel**) moves you anywhere and fast-forwards the story. Each request
+waits until you walk freely in a town, an interior or a dungeon (not in a menu or a conversation), then goes
+through the game's own fade and loading, so you arrive as the game would bring you there.
+
+| Control | Effect and limits |
+|---|---|
+| Town or area / Warp to the town | Every town and area the disc has a map for (52), at its default entrance |
+| Dungeon / Floor / Warp to the floor | Any floor of the seven dungeons (Demon Shaft included). The last floor is the boss's: its door and its fight are set up by the game as on a normal arrival. A warped-to floor counts as reached on the dungeon's entrance menu. A dungeon's story floors need the allies of its chapter (the Wise Owl Forest two, the Shipwreck three, ... the Gallery of Time six; Divine Beast Cave from floor 11 two; the Demon Shaft none): ahead of the story the warp says which chapter to advance to first |
+| Next monster | In a dungeon: next to the next live monster of the floor, in turn |
+| Unlock georama parts | Every building, villager and element of every town, as if every Atla had been opened (through the game's own Atla routines; elements already owned are not given twice). The dungeons' Atla are then empty. The Sun Sphere stays the Coliseum's |
+| Open the world map | Every town and dungeon on the world map, and the World Map item |
+| Story chapter / Advance the story | The story state a playthrough has when that chapter begins: the chapter counter, the allies and their weapons, the dungeons before it cleared, the places visited, the story flags the transition scenes set. It never moves the story back |
+
+The story chapters are 1 Norune, 2 Matataki and Wise Owl Forest, 3 Queens and the Shipwreck, 4 Muska Lacka and
+the Sun & Moon Temple, 5 Yellow Drops and the Moon Sea, 6 Dark Heaven Castle and the Gallery of Time, and 7 the
+post-game (the game counts as cleared: the Demon Shaft opens). **Save first:** advancing the story is meant for
+testing; key items handed out in the middle of a chapter and the georama house events of skipped chapters are not
+all recreated, and an advanced save is not the same as a played one.
+
+### Scripted runs
+
+`--cheat-script FILE` drives the same requests by frame, for hidden test runs. Each line is
+`<frame> <command> [arguments]` (`#` starts a comment); commands run in order, each once the game is idle:
+
+| Command | Effect |
+|---|---|
+| `place <map>` | Warp to a town or area by map number (Norune 0, Matataki 1, Queens 2, Muska Lacka 3, Brownboo 14, Yellow Drops 23, Dark Heaven Castle 40, ...) |
+| `dungeon <dungeon> <floor>` | Warp to a dungeon (0 Divine Beast Cave ... 6 Demon Shaft) and floor (1-based) |
+| `monster`, `georama`, `world`, `chapter <1-7>` | As the Travel rows |
+| `flag <n> <0/1>`, `intflag <n> <value>` | A story flag or counter, through the game's own setter |
+| `cheat <name> <0/1>` | `health`, `durability`, `thirst`, `stamina`, `time`, `fast`, `fishing`, `map`, `onehit`, `nodamage`, `key` |
+| `talk <0/1>` | Cross tapped every 16 frames while a conversation or an event waits, so a run reads through the story |
+| `wait <frames>` | The next command that many frames later |
+| `where`, `peek` | The game's state in the log (`[dc:warp]`): mode, map, dungeon, floor, chapter, party, deepest floors. `where` in turn, `peek` at once |
 
 ## Implementation and bounded validation
 

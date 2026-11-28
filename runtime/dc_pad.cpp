@@ -22,6 +22,7 @@ uint32_t rd32(const uint8_t *ram,uint32_t at){uint32_t v;std::memcpy(&v,ram+(at&
 void wr32(uint8_t *ram,uint32_t at,uint32_t v){std::memcpy(ram+(at&0x1ffffffu),&v,4);}
 void wr8(uint8_t *ram,uint32_t at,uint8_t v){ram[at&0x1ffffffu]=v;}
 void returnVoid(R5900Context *c){c->pc=c->r[31].uw[0];}
+uint16_t g_extraButtons=0; // dc::pad::press (the cheat script's dialogue advance)
 
 // read_pad(PAD_STATUS *status, int port, int slot): CGamePad::UpDate calls it for port 0 and port 1 (slot 0).
 void readPad(uint8_t *ram,R5900Context *c,Runtime *rt)
@@ -34,7 +35,7 @@ void readPad(uint8_t *ram,R5900Context *c,Runtime *rt)
         if(libraries.pad.input)libraries.pad.input->read(libraries.framesEnded,port,input);
     }
     // scePadRead's halfword arrives byte-swapped in DC's word: Cross is 0x40, Up 0x1000.
-    const uint16_t buttons=static_cast<uint16_t>((input.buttons<<8)|(input.buttons>>8));
+    const uint16_t buttons=static_cast<uint16_t>(((input.buttons<<8)|(input.buttons>>8))|(port==0?g_extraButtons:0u));
     wr32(ram,status,buttons);
     wr32(ram,status+4,input.ly);wr32(ram,status+8,input.lx);wr32(ram,status+12,input.ry);wr32(ram,status+16,input.rx);
     wr32(ram,status+20,kReady);wr32(ram,status+24,kStable);wr32(ram,status+28,kDualShock);
@@ -66,6 +67,7 @@ void step(uint8_t *ram,R5900Context *c,Runtime *rt)
 }
 }
 
+void press(unsigned buttons){g_extraButtons=static_cast<uint16_t>(buttons);}
 void install(bozo::port::Registry &registry)
 {
     registry.registerFunction(kReadPad,readPad);

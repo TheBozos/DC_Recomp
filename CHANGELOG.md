@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Widescreen (Video tab, the in-game Graphics page, `widescreen = on` in `video.ini`): a 16:9 picture with more of the scene at the sides, nothing stretched; the HUD moves to the screen's edges (the town clock, the dungeon's status, floor and attack gauge, the minimap), menus and full-screen pictures stay centred, fades and backgrounds cover the whole width.
+- The in-game Graphics page also sets widescreen, anti-aliasing and texture smoothing.
+- Travel (Options → Travel, F2 → Travel): warp to any town or area, to any floor of any dungeon (boss floors included), next to the floor's monsters; every georama part, the whole world map, and a story chapter select. See [the cheat reference](docs/CHEATS.md).
+- `--cheat-script FILE`: travel, story and cheat commands by frame for scripted test runs, with dialogue read through (`talk 1`) and the game's state logged (`where`).
+
+### Changed
+- BozoEngine moves to its current master (c27ce41): the widescreen setting and picture shape it needs, among other engine work.
+
 ## [0.4.0] - 2026-11-24
 
 ### Added
